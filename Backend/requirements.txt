@@ -1,32 +1,49 @@
+# ==============================
 # Core Framework
+# ==============================
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 
-# AI/ML Components
+# ==============================
+# AI / ML Components
+# ==============================
 google-generativeai==0.3.2
 
+# ==============================
 # Data Models & Validation
+# ==============================
 pydantic==2.5.0
 pydantic-settings==2.1.0
 email-validator==2.1.0.post1
 
+# ==============================
 # Domain & Network Analysis
+# ==============================
 python-whois==0.9.3
-httpx==0.25.2  # Async HTTP client for Threat Intel APIs
+httpx==0.25.2
 
-# Caching Layer (Choose ONE option below)
-
-# OPTION 1: Redis for production (comment out if not needed)
+# ==============================
+# Caching Layer
+# ==============================
+# OPTION 1: Use Redis (Production)
 redis[hiredis]==5.0.1
 
-# OPTION 2: OR use fakeredis for testing (comment out if not needed)
+# OPTION 2: Use FakeRedis (Testing)
 # fakeredis==2.19.0
 
+# ==============================
 # Environment Management
+# ==============================
 python-dotenv==1.0.0
 
-# Additional Utilities
-asyncio-throttle==1.0.2  # Rate limiting
-tenacity==8.2.3          # Retry logic
-aiofiles==23.2.1         # Async file operations
-loguru==0.7.2           # Better logging
+# ==============================
+# Async Utilities & Reliability
+# ==============================
+asyncio-throttle==1.0.2
+tenacity==8.2.3
+aiofiles==23.2.1
+
+# ==============================
+# Logging
+# ==============================
+loguru==0.7.2

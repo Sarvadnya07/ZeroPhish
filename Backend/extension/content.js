@@ -3,7 +3,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "EXTRACT_EMAIL") {
         // Targeted selectors for Gmail's 2026 DOM structure
         const bodyText = document.querySelector('.a3s.aiL')?.innerText || document.body.innerText;
-        const sender = document.querySelector('.gD')?.getAttribute('email') || "Unknown";
+        const senderEl = document.querySelector('.gD');
+        const senderEmail = senderEl?.getAttribute('email') || "Unknown";
+        const senderName =
+            senderEl?.getAttribute('name') ||
+            senderEl?.innerText?.trim() ||
+            "Unknown";
         const subject = document.querySelector('.hP')?.innerText || "No Subject";
         const links = Array.from(document.querySelectorAll('a'))
             .map(a => ({
@@ -14,7 +19,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         sendResponse({ 
             body: bodyText.substring(0, 2500), // Tier 1 limit
-            sender, 
+            sender: senderEmail,
+            senderEmail,
+            senderName,
             subject, 
             links
         });

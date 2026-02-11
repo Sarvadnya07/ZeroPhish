@@ -28,7 +28,10 @@ function renderEvidence(items) {
 
   evidenceListEl.innerHTML = items
     .map((i) => {
-      const points = typeof i?.points === 'number' ? `(+${i.points}) ` : '';
+      const points =
+        typeof i?.points === 'number'
+          ? `(${i.points > 0 ? '+' : ''}${i.points}) `
+          : '';
       const detail = i?.detail ? i.detail : String(i);
       const check = i?.check ? `[${i.check}] ` : '';
       return `<li>${check}${points}${detail}</li>`;

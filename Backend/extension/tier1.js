@@ -44,6 +44,16 @@ const TRUSTED_BRANDS = [
   'amazon.com',
 ];
 
+const SENDER_DOMAIN_ALLOWLIST = new Set(TRUSTED_BRANDS);
+
+const BRAND_SPOOF_RULES = [
+  { keywords: ['google', 'gmail'], domains: ['google.com', 'gmail.com'] },
+  { keywords: ['microsoft', 'outlook', 'office', 'onedrive'], domains: ['microsoft.com', 'outlook.com', 'office.com', 'live.com'] },
+  { keywords: ['paypal'], domains: ['paypal.com'] },
+  { keywords: ['apple', 'icloud'], domains: ['apple.com', 'icloud.com'] },
+  { keywords: ['amazon', 'aws'], domains: ['amazon.com', 'amazonaws.com'] },
+];
+
 const URL_SHORTENERS = new Set([
   'bit.ly',
   't.co',
@@ -82,6 +92,23 @@ function looksLikeIpHostname(hostname) {
 
 function containsNonAscii(str) {
   return /[^\u0000-\u007F]/.test(str);
+}
+
+function extractEmailAddress(senderRaw) {
+  const s = (senderRaw || '').toString().trim();
+  if (!s) return '';
+
+  const angle = s.match(/<([^>]+)>/);
+  if (angle && angle[1]) return angle[1].trim();
+
+  const plain = s.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return plain ? plain[0].trim() : s;
+}
+
+function emailDomain(email) {
+  const at = (email || '').lastIndexOf('@');
+  if (at === -1) return '';
+  return normalizeDomain(email.slice(at + 1));
 }
 
 function scoreTextKeywords(text, evidence) {
@@ -154,24 +181,74 @@ function scoreLinks({ bodyText, links }, evidence) {
   return points;
 }
 
+function scoreSender({ senderEmail, senderName, sender }, evidence) {
+  let points = 0;
+
+  const email = extractEmailAddress(senderEmail || sender);
+  const domain = emailDomain(email);
+  const name = (senderName || '').toString();
+  const nameLower = name.toLowerCase();
+
+  if (!email || email === 'Unknown' || !domain) {
+    points += 4;
+    evidence.push({ check: 'sender', points: 4, detail: 'Sender address unavailable.' });
+    return points;
+  }
+
+  if (domain.includes('xn--')) {
+    points += 12;
+    evidence.push({ check: 'sender_punycode', points: 12, detail: `Sender domain punycode: ${domain}` });
+  }
+
+  if (containsNonAscii(domain)) {
+    points += 16;
+    evidence.push({ check: 'sender_homograph', points: 16, detail: `Sender domain non-ASCII: ${domain}` });
+  }
+
+  const isAllowlisted = Array.from(SENDER_DOMAIN_ALLOWLIST).some(
+    (d) => domain === d || domain.endsWith(`.${d}`),
+  );
+  if (isAllowlisted) {
+    points -= 8;
+    evidence.push({ check: 'sender_allowlist', points: -8, detail: `Sender domain allowlisted: ${domain}` });
+  }
+
+  for (const rule of BRAND_SPOOF_RULES) {
+    const claimsBrand = rule.keywords.some((k) => nameLower.includes(k));
+    if (!claimsBrand) continue;
+
+    const matchesBrandDomain = rule.domains.some((d) => domain.endsWith(d));
+    if (!matchesBrandDomain) {
+      points += 18;
+      evidence.push({
+        check: 'sender_spoof',
+        points: 18,
+        detail: `Display name suggests ${rule.domains[0]} but sender domain is ${domain}`,
+      });
+    }
+
+    break;
+  }
+
+  return points;
+}
+
 export function analyzeTier1(emailData) {
   const evidence = [];
   const body = emailData?.body || '';
   const subject = emailData?.subject || '';
-  const sender = emailData?.sender || '';
 
   let score = 0;
   score += scoreTextKeywords(`${subject}\n${body}`, evidence);
+  score += scoreSender(
+    { senderEmail: emailData?.senderEmail, senderName: emailData?.senderName, sender: emailData?.sender },
+    evidence,
+  );
   score += scoreLinks({ bodyText: `${subject}\n${body}`, links: emailData?.links || [] }, evidence);
-
-  if (!sender || sender === 'Unknown') {
-    score += 4;
-    evidence.push({ check: 'sender', points: 4, detail: 'Sender address unavailable.' });
-  }
 
   return {
     t1_score: clampScore(score),
     t1_evidence: evidence,
-    t1_status: score > 0 ? 'Suspicious' : 'Clean',
+    t1_status: score >= 20 ? 'Suspicious' : 'Clean',
   };
 }
