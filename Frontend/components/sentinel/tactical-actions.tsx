@@ -29,7 +29,7 @@ export function TacticalActions({
   }
 
   return (
-    <div className="flex flex-col gap-3 pt-2">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
       {/* Quarantine & Report */}
       {isComplete && !reported && (
         <motion.button
@@ -38,11 +38,10 @@ export function TacticalActions({
           whileTap={{ scale: 0.97 }}
           animate={confirming ? { x: [0, -3, 3, -2, 2, 0] } : {}}
           transition={confirming ? { duration: 0.4 } : {}}
-          className={`flex w-full items-center justify-center gap-2 rounded-lg py-3 font-semibold text-sm transition-colors ${
-            confirming
+          className={`flex items-center justify-center gap-2 rounded-lg py-3 font-semibold text-sm transition-colors ${confirming
               ? "border-2 border-[#FF003C] bg-[#FF003C]/20 text-[#FF003C]"
               : "bg-[#FF003C] text-[hsl(0,0%,100%)]  hover:bg-[#FF003C]/90"
-          }`}
+            }`}
         >
           <Flame className="h-4 w-4" />
           {confirming ? "Confirm Quarantine & Report" : "Quarantine & Report"}
@@ -53,7 +52,7 @@ export function TacticalActions({
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="flex items-center justify-center gap-2 rounded-lg border border-[#00F0FF]/20 bg-[#00F0FF]/10 py-3 text-sm font-semibold text-[#00F0FF]"
+          className="flex items-center justify-center gap-2 rounded-lg border border-[#00F0FF]/20 bg-[#00F0FF]/10 py-3 text-sm font-semibold text-[#00F0FF] md:col-span-2"
         >
           <CheckCircle2 className="h-4 w-4" />
           Email Quarantined & Reported
@@ -65,7 +64,7 @@ export function TacticalActions({
         <motion.button
           type="button"
           whileTap={{ scale: 0.97 }}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#00F0FF]/20 bg-[#00F0FF]/10 py-3 text-sm font-semibold text-[#00F0FF] hover:bg-[#00F0FF]/20 transition-colors"
+          className="flex items-center justify-center gap-2 rounded-lg border border-[#00F0FF]/20 bg-[#00F0FF]/10 py-3 text-sm font-semibold text-[#00F0FF] hover:bg-[#00F0FF]/20 transition-colors"
         >
           <CheckCircle2 className="h-4 w-4" />
           Safe Passage
@@ -77,7 +76,8 @@ export function TacticalActions({
         <button
           type="button"
           onClick={onToggleLogs}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-[hsl(0,0%,100%)]/[0.06] bg-[hsl(0,0%,7%)] py-2.5 text-xs font-mono text-[hsl(0,0%,55%)] hover:text-[hsl(0,0%,75%)] hover:border-[hsl(0,0%,100%)]/[0.1] transition-colors"
+          className={`flex items-center justify-center gap-2 rounded-lg border border-[hsl(0,0%,100%)]/[0.06] bg-[hsl(0,0%,7%)] py-2.5 text-xs font-mono text-[hsl(0,0%,55%)] hover:text-[hsl(0,0%,75%)] hover:border-[hsl(0,0%,100%)]/[0.1] transition-colors ${isSafe && !reported ? "" : "md:col-span-2"
+            }`}
         >
           <FileCode2 className="h-3.5 w-3.5" />
           {logsOpen ? "Hide Technical Logs" : "Explain Logic"}
