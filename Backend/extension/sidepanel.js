@@ -1,11 +1,15 @@
-﻿import { analyzeTier1 } from './tier1.js';
+﻿// ZeroPhish Extension - Gateway Integration
+// Updated to work with unified API Gateway
 
-const BACKEND_BERT_URL = 'http://127.0.0.1:8000/tier1/bert';
+import { analyzeTier1 } from './tier1.js';
 
+// Gateway URL
+const GATEWAY_URL = 'http://127.0.0.1:8000/gateway';
+
+// UI Elements
 const scanButton = document.getElementById('scan-btn');
 const threatScoreEl = document.getElementById('threat-score');
 const statusTextEl = document.getElementById('status-text');
-const mlStatusEl = document.getElementById('ml-status');
 const evidenceListEl = document.getElementById('evidence-list');
 
 function clampScore(score) {
@@ -16,10 +20,6 @@ function setStatus(text) {
   statusTextEl.innerText = text;
 }
 
-function setMlStatus(text) {
-  mlStatusEl.innerText = text;
-}
-
 function renderEvidence(items) {
   if (!Array.isArray(items) || items.length === 0) {
     evidenceListEl.innerHTML = '';
@@ -28,13 +28,8 @@ function renderEvidence(items) {
 
   evidenceListEl.innerHTML = items
     .map((i) => {
-      const points =
-        typeof i?.points === 'number'
-          ? `(${i.points > 0 ? '+' : ''}${i.points}) `
-          : '';
-      const detail = i?.detail ? i.detail : String(i);
-      const check = i?.check ? `[${i.check}] ` : '';
-      return `<li>${check}${points}${detail}</li>`;
+      const detail = typeof i === 'string' ? i : (i?.detail || String(i));
+      return `<li>${detail}</li>`;
     })
     .join('');
 }
@@ -48,79 +43,140 @@ async function extractEmailFromGmailActiveTab() {
     throw new Error('Please open a Gmail message first.');
   }
 
-  const response = await new Promise((resolve, reject) => {
-    chrome.tabs.sendMessage(tab.id, { action: 'EXTRACT_EMAIL' }, (res) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
+  return new Promise((resolve, reject) => {
+    chrome.tabs.sendMessage(tab.id, { action: 'EXTRACT_EMAIL' }, (response) => {
+      if (chrome.runtime.lastError || !response) {
+        reject(new Error('Failed to extract email. Please refresh Gmail.'));
+      } else {
+        resolve(response);
       }
-      resolve(res);
     });
   });
-  if (!response?.body) {
-    throw new Error('Could not read the email. Refresh Gmail and try again.');
-  }
-
-  return response;
 }
 
-async function fetchBertThreat(emailText) {
-  const res = await fetch(BACKEND_BERT_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: emailText }),
-  });
+// Poll for Tier 3 completion
+async function pollForTier3(scanId, partialScore) {
+  const maxPolls = 10;
+  let pollCount = 0;
 
-  if (!res.ok) {
-    const msg = await res.text().catch(() => '');
-    throw new Error(`Backend error (${res.status}): ${msg}`);
-  }
-
-  return res.json();
-}
-
-scanButton.addEventListener('click', async () => {
-  threatScoreEl.innerText = '0';
-  renderEvidence([]);
-  setMlStatus('');
-
-  try {
-    setStatus('Reading Gmail content...');
-    const email = await extractEmailFromGmailActiveTab();
-
-    // Tier 1A: instant heuristics
-    const heur = analyzeTier1(email);
-    threatScoreEl.innerText = String(heur.t1_score);
-    renderEvidence(heur.t1_evidence);
-    setStatus(`Tier 1 heuristics: ${heur.t1_status}`);
-
-    // Tier 1B: optional local HuggingFace/BERT backend
-    setMlStatus('Local ML: pending (127.0.0.1:8000)');
+  const pollInterval = setInterval(async () => {
+    pollCount++;
 
     try {
-      const ml = await fetchBertThreat((email.body || '').substring(0, 2500));
+      const response = await fetch(`${GATEWAY_URL}/status/${scanId}`);
+      if (!response.ok) {
+        clearInterval(pollInterval);
+        return;
+      }
 
-      const combined = clampScore(heur.t1_score * 0.65 + (ml.threat_level || 0) * 0.35);
+      const status = await response.json();
 
-      const mergedEvidence = [...(heur.t1_evidence || [])];
-      mergedEvidence.push({
-        check: 'ml',
-        points: Math.max(0, combined - heur.t1_score),
-        detail: `Local ML: ${ml.label} (${Math.round((ml.confidence || 0) * 100)}%) - ${ml.reasoning}`,
-      });
+      if (status.complete) {
+        clearInterval(pollInterval);
 
-      threatScoreEl.innerText = String(combined);
-      renderEvidence(mergedEvidence);
-      setMlStatus(`Local ML: online (${ml.model})`);
-      setStatus('Tier 1 complete.');
-    } catch (mlErr) {
-      console.warn(mlErr);
-      setMlStatus('Local ML: offline (heuristics only)');
-      setStatus('Tier 1 heuristics complete (ML offline).');
+        // Update with final results
+        threatScoreEl.innerText = clampScore(status.final_score);
+
+        // Get full result
+        const fullResponse = await fetch(`${GATEWAY_URL}/result/${scanId}`);
+        const fullResult = await fullResponse.json();
+
+        const finalEvidence = [
+          `🎯 Final Score: ${status.final_score.toFixed(1)}`,
+          `📊 Verdict: ${status.verdict}`,
+          ...fullResult.combined_evidence,
+          status.tier3 ? `🤖 AI: ${status.tier3.category}` : '',
+        ].filter(e => e);
+
+        renderEvidence(finalEvidence);
+
+        // Update status based on verdict
+        if (status.verdict === "CRITICAL") {
+          setStatus("🚨 CRITICAL THREAT DETECTED!");
+        } else if (status.verdict === "SUSPICIOUS") {
+          setStatus("⚠️ Suspicious Email - Exercise Caution");
+        } else {
+          setStatus("✅ Email appears safe");
+        }
+      } else if (pollCount >= maxPolls) {
+        clearInterval(pollInterval);
+        setStatus(`⚠️ ${status.verdict} (AI timeout)`);
+      }
+    } catch (error) {
+      console.error("Polling error:", error);
+      clearInterval(pollInterval);
     }
-  } catch (err) {
-    console.error(err);
-    setMlStatus('Local ML: offline (heuristics only)');
-    setStatus(err?.message || 'Scan failed.');
+  }, 500); // Poll every 500ms
+}
+
+// Main scan handler
+scanButton.addEventListener('click', async () => {
+  try {
+    setStatus('🔍 Extracting email...');
+    threatScoreEl.innerText = '0';
+    renderEvidence([]);
+
+    // Extract email from Gmail
+    const emailData = await extractEmailFromGmailActiveTab();
+
+    // Run Tier 1 analysis
+    setStatus('⚡ Running Tier 1 analysis...');
+    const tier1Result = analyzeTier1(emailData);
+
+    const tier1Score = tier1Result.t1_score || 0;
+    const tier1Evidence = tier1Result.t1_evidence || [];
+
+    // Show Tier 1 results
+    threatScoreEl.innerText = clampScore(tier1Score);
+    renderEvidence([...tier1Evidence, '⏳ Sending to Gateway...']);
+
+    // Send to Gateway
+    setStatus('🔄 Sending to Gateway (Tier 2 + Tier 3)...');
+
+    const response = await fetch(`${GATEWAY_URL}/scan`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        tier1_score: tier1Score,
+        tier1_evidence: tier1Evidence,
+        sender: emailData.sender,
+        body: emailData.body,
+        links: emailData.links
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Gateway error: ${response.status}`);
+    }
+
+    const result = await response.json();
+    const scanId = result.scan_id;
+
+    // Update UI with partial results (T1 + T2)
+    threatScoreEl.innerText = clampScore(result.partial_score);
+
+    const partialEvidence = [
+      `📊 Partial: ${result.partial_score.toFixed(1)} (T1+T2)`,
+      `⚖️ Formula: T1×0.2 + T2×0.3 + T3×0.5`,
+      ...result.combined_evidence,
+      `🔬 Category: ${result.tier2.threat_details.category}`,
+      `⏳ Tier 3: Processing...`
+    ];
+
+    renderEvidence(partialEvidence);
+    setStatus(`⚡ ${result.verdict} (Partial) - Waiting for AI...`);
+
+    // Poll for Tier 3 completion
+    pollForTier3(scanId, result.partial_score);
+
+  } catch (error) {
+    console.error('Scan error:', error);
+    setStatus(`❌ Error: ${error.message}`);
+    renderEvidence([
+      '⚠️ Gateway unavailable',
+      '💡 Start gateway: .\\start_gateway.ps1'
+    ]);
   }
 });

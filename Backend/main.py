@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import time
@@ -10,6 +11,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
+
+from tier_3.main import T3Result, analyze_email_intent
 
 
 app = FastAPI(title="ZeroPhish Tier 1 (Local)", version="0.1.0")
@@ -33,6 +36,23 @@ class BertResponse(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0)
     model: str
     reasoning: str
+
+
+class ScanRequest(BaseModel):
+    """Full email scan request across all three Tiers."""
+    sender: str = Field(..., min_length=1, max_length=500, description="Sender email address")
+    subject: str = Field(default="", max_length=500, description="Email subject line")
+    body: str = Field(..., min_length=1, max_length=10000, description="Full email body text")
+
+
+class ScanResponse(BaseModel):
+    """Unified response combining Tier 1 (Rules), Tier 2 (Metadata), Tier 3 (AI)."""
+    final_score: float = Field(..., ge=0.0, le=100.0, description="Weighted composite threat score")
+    tier1: dict[str, Any] = Field(default_factory=dict, description="Rule-based detection results")
+    tier2: dict[str, Any] = Field(default_factory=dict, description="Domain reputation and metadata results")
+    tier3: T3Result = Field(..., description="AI semantic analysis results")
+    recommendation: str = Field(..., description="Safe/Review/Quarantine")
+    timestamp: float = Field(..., description="Unix timestamp of scan")
 
 
 _pipeline: Any | None = None
@@ -152,3 +172,98 @@ def tier1_bert(req: BertRequest) -> BertResponse:
         raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"ML inference failed: {e}") from e
+
+
+@app.post("/scan", response_model=ScanResponse)
+async def scan_endpoint(request: ScanRequest) -> ScanResponse:
+    """
+    Unified email security scan combining Tiers 1, 2, and 3.
+    
+    - Tier 1: Rule-based detection (text patterns)
+    - Tier 2: Domain/metadata reputation (IP, SPF, DKIM, etc.)
+    - Tier 3: AI semantic analysis for zero-day phishing
+    
+    All tiers run in parallel to minimize latency (<3s target).
+    """
+    start_time = time.time()
+    
+    # Tier 1: Local text classification
+    t1_task = asyncio.create_task(_tier1_scan(request.body))
+    
+    # Tier 2: Domain reputation (placeholder - integrate with actual service)
+    t2_task = asyncio.create_task(_tier2_scan(request.sender))
+    
+    # Tier 3: AI semantic analysis
+    t3_task = asyncio.create_task(analyze_email_intent(request.body))
+    
+    # Wait for all with 2.8s timeout (leave 0.2s buffer)
+    try:
+        t1_result, t2_result, t3_result = await asyncio.wait_for(
+            asyncio.gather(t1_task, t2_task, t3_task, return_exceptions=False),
+            timeout=2.8
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Scan timeout: one or more tiers exceeded time limit")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Scan failed: {e}")
+    
+    # Sentinel Scoring Formula: T1 (20%) + T2 (30%) + T3 (50%)
+    t1_score = t1_result.get("threat_level", 0)
+    t2_score = t2_result.get("score", 50)
+    t3_score = t3_result.threat_score
+    
+    final_score = (t1_score * 0.2) + (t2_score * 0.3) + (t3_score * 0.5)
+    final_score = max(0.0, min(100.0, final_score))
+    
+    # Determine recommendation based on final score
+    if final_score >= 75:
+        recommendation = "Quarantine"
+    elif final_score >= 50:
+        recommendation = "Review"
+    else:
+        recommendation = "Safe"
+    
+    return ScanResponse(
+        final_score=final_score,
+        tier1=t1_result,
+        tier2=t2_result,
+        tier3=t3_result,
+        recommendation=recommendation,
+        timestamp=time.time()
+    )
+
+
+async def _tier1_scan(email_body: str) -> dict[str, Any]:
+    """Tier 1: Local BERT text classification (synchronous wrapped in async)."""
+    try:
+        bert_req = BertRequest(text=email_body[:4000])  # Respect model limit
+        result = tier1_bert(bert_req)
+        return {
+            "threat_level": result.threat_level,
+            "label": result.label,
+            "confidence": result.confidence,
+            "model": result.model,
+            "reasoning": result.reasoning
+        }
+    except HTTPException:
+        return {"threat_level": 0, "label": "unknown", "confidence": 0.0, "error": "T1 unavailable"}
+    except Exception as e:
+        return {"threat_level": 0, "label": "error", "confidence": 0.0, "error": str(e)}
+
+
+async def _tier2_scan(sender_email: str) -> dict[str, Any]:
+    """Tier 2: Domain reputation and metadata (placeholder for future integration)."""
+    try:
+        # TODO: Integrate with real T2 service (speed_layer.py)
+        # For now, return neutral assessment
+        domain = sender_email.split("@")[-1] if "@" in sender_email else "unknown"
+        return {
+            "domain": domain,
+            "score": 50,  # Neutral default
+            "spf": "unknown",
+            "dkim": "unknown",
+            "dmarc": "unknown",
+            "reputation": "neutral"
+        }
+    except Exception as e:
+        return {"domain": "unknown", "score": 50, "error": str(e)}
