@@ -3,12 +3,14 @@ from __future__ import annotations
 import hashlib
 import os
 import time
+import asyncio
 from collections import OrderedDict
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import RedirectResponse, Response, StreamingResponse
+from fastapi import Request
 from pydantic import BaseModel, Field
 
 
@@ -29,10 +31,55 @@ class BertRequest(BaseModel):
 
 class BertResponse(BaseModel):
     threat_level: int = Field(..., ge=0, le=100)
+    category: str = Field(..., pattern="^(safe|spam|phishing)$")
     label: str
     confidence: float = Field(..., ge=0.0, le=1.0)
     model: str
     reasoning: str
+
+
+class LinkItem(BaseModel):
+    href: str
+    text: str | None = None
+
+
+class HeuristicItem(BaseModel):
+    check: str
+    points: int | float | None = None
+    detail: str | None = None
+    kind: str | None = None
+
+
+class Tier1Result(BaseModel):
+    score: int = Field(..., ge=0, le=100)
+    category: str = Field(..., pattern="^(safe|spam|phishing)$")
+    summary: str
+    evidence: list[HeuristicItem] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+    heuristics_score: int | None = Field(default=None, ge=0, le=100)
+    ml_enabled: bool = False
+    ml_threat_level: int | None = Field(default=None, ge=0, le=100)
+    ml_category: str | None = Field(default=None, pattern="^(safe|spam|phishing)$")
+    ml_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    ml_label: str | None = None
+    ml_model: str | None = None
+    ml_reasoning: str | None = None
+
+
+class EmailMeta(BaseModel):
+    subject: str | None = None
+    senderEmail: str | None = None
+    senderName: str | None = None
+
+
+class Tier1Report(BaseModel):
+    version: int = 1
+    scan_id: str
+    created_at: str
+    source: str = "chrome_sidepanel"
+    email: EmailMeta = Field(default_factory=EmailMeta)
+    links: list[LinkItem] = Field(default_factory=list)
+    tier1: Tier1Result
 
 
 _pipeline: Any | None = None
@@ -118,6 +165,59 @@ def favicon() -> Response:
     return Response(status_code=204)
 
 
+_latest_tier1_report: Tier1Report | None = None
+_tier1_stream_queues: set["asyncio.Queue[Tier1Report]"] = set()
+
+
+@app.get("/tier1/latest", response_model=Tier1Report | None)
+def tier1_latest() -> Tier1Report | None:
+    return _latest_tier1_report
+
+
+@app.post("/tier1/report", response_model=Tier1Report)
+async def tier1_report(report: Tier1Report) -> Tier1Report:
+    global _latest_tier1_report
+    _latest_tier1_report = report
+
+    dead: list[asyncio.Queue[Tier1Report]] = []
+    for q in list(_tier1_stream_queues):
+        try:
+            q.put_nowait(report)
+        except Exception:
+            dead.append(q)
+
+    for q in dead:
+        _tier1_stream_queues.discard(q)
+
+    return report
+
+
+@app.get("/tier1/stream")
+async def tier1_stream(request: Request) -> StreamingResponse:
+    q: "asyncio.Queue[Tier1Report]" = asyncio.Queue(maxsize=50)
+    _tier1_stream_queues.add(q)
+
+    async def gen():
+        try:
+            # Send last known report immediately (useful on refresh).
+            if _latest_tier1_report is not None:
+                yield f"data: {_latest_tier1_report.model_dump_json()}\n\n"
+
+            # Keepalive + stream updates.
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    item = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield f"data: {item.model_dump_json()}\n\n"
+                except asyncio.TimeoutError:
+                    yield "event: ping\ndata: {}\n\n"
+        finally:
+            _tier1_stream_queues.discard(q)
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
 @app.post("/tier1/bert", response_model=BertResponse)
 def tier1_bert(req: BertRequest) -> BertResponse:
     text = req.text.strip()
@@ -141,6 +241,7 @@ def tier1_bert(req: BertRequest) -> BertResponse:
 
         res = BertResponse(
             threat_level=int(round(max(0.0, min(100.0, risk)))),
+            category=("phishing" if risk >= 60 else "spam" if risk >= 20 else "safe"),
             label=label,
             confidence=max(0.0, min(1.0, confidence)),
             model=model_id,

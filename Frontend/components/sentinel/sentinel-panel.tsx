@@ -13,17 +13,21 @@ import {
   SAFE_STATE,
   THREAT_STATE,
   SCANNING_STATE,
+  LIVE_IDLE_STATE,
 } from "@/lib/sentinel-data"
 import type { ScanResult } from "@/lib/sentinel-data"
+import { tier1ReportToScanResult, type Tier1Report } from "@/lib/live-tier1"
 
-type Demo = "safe" | "threat"
+type Demo = "safe" | "threat" | "live"
 
 export function SentinelPanel() {
-  const [demo, setDemo] = useState<Demo>("threat")
-  const [scanData, setScanData] = useState<ScanResult>(SCANNING_STATE)
+  const [demo, setDemo] = useState<Demo>("live")
+  const [scanData, setScanData] = useState<ScanResult>(LIVE_IDLE_STATE)
   const [logsOpen, setLogsOpen] = useState(false)
+  const [liveStatus, setLiveStatus] = useState<"online" | "offline" | "connecting">("connecting")
 
   const runScan = useCallback((target: Demo) => {
+    if (target === "live") return () => {}
     setScanData(SCANNING_STATE)
     setLogsOpen(false)
 
@@ -38,8 +42,75 @@ export function SentinelPanel() {
   }, [])
 
   useEffect(() => {
-    const cleanup = runScan(demo)
-    return cleanup
+    if (demo !== "live") {
+      const cleanup = runScan(demo)
+      return cleanup
+    }
+
+    setScanData(LIVE_IDLE_STATE)
+    setLogsOpen(false)
+
+    const baseUrl = process.env.NEXT_PUBLIC_ZEROPHISH_BACKEND_URL || "http://127.0.0.1:8000"
+    let closed = false
+    let es: EventSource | null = null
+
+    async function bootstrapLatest() {
+      try {
+        const res = await fetch(`${baseUrl}/tier1/latest`, { cache: "no-store" })
+        if (!res.ok) return
+        const data = (await res.json()) as Tier1Report | null
+        if (data && !closed) {
+          setScanData(tier1ReportToScanResult(data))
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    function connect() {
+      setLiveStatus("connecting")
+      es = new EventSource(`${baseUrl}/tier1/stream`)
+
+      es.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data) as Tier1Report
+          setScanData(tier1ReportToScanResult(data))
+          setLiveStatus("online")
+        } catch {
+          // ignore
+        }
+      }
+
+      es.addEventListener("ping", () => {
+        setLiveStatus("online")
+      })
+
+      es.onerror = () => {
+        if (closed) return
+        setLiveStatus("offline")
+        try {
+          es?.close()
+        } catch {
+          // ignore
+        }
+        es = null
+        setTimeout(() => {
+          if (!closed) connect()
+        }, 1200)
+      }
+    }
+
+    bootstrapLatest()
+    connect()
+
+    return () => {
+      closed = true
+      try {
+        es?.close()
+      } catch {
+        // ignore
+      }
+    }
   }, [demo, runScan])
 
   return (
@@ -65,9 +136,20 @@ export function SentinelPanel() {
           <div className="flex items-center gap-2">
             <Radio className="h-4 w-4 text-[hsl(0,0%,40%)]" />
             <span className="font-mono text-xs text-[hsl(0,0%,40%)] uppercase tracking-widest hidden sm:inline">
-              Simulate
+              Mode
             </span>
             <div className="flex rounded-md border border-[hsl(0,0%,100%)]/[0.06] bg-[hsl(0,0%,5%)] overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setDemo("live")}
+                className={`px-4 py-2 font-mono text-xs transition-colors ${
+                  demo === "live"
+                    ? "bg-[#00F0FF]/15 text-[#00F0FF]"
+                    : "text-[hsl(0,0%,45%)] hover:text-[hsl(0,0%,65%)]"
+                }`}
+              >
+                LIVE
+              </button>
               <button
                 type="button"
                 onClick={() => setDemo("safe")}
@@ -99,7 +181,7 @@ export function SentinelPanel() {
               <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#00F0FF]" />
             </span>
             <span className="font-mono text-xs text-[#00F0FF]">
-              ACTIVE
+              {demo === "live" ? liveStatus.toUpperCase() : "ACTIVE"}
             </span>
           </div>
         </div>

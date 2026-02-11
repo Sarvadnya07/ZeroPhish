@@ -182,6 +182,36 @@ export const SCANNING_STATE: ScanResult = {
   flaggedExcerpts: [],
 }
 
+export const LIVE_IDLE_STATE: ScanResult = {
+  threatScore: 0,
+  threatLevel: "safe",
+  phase: "idle",
+
+  tier1: {
+    regexCheck: { label: "Regex Pattern Check", status: "pending" },
+    linkMismatch: { label: "Link-Text Mismatch", status: "pending" },
+    whitelistHit: { label: "Sender Whitelist", status: "pending" },
+  },
+
+  tier2: {
+    spf: { label: "SPF", status: "pending" },
+    dkim: { label: "DKIM", status: "pending" },
+    dmarc: { label: "DMARC", status: "pending" },
+    domainAge: "Waiting for live data...",
+    hostingProvider: "Waiting for live data...",
+  },
+
+  tier3: {
+    active: false,
+    markers: [],
+    intentProfile: [],
+  },
+
+  urls: [],
+  evidence: [],
+  flaggedExcerpts: [],
+}
+
 export const LOG_MESSAGES = [
   "Initializing Sentinel AI v3.2.1...",
   "Scanning email headers...",
