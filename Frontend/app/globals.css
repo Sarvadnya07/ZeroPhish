@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 2%;
+    --foreground: 0 0% 95%;
+    --card: 0 0% 7%;
+    --card-foreground: 0 0% 95%;
+    --popover: 0 0% 5%;
+    --popover-foreground: 0 0% 95%;
+    --primary: 187 100% 47%;
+    --primary-foreground: 0 0% 2%;
+    --secondary: 0 0% 10%;
+    --secondary-foreground: 0 0% 90%;
+    --muted: 0 0% 12%;
+    --muted-foreground: 0 0% 55%;
+    --accent: 36 100% 50%;
+    --accent-foreground: 0 0% 2%;
+    --destructive: 348 100% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 15%;
+    --input: 0 0% 15%;
+    --ring: 187 100% 47%;
+    --chart-1: 187 100% 47%;
+    --chart-2: 36 100% 50%;
+    --chart-3: 348 100% 50%;
+    --chart-4: 0 0% 55%;
+    --chart-5: 120 60% 45%;
+    --radius: 0.75rem;
+    --sentinel-cyan: 187 100% 47%;
+    --sentinel-orange: 36 100% 50%;
+    --sentinel-red: 348 100% 50%;
+    --sentinel-surface: 0 0% 7%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Custom scrollbar for the sentinel panel */
+.sentinel-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.sentinel-scrollbar::-webkit-scrollbar-track {
+  background: hsl(0 0% 5%);
+}
+.sentinel-scrollbar::-webkit-scrollbar-thumb {
+  background: hsl(187 100% 47% / 0.3);
+  border-radius: 2px;
+}
+.sentinel-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: hsl(187 100% 47% / 0.5);
+}
