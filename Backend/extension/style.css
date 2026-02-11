@@ -1,0 +1,18 @@
+body { background: #050505; color: #e0e0e0; font-family: 'Inter', sans-serif; padding: 20px; }
+.header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 10px; }
+.logo { font-weight: bold; color: #00f0ff; letter-spacing: 1px; }
+.pulse { width: 8px; height: 8px; background: #00ff88; border-radius: 50%; box-shadow: 0 0 10px #00ff88; }
+
+.score-container { text-align: center; margin: 30px 0; }
+#threat-score { font-size: 64px; font-weight: 800; color: #00f0ff; }
+.score-label { color: #888; font-size: 12px; }
+
+#scan-btn { 
+    width: 100%; background: #00f0ff; color: #000; border: none; padding: 15px; 
+    font-weight: bold; border-radius: 4px; cursor: pointer; transition: 0.3s;
+}
+#scan-btn:hover { background: #00d8e6; transform: scale(0.98); }
+
+.analysis-box { background: #121212; border: 1px solid #222; margin-top: 20px; padding: 15px; border-radius: 8px; }
+.tier-header { font-size: 10px; color: #00f0ff; margin-bottom: 10px; }
+#evidence-list { font-size: 13px; color: #ffab00; padding-left: 20px; }
