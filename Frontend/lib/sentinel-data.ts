@@ -183,7 +183,7 @@ export const SCANNING_STATE: ScanResult = {
 }
 
 export const LOG_MESSAGES = [
-  "Initializing Sentinel AI v3.2.1...",
+  "Initializing ZeroPhish v3.2.1...",
   "Scanning email headers...",
   "Checking sender reputation...",
   "Running regex pattern analysis...",

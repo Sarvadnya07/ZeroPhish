@@ -52,7 +52,7 @@ export function SentinelPanel() {
           </div>
           <div>
             <h1 className="text-base font-bold text-[hsl(0,0%,95%)] tracking-tight">
-              Sentinel AI
+              ZeroPhish
             </h1>
             <p className="font-mono text-xs text-[hsl(0,0%,45%)]">
               Phishing Forensics v3.2
@@ -71,22 +71,20 @@ export function SentinelPanel() {
               <button
                 type="button"
                 onClick={() => setDemo("safe")}
-                className={`px-4 py-2 font-mono text-xs transition-colors ${
-                  demo === "safe"
+                className={`px-4 py-2 font-mono text-xs transition-colors ${demo === "safe"
                     ? "bg-[#00F0FF]/15 text-[#00F0FF]"
                     : "text-[hsl(0,0%,45%)] hover:text-[hsl(0,0%,65%)]"
-                }`}
+                  }`}
               >
                 SAFE
               </button>
               <button
                 type="button"
                 onClick={() => setDemo("threat")}
-                className={`px-4 py-2 font-mono text-xs transition-colors ${
-                  demo === "threat"
+                className={`px-4 py-2 font-mono text-xs transition-colors ${demo === "threat"
                     ? "bg-[#FF003C]/15 text-[#FF003C]"
                     : "text-[hsl(0,0%,45%)] hover:text-[hsl(0,0%,65%)]"
-                }`}
+                  }`}
               >
                 THREAT
               </button>

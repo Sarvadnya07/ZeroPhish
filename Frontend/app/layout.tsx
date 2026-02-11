@@ -11,7 +11,7 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Sentinel AI - Phishing Forensic Analysis',
+  title: 'ZeroPhish - Phishing Forensic Analysis',
   description:
     'AI-powered phishing forensic analysis command center with 3-tier threat detection pipeline.',
 }

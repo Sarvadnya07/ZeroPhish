@@ -5,6 +5,11 @@ const aiWorker = new Worker('worker.js', { type: 'module' });
 const progressBar = document.getElementById('ai-progress-bar');
 const loadingContainer = document.getElementById('ai-loading-container');
 const statusText = document.getElementById('status-text');
+const threatScore = document.getElementById('threat-score');
+const evidenceList = document.getElementById('evidence-list');
+
+// Backend API URL
+const BACKEND_URL = 'http://127.0.0.1:8000';
 
 // 1. Safety Net: Initialize AI Worker
 aiWorker.postMessage({ action: 'init' });
@@ -28,8 +33,9 @@ aiWorker.onmessage = (e) => {
 
 // 2. Main Scan Function
 document.getElementById('scan-btn').addEventListener('click', async () => {
-    const statusText = document.getElementById('status-text');
     statusText.innerText = "🔍 Accessing Gmail Content...";
+    threatScore.innerText = "0";
+    evidenceList.innerHTML = "";
 
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
@@ -57,7 +63,10 @@ document.getElementById('scan-btn').addEventListener('click', async () => {
 
         // Homograph/Link Mismatch Check
         response.links.forEach(link => {
-            if (/[^\u0000-\u007F]/.test(link)) { t1Score += 40; evidence.push("🚨 Homograph URL detected."); }
+            if (/[^\u0000-\u007F]/.test(link)) { 
+                t1Score += 40; 
+                evidence.push("🚨 Homograph URL detected."); 
+            }
         });
 
         // --- TIER 1: BERT AI (WEB WORKER) ---
@@ -73,23 +82,78 @@ document.getElementById('scan-btn').addEventListener('click', async () => {
                 }
 
                 // Final UI Update
-                document.getElementById('threat-score').innerText = Math.min(t1Score, 100);
+                threatScore.innerText = Math.min(t1Score, 100);
                 updateEvidenceUI(evidence);
                 statusText.innerText = "Tier 1 Complete. Syncing with Backend...";
                 
-                // CALL PERSON B
-                sendToBackend(response, t1Score);
+                // Send to backend for Tier 2 & 3 analysis
+                sendToBackend(response, t1Score, evidence);
             }
         };
     });
 });
 
+// Update evidence UI
 function updateEvidenceUI(items) {
-    const list = document.getElementById('evidence-list');
-    list.innerHTML = items.map(i => `<li>${i}</li>`).join('');
+    evidenceList.innerHTML = items.map(i => `<li>${i}</li>`).join('');
 }
 
-function renderEvidence(items) {
-    const list = document.getElementById('evidence-list');
-    list.innerHTML = items.map(i => `<li>${i}</li>`).join('');
+// Send data to backend for deeper analysis
+async function sendToBackend(emailData, tier1Score, tier1Evidence) {
+    try {
+        statusText.innerText = "🔄 Sending to Backend for Deep Analysis...";
+        
+        const response = await fetch(`${BACKEND_URL}/scan`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                sender: emailData.sender,
+                body: emailData.body,
+                links: emailData.links
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Backend error: ${response.status}`);
+        }
+
+        const result = await response.json();
+        
+        // Update UI with backend results
+        threatScore.innerText = Math.round(result.final_score);
+        
+        // Combine Tier 1 and backend evidence
+        const allEvidence = [
+            ...tier1Evidence,
+            ...result.evidence,
+            `📊 Verdict: ${result.verdict}`,
+            `🔍 Category: ${result.threat_analysis.category}`,
+            result.cached ? "⚡ Cached Result" : "🆕 Fresh Analysis"
+        ];
+        
+        updateEvidenceUI(allEvidence);
+        
+        // Update status based on verdict
+        if (result.verdict === "CRITICAL") {
+            statusText.innerText = "🚨 CRITICAL THREAT DETECTED!";
+        } else if (result.verdict === "SUSPICIOUS") {
+            statusText.innerText = "⚠️ Suspicious Email - Exercise Caution";
+        } else {
+            statusText.innerText = "✅ Email appears safe";
+        }
+        
+    } catch (error) {
+        console.error("Backend communication error:", error);
+        statusText.innerText = "⚠️ Backend offline - Using Tier 1 results only";
+        
+        // Show tier 1 results with warning
+        const fallbackEvidence = [
+            ...tier1Evidence,
+            "⚠️ Backend unavailable - Limited analysis",
+            "💡 Start backend: python tier_2/main.py"
+        ];
+        updateEvidenceUI(fallbackEvidence);
+    }
 }

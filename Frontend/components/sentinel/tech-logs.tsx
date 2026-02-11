@@ -5,7 +5,7 @@ import type { ScanResult } from "@/lib/sentinel-data"
 
 export function TechLogs({ data, open }: { data: ScanResult; open: boolean }) {
   const logData = {
-    sentinel_version: "3.2.1",
+    zerophish_version: "3.2.1",
     scan_timestamp: new Date().toISOString(),
     threat_score: data.threatScore,
     threat_level: data.threatLevel,

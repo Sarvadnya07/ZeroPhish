@@ -19,7 +19,7 @@ export function StatusTicker({ phase }: { phase: ScanPhase }) {
 
   const message =
     phase === "idle"
-      ? "Sentinel AI standing by..."
+      ? "ZeroPhish standing by..."
       : phase === "scanning"
         ? LOG_MESSAGES[logIndex]
         : "Analysis complete."

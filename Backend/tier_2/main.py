@@ -1,48 +1,25 @@
-# main.py - Simplified version for Windows
+# main.py - Speed Layer + Intent Threat Analysis
 import os
 import asyncio
 import json
 import whois
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Dict, Optional, Tuple
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import google.generativeai as genai
+from dotenv import load_dotenv
 
-# Import simplified cache (no Redis dependency)
+# Load environment variables
+load_dotenv()
+
+# Redis imports
 try:
-    from speed_layer import cache, init_cache
+    import redis.asyncio as redis
+    REDIS_AVAILABLE = True
 except ImportError:
-    print("⚠️ speed_layer.py not found, creating simple fallback cache")
-    
-    # Simple fallback cache if speed_layer.py is missing
-    class SimpleCache:
-        def __init__(self):
-            self.cache = {}
-        
-        async def get_cached_result(self, sender: str, body: str):
-            key = f"{sender}:{hash(body)}"
-            return self.cache.get(key)
-        
-        async def set_cached_result(self, sender: str, body: str, result: dict):
-            key = f"{sender}:{hash(body)}"
-            self.cache[key] = result
-        
-        async def get_stats(self):
-            return {"status": "simple_cache", "size": len(self.cache)}
-        
-        async def clear_cache(self):
-            self.cache.clear()
-        
-        async def disconnect(self):
-            pass
-    
-    cache = SimpleCache()
-    
-    async def init_cache():
-        print("✅ Simple cache initialized")
-        return cache
+    REDIS_AVAILABLE = False
+    print("⚠️ Redis not available, using in-memory fallback")
 
 # --- INITIALIZATION ---
 app = FastAPI(title="ZeroPhish Backend")
@@ -50,15 +27,10 @@ app = FastAPI(title="ZeroPhish Backend")
 # CORS for Chrome Extension
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict this
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Configure Gemini Flash
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "YOUR_GEMINI_KEY_HERE")
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
 
 # --- DATA MODELS ---
 class ScanRequest(BaseModel):
@@ -66,21 +38,271 @@ class ScanRequest(BaseModel):
     body: str
     links: List[str]
 
-class AIAnalysis(BaseModel):
-    threat_level: Optional[int] = None
+class ThreatAnalysis(BaseModel):
+    threat_level: int
     category: str
     reasoning: str
-    flagged_phrases: Optional[List[str]] = []
+    flagged_phrases: List[str]
 
 class ScanResponse(BaseModel):
     final_score: float
     verdict: str
     evidence: List[str]
     tier_details: dict
-    ai_analysis: AIAnalysis
+    threat_analysis: ThreatAnalysis
     cached: bool = False
 
-# --- LOGIC UTILITIES ---
+# --- THREAT ANALYSIS LOGIC ---
+
+class ThreatAnalyzer:
+    """Local threat analysis engine (no external AI)"""
+    
+    # Threat patterns database
+    URGENCY_PATTERNS = [
+        "urgent", "immediately", "asap", "right away", "deadline", "expire",
+        "last chance", "limited time", "act now", "don't delay", "emergency",
+        "urgent action", "immediate attention", "time sensitive"
+    ]
+    
+    FINANCIAL_PATTERNS = [
+        "money", "payment", "invoice", "bank", "wire", "transfer", "account",
+        "fund", "cash", "credit", "debit", "refund", "prize", "lottery",
+        "inheritance", "million", "billion", "dollar", "euro", "pound"
+    ]
+    
+    CREDENTIAL_PATTERNS = [
+        "password", "login", "verify", "confirm", "account", "security",
+        "update", "authenticate", "validate", "credentials", "username",
+        "sign in", "log in", "access", "reset", "change password"
+    ]
+    
+    AUTHORITY_PATTERNS = [
+        "irs", "tax", "government", "police", "fbi", "court", "legal",
+        "official", "authority", "administration", "department", "agency",
+        "ceo", "manager", "director", "president", "executive"
+    ]
+    
+    SCARE_TACTICS = [
+        "suspend", "terminate", "locked", "blocked", "compromised",
+        "unauthorized", "breach", "hacked", "security alert", "warning",
+        "violation", "penalty", "fine", "arrest", "lawsuit"
+    ]
+    
+    SUSPICIOUS_URLS = [
+        "bit.ly", "tinyurl", "goo.gl", "ow.ly", "is.gd", "buff.ly",
+        "adf.ly", "shorte.st", "bc.vc", "adfly", "bitly", "shorturl"
+    ]
+    
+    @classmethod
+    def analyze_threat(cls, email_body: str, sender: str, links: List[str]) -> ThreatAnalysis:
+        """Analyze email for threat indicators using local logic."""
+        body_lower = email_body.lower()
+        
+        # Initialize counters
+        urgency_score = 0
+        financial_score = 0
+        credential_score = 0
+        authority_score = 0
+        scare_score = 0
+        link_score = 0
+        
+        flagged_phrases = []
+        
+        # Check for urgency patterns
+        for pattern in cls.URGENCY_PATTERNS:
+            if pattern in body_lower:
+                urgency_score += 10
+                flagged_phrases.append(pattern)
+        
+        # Check for financial patterns
+        for pattern in cls.FINANCIAL_PATTERNS:
+            if pattern in body_lower:
+                financial_score += 8
+                flagged_phrases.append(pattern)
+        
+        # Check for credential patterns
+        for pattern in cls.CREDENTIAL_PATTERNS:
+            if pattern in body_lower:
+                credential_score += 7
+                flagged_phrases.append(pattern)
+        
+        # Check for authority impersonation
+        for pattern in cls.AUTHORITY_PATTERNS:
+            if pattern in body_lower:
+                authority_score += 9
+                flagged_phrases.append(pattern)
+        
+        # Check for scare tactics
+        for pattern in cls.SCARE_TACTICS:
+            if pattern in body_lower:
+                scare_score += 8
+                flagged_phrases.append(pattern)
+        
+        # Check for suspicious URLs
+        for link in links:
+            for suspicious in cls.SUSPICIOUS_URLS:
+                if suspicious in link.lower():
+                    link_score += 15
+                    flagged_phrases.append(f"suspicious_url:{suspicious}")
+                    break
+        
+        # Calculate threat level (0-100)
+        base_threat = min(100, urgency_score + financial_score + credential_score + 
+                         authority_score + scare_score + link_score)
+        
+        # Check for combined patterns (higher risk)
+        if urgency_score > 0 and (financial_score > 0 or credential_score > 0):
+            base_threat = min(100, base_threat + 20)
+        
+        if authority_score > 0 and (financial_score > 0 or scare_score > 0):
+            base_threat = min(100, base_threat + 25)
+        
+        # Determine category
+        categories = []
+        if urgency_score >= 20: categories.append("Urgency")
+        if financial_score >= 15: categories.append("Financial")
+        if credential_score >= 15: categories.append("Credential")
+        if authority_score >= 10: categories.append("Authority")
+        if scare_score >= 15: categories.append("ScareTactics")
+        
+        if not categories:
+            category = "Safe"
+            reasoning = "No significant threat indicators detected"
+        else:
+            category = "/".join(categories[:3])  # Max 3 categories
+            reasoning = f"Detected {len(categories)} threat categories: {', '.join(categories)}"
+        
+        # Deduplicate flagged phrases
+        flagged_phrases = list(set(flagged_phrases))[:10]  # Limit to 10
+        
+        return ThreatAnalysis(
+            threat_level=base_threat,
+            category=category,
+            reasoning=reasoning,
+            flagged_phrases=flagged_phrases
+        )
+
+# --- SPEED LAYER (REDIS) ---
+
+class SpeedLayerCache:
+    """Speed Layer with Redis for high-performance caching."""
+    
+    def __init__(self, redis_url: str = None):
+        # Load Redis URL from environment or use default
+        self.redis_url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379")
+        self.client = None
+        self.ttl = 300  # 5 minutes cache
+        
+    async def connect(self):
+        """Connect to Redis."""
+        if not REDIS_AVAILABLE:
+            print("⚠️ Redis client not available, using fallback")
+            self.client = None
+            return False
+        
+        try:
+            self.client = redis.from_url(
+                self.redis_url,
+                decode_responses=True,
+                socket_timeout=2,
+                socket_connect_timeout=2
+            )
+            await self.client.ping()
+            print("✅ Redis cache connected")
+            return True
+        except Exception as e:
+            print(f"❌ Redis connection failed: {e}")
+            self.client = None
+            return False
+    
+    async def disconnect(self):
+        """Disconnect from Redis."""
+        if self.client:
+            await self.client.close()
+    
+    def _generate_key(self, sender: str, body: str) -> str:
+        """Generate cache key."""
+        import hashlib
+        content = f"{sender}:{body[:500]}"  # First 500 chars for hash
+        hash_obj = hashlib.md5(content.encode())
+        return f"scan:{hash_obj.hexdigest()}"
+    
+    async def get_cached_result(self, sender: str, body: str) -> Optional[Dict]:
+        """Get cached result from Redis."""
+        if not self.client:
+            return None
+        
+        try:
+            key = self._generate_key(sender, body)
+            cached_data = await self.client.get(key)
+            if cached_data:
+                return json.loads(cached_data)
+        except Exception as e:
+            print(f"Cache read error: {e}")
+        
+        return None
+    
+    async def set_cached_result(self, sender: str, body: str, result: Dict):
+        """Cache result in Redis."""
+        if not self.client:
+            return
+        
+        try:
+            key = self._generate_key(sender, body)
+            result_with_meta = {
+                **result,
+                "_cached_at": datetime.now().isoformat(),
+                "_ttl": self.ttl
+            }
+            
+            await self.client.setex(
+                key,
+                self.ttl,
+                json.dumps(result_with_meta)
+            )
+            
+            # Update recent scans list
+            await self.client.lpush("recent_scans", key)
+            await self.client.ltrim("recent_scans", 0, 99)  # Keep last 100
+        except Exception as e:
+            print(f"Cache write error: {e}")
+    
+    async def get_stats(self) -> Dict:
+        """Get Redis cache statistics."""
+        if not self.client:
+            return {"status": "disconnected", "backend": "none"}
+        
+        try:
+            info = await self.client.info()
+            return {
+                "status": "connected",
+                "backend": "redis",
+                "connected_clients": info.get("connected_clients", 0),
+                "used_memory_human": info.get("used_memory_human", "0"),
+                "total_commands_processed": info.get("total_commands_processed", 0),
+                "keyspace_hits": info.get("keyspace_hits", 0),
+                "keyspace_misses": info.get("keyspace_misses", 0)
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+    
+    async def clear_cache(self):
+        """Clear all scan cache."""
+        if not self.client:
+            return {"message": "No Redis connection"}
+        
+        try:
+            keys = await self.client.keys("scan:*")
+            if keys:
+                await self.client.delete(*keys)
+            return {"message": f"Cleared {len(keys)} cache entries"}
+        except Exception as e:
+            return {"message": f"Cache clear error: {str(e)}"}
+
+# Initialize speed layer
+cache = SpeedLayerCache()
+
+# --- DOMAIN ANALYSIS ---
 
 def get_domain_age(domain: str) -> int:
     """Tier 2: WHOIS Check. Returns age in days."""
@@ -92,62 +314,30 @@ def get_domain_age(domain: str) -> int:
         
         if not creation_date:
             return 0
-            
-        age = (datetime.now(timezone.utc) - creation_date.replace(tzinfo=timezone.utc)).days
+        
+        # Handle timezone-aware and timezone-naive datetimes
+        now = datetime.now(timezone.utc)
+        if creation_date.tzinfo is None:
+            # If creation_date is naive, assume UTC
+            creation_date = creation_date.replace(tzinfo=timezone.utc)
+        
+        age = (now - creation_date).days
         return age
-    except Exception:
-        return 0
-
-async def tier_3_ai_analysis(email_body: str) -> AIAnalysis:
-    """Tier 3: Gemini Semantic Intent Analysis."""
-    system_prompt = """You are a Forensic Cybersecurity Analyst. Analyze the following email for 
-    Social Engineering, Phishing, or Malicious Intent.
-    Return ONLY valid JSON in this exact format:
-    {
-      "threat_level": 0-100,
-      "category": "Urgency/Financial/Credential/Safe/Scan Error",
-      "reasoning": "1-sentence explanation",
-      "flagged_phrases": ["phrase1", "phrase2"]
-    }
-    """
-    
-    try:
-        response = await model.generate_content_async(f"{system_prompt}\n\nEmail: {email_body}")
-        clean_json = response.text.replace('```json', '').replace('```', '').strip()
-        
-        analysis_data = json.loads(clean_json)
-        
-        return AIAnalysis(
-            threat_level=analysis_data.get("threat_level", 50),
-            category=analysis_data.get("category", "Unknown"),
-            reasoning=analysis_data.get("reasoning", "No reasoning provided"),
-            flagged_phrases=analysis_data.get("flagged_phrases", [])
-        )
-    except json.JSONDecodeError as e:
-        print(f"JSON Parse Error: {e}")
-        return AIAnalysis(
-            threat_level=50,
-            category="Parse Error",
-            reasoning="Could not parse AI response",
-            flagged_phrases=[]
-        )
     except Exception as e:
-        print(f"AI Analysis Error: {e}")
-        return AIAnalysis(
-            threat_level=50,
-            category="Scan Error",
-            reasoning=f"AI Analysis failed: {str(e)}",
-            flagged_phrases=[]
-        )
+        # Log the error for debugging but return 0 to continue processing
+        print(f"WHOIS lookup failed for {domain}: {e}")
+        return 0
 
 # --- EVENT HANDLERS ---
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
-    await init_cache()
+    await cache.connect()
     print("✅ ZeroPhish Backend started")
-    
+    print("📊 Speed Layer: Redis")
+    print("🧠 Threat Analysis: Local Engine")
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown."""
@@ -157,133 +347,107 @@ async def shutdown_event():
 
 @app.post("/scan", response_model=ScanResponse)
 async def scan_endpoint(request: ScanRequest):
-    """Scan email for phishing."""
-    # Check cache first
+    """Scan email for phishing using speed layer + local threat analysis."""
+    # Check cache first (Speed Layer)
     cached_result = await cache.get_cached_result(request.sender, request.body)
     
     if cached_result:
-        # Remove metadata
-        for key in ['_cached_at', '_ttl', '_cache_type']:
-            cached_result.pop(key, None)
+        # Remove metadata before returning
+        cached_result.pop("_cached_at", None)
+        cached_result.pop("_ttl", None)
         
-        if 'ai_analysis' in cached_result:
-            cached_result['ai_analysis'] = AIAnalysis(**cached_result['ai_analysis'])
+        # Convert threat_analysis dict to model
+        if "threat_analysis" in cached_result:
+            cached_result["threat_analysis"] = ThreatAnalysis(**cached_result["threat_analysis"])
         
-        if 'evidence' in cached_result:
-            cached_result['evidence'].append("⚡ Served from cache")
+        cached_result["evidence"].append("⚡ Served from Redis cache")
         
         return ScanResponse(**cached_result, cached=True)
     
-    # If not cached, perform full scan
+    # If not cached, perform full analysis
     evidence = []
-    t1_status, t2_status, t3_status = "OK", "OK", "OK"
-    t1_score, t2_score, t3_score = 0.0, 0.0, 0.0
     
-    # 1. Tier 1: Local Heuristics
-    high_risk_keywords = ["urgent", "immediately", "verify", "unauthorized", "suspended"]
-    medium_risk_keywords = ["password", "login", "account", "security", "confirm"]
+    # 1. Domain Analysis (Tier 2)
+    domain_score = 0
+    domain_status = "OK"
     
-    body_lower = request.body.lower()
-    
-    high_risk_count = sum(1 for word in high_risk_keywords if word in body_lower)
-    medium_risk_count = sum(1 for word in medium_risk_keywords if word in body_lower)
-    
-    if high_risk_count > 0:
-        t1_score = min(30 + (high_risk_count * 15), 100)
-        evidence.append(f"⚠️ High-pressure keywords detected ({high_risk_count} high-risk phrases).")
-        t1_status = "SUSPICIOUS"
-    
-    if medium_risk_count > 0:
-        t1_score += min(10 + (medium_risk_count * 5), 40)
-        evidence.append(f"⚠️ Suspicious keywords found ({medium_risk_count} medium-risk phrases).")
-        t1_status = "SUSPICIOUS" if t1_status == "OK" else t1_status
-    
-    t1_score = min(t1_score, 100)
-    
-    # 2. Tier 2: Domain Age
     try:
         domain = request.sender.split("@")[-1]
         age_days = await asyncio.to_thread(get_domain_age, domain)
         
         if age_days == 0:
-            t2_score = 70.0
+            domain_score = 70
             evidence.append("⚠️ Could not verify domain age.")
-            t2_status = "UNKNOWN"
+            domain_status = "UNKNOWN"
         elif age_days < 30:
-            t2_score = 100.0
+            domain_score = 100
             evidence.append(f"🚨 Domain is very young ({age_days} days).")
-            t2_status = "CRITICAL"
+            domain_status = "CRITICAL"
         elif age_days < 365:
-            t2_score = 60.0
+            domain_score = 60
             evidence.append(f"⚠️ Domain is relatively new ({age_days} days).")
-            t2_status = "SUSPICIOUS"
+            domain_status = "SUSPICIOUS"
         else:
-            t2_score = 10.0
+            domain_score = 10
             evidence.append(f"✓ Domain is established ({age_days} days old).")
-            t2_status = "OK"
+            domain_status = "OK"
     except Exception as e:
-        t2_score = 50.0
+        domain_score = 50
         evidence.append("⚠️ Domain analysis failed.")
-        t2_status = "ERROR"
-        print(f"Domain analysis error: {e}")
-
-    # 3. Tier 3: AI Analysis
-    try:
-        ai_data = await asyncio.wait_for(tier_3_ai_analysis(request.body), timeout=2.5)
-        t3_status = "ANALYZED"
-        
-        if ai_data.threat_level is not None:
-            t3_score = float(ai_data.threat_level)
-        else:
-            if "Urgency" in ai_data.category or "Financial" in ai_data.category or "Credential" in ai_data.category:
-                t3_score = 90.0
-            elif "Safe" in ai_data.category:
-                t3_score = 10.0
-            else:
-                t3_score = 50.0
-                
-        if ai_data.flagged_phrases:
-            evidence.append(f"🤖 AI flagged phrases: {', '.join(ai_data.flagged_phrases[:3])}")
-        if ai_data.category != "Safe":
-            evidence.append(f"🤖 AI Analysis: {ai_data.reasoning}")
-            
-    except asyncio.TimeoutError:
-        ai_data = AIAnalysis(
-            threat_level=50,
-            category="Unknown", 
-            reasoning="Analysis timed out - Proceed with caution.",
-            flagged_phrases=[]
-        )
-        t3_score = 50.0
-        t3_status = "TIMEOUT"
-        evidence.append("⚠️ AI analysis timed out (2.5s limit).")
-
-    # Final calculation
-    final_score = (t1_score * 0.2) + (t2_score * 0.3) + (t3_score * 0.5)
+        domain_status = "ERROR"
     
+    # 2. Local Threat Analysis (Tier 3)
+    threat_data = ThreatAnalyzer.analyze_threat(
+        email_body=request.body,
+        sender=request.sender,
+        links=request.links
+    )
+    
+    threat_score = threat_data.threat_level
+    threat_status = "CRITICAL" if threat_score >= 70 else "SUSPICIOUS" if threat_score >= 40 else "OK"
+    
+    # Add threat evidence
+    if threat_data.category != "Safe":
+        evidence.append(f"🔍 Threat detected: {threat_data.category}")
+    
+    if threat_data.flagged_phrases:
+        evidence.append(f"🚩 Flagged phrases: {', '.join(threat_data.flagged_phrases[:3])}")
+    
+    # 3. Calculate final score (Domain 30%, Threat 70%)
+    final_score = (domain_score * 0.3) + (threat_score * 0.7)
+    
+    # Determine verdict
     if final_score < 30:
         verdict = "SAFE"
     elif final_score < 70:
         verdict = "SUSPICIOUS"
     else:
         verdict = "CRITICAL"
-
+    
+    # Prepare tier details
     tier_details = {
-        "t1": {"status": t1_status, "score": round(t1_score, 2)},
-        "t2": {"status": t2_status, "score": round(t2_score, 2)},
-        "t3": {"status": t3_status, "score": round(t3_score, 2)}
+        "domain_analysis": {
+            "status": domain_status,
+            "score": round(domain_score, 2),
+            "weight": 0.3
+        },
+        "threat_analysis": {
+            "status": threat_status,
+            "score": round(threat_score, 2),
+            "weight": 0.7
+        }
     }
-
+    
     # Prepare result
     result = {
         "final_score": round(final_score, 2),
         "verdict": verdict,
         "evidence": evidence,
         "tier_details": tier_details,
-        "ai_analysis": ai_data.dict()
+        "threat_analysis": threat_data.dict()
     }
     
-    # Cache the result
+    # Cache the result (Speed Layer)
     await cache.set_cached_result(request.sender, request.body, result)
     
     return ScanResponse(**result, cached=False)
@@ -292,29 +456,57 @@ async def scan_endpoint(request: ScanRequest):
 
 @app.get("/cache/stats")
 async def get_cache_stats():
-    """Get cache statistics."""
+    """Get Redis cache statistics."""
     return await cache.get_stats()
 
 @app.delete("/cache/clear")
 async def clear_cache_endpoint():
-    """Clear the cache."""
-    await cache.clear_cache()
-    return {"message": "Cache cleared successfully"}
+    """Clear the Redis cache."""
+    result = await cache.clear_cache()
+    return result
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint for monitoring."""
+    """Health check endpoint."""
+    cache_stats = await cache.get_stats()
+    
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "service": "ZeroPhish Backend",
-        "cache_stats": await cache.get_stats()
+        "version": "1.0.0",
+        "features": {
+            "speed_layer": "Redis" if cache.client else "None",
+            "threat_analysis": "Local Engine",
+            "domain_check": "WHOIS"
+        },
+        "cache": cache_stats
     }
+
+# --- THREAT PATTERN MANAGEMENT ---
+
+@app.get("/threat/patterns")
+async def get_threat_patterns():
+    """Get all threat patterns used by the analyzer."""
+    return {
+        "urgency_patterns": ThreatAnalyzer.URGENCY_PATTERNS,
+        "financial_patterns": ThreatAnalyzer.FINANCIAL_PATTERNS,
+        "credential_patterns": ThreatAnalyzer.CREDENTIAL_PATTERNS,
+        "authority_patterns": ThreatAnalyzer.AUTHORITY_PATTERNS,
+        "scare_tactics": ThreatAnalyzer.SCARE_TACTICS,
+        "suspicious_urls": ThreatAnalyzer.SUSPICIOUS_URLS
+    }
+
+# --- RUN SERVER ---
 
 if __name__ == "__main__":
     import uvicorn
+    
     print("🚀 Starting ZeroPhish Backend...")
-    print("📧 API available at: http://localhost:8000")
-    print("📊 Health check: http://localhost:8000/health")
-    print("🔧 Cache stats: http://localhost:8000/cache/stats")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    print("📧 API: http://localhost:8000")
+    print("🏥 Health: http://localhost:8000/health")
+    print("📊 Cache: http://localhost:8000/cache/stats")
+    print("🔧 Threat Patterns: http://localhost:8000/threat/patterns")
+    print("=" * 50)
+    
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
