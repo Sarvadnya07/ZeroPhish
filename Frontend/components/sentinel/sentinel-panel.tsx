@@ -43,99 +43,113 @@ export function SentinelPanel() {
   }, [demo, runScan])
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-[400px] flex-col bg-[#050505]">
+    <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col bg-[#050505] px-4 lg:px-8">
       {/* Header */}
-      <header className="sticky top-0 z-10 flex items-center justify-between border-b border-[hsl(0,0%,100%)]/[0.06] bg-[#050505]/95 backdrop-blur-md px-4 py-3">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#00F0FF]/20 bg-[#00F0FF]/10">
-            <Shield className="h-4 w-4 text-[#00F0FF]" />
+      <header className="sticky top-0 z-10 flex items-center justify-between border-b border-[hsl(0,0%,100%)]/[0.06] bg-[#050505]/95 backdrop-blur-md py-4 -mx-4 px-4 lg:-mx-8 lg:px-8">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#00F0FF]/20 bg-[#00F0FF]/10">
+            <Shield className="h-5 w-5 text-[#00F0FF]" />
           </div>
           <div>
-            <h1 className="text-sm font-bold text-[hsl(0,0%,95%)] tracking-tight">
+            <h1 className="text-base font-bold text-[hsl(0,0%,95%)] tracking-tight">
               Sentinel AI
             </h1>
-            <p className="font-mono text-[10px] text-[hsl(0,0%,45%)]">
+            <p className="font-mono text-xs text-[hsl(0,0%,45%)]">
               Phishing Forensics v3.2
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00F0FF] opacity-75" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-[#00F0FF]" />
-          </span>
-          <span className="font-mono text-[10px] text-[#00F0FF]">
-            ACTIVE
-          </span>
+        <div className="flex items-center gap-4">
+          {/* Demo Switcher */}
+          <div className="flex items-center gap-2">
+            <Radio className="h-4 w-4 text-[hsl(0,0%,40%)]" />
+            <span className="font-mono text-xs text-[hsl(0,0%,40%)] uppercase tracking-widest hidden sm:inline">
+              Simulate
+            </span>
+            <div className="flex rounded-md border border-[hsl(0,0%,100%)]/[0.06] bg-[hsl(0,0%,5%)] overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setDemo("safe")}
+                className={`px-4 py-2 font-mono text-xs transition-colors ${
+                  demo === "safe"
+                    ? "bg-[#00F0FF]/15 text-[#00F0FF]"
+                    : "text-[hsl(0,0%,45%)] hover:text-[hsl(0,0%,65%)]"
+                }`}
+              >
+                SAFE
+              </button>
+              <button
+                type="button"
+                onClick={() => setDemo("threat")}
+                className={`px-4 py-2 font-mono text-xs transition-colors ${
+                  demo === "threat"
+                    ? "bg-[#FF003C]/15 text-[#FF003C]"
+                    : "text-[hsl(0,0%,45%)] hover:text-[hsl(0,0%,65%)]"
+                }`}
+              >
+                THREAT
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00F0FF] opacity-75" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#00F0FF]" />
+            </span>
+            <span className="font-mono text-xs text-[#00F0FF]">
+              ACTIVE
+            </span>
+          </div>
         </div>
       </header>
 
-      {/* Demo Switcher */}
-      <div className="flex items-center gap-2 px-4 pt-4 pb-2">
-        <Radio className="h-3.5 w-3.5 text-[hsl(0,0%,40%)]" />
-        <span className="font-mono text-[10px] text-[hsl(0,0%,40%)] uppercase tracking-widest">
-          Simulate
-        </span>
-        <div className="ml-auto flex rounded-md border border-[hsl(0,0%,100%)]/[0.06] bg-[hsl(0,0%,5%)] overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setDemo("safe")}
-            className={`px-3 py-1.5 font-mono text-[10px] transition-colors ${
-              demo === "safe"
-                ? "bg-[#00F0FF]/15 text-[#00F0FF]"
-                : "text-[hsl(0,0%,45%)] hover:text-[hsl(0,0%,65%)]"
-            }`}
-          >
-            SAFE
-          </button>
-          <button
-            type="button"
-            onClick={() => setDemo("threat")}
-            className={`px-3 py-1.5 font-mono text-[10px] transition-colors ${
-              demo === "threat"
-                ? "bg-[#FF003C]/15 text-[#FF003C]"
-                : "text-[hsl(0,0%,45%)] hover:text-[hsl(0,0%,65%)]"
-            }`}
-          >
-            THREAT
-          </button>
-        </div>
-      </div>
-
-      {/* Scrollable body */}
-      <div className="flex-1 overflow-y-auto sentinel-scrollbar px-4 pb-6">
+      {/* Scrollable body with 2-column grid */}
+      <div className="flex-1 overflow-y-auto sentinel-scrollbar py-6">
         <div className="flex flex-col gap-6">
-          {/* Status Ticker */}
+          {/* Status Ticker - Full Width */}
           <StatusTicker phase={scanData.phase} />
 
-          {/* Threat Gauge Hero */}
-          <motion.div
-            layout
-            className="rounded-xl border border-[hsl(0,0%,100%)]/[0.06] bg-[hsl(0,0%,7%)]/80 backdrop-blur-md"
-          >
-            <ThreatGauge
-              score={scanData.threatScore}
-              level={scanData.threatLevel}
-              phase={scanData.phase}
+          {/* 2-Column Grid Layout */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left Column */}
+            <div className="flex flex-col gap-6">
+              {/* Threat Gauge Hero */}
+              <motion.div
+                layout
+                className="rounded-xl border border-[hsl(0,0%,100%)]/[0.06] bg-[hsl(0,0%,7%)]/80 backdrop-blur-md"
+              >
+                <ThreatGauge
+                  score={scanData.threatScore}
+                  level={scanData.threatLevel}
+                  phase={scanData.phase}
+                />
+              </motion.div>
+
+              {/* Deep Forensics */}
+              <ForensicsPanel data={scanData} />
+            </div>
+
+            {/* Right Column */}
+            <div className="flex flex-col gap-6">
+              {/* Analysis Pipeline */}
+              <AnalysisPipeline data={scanData} />
+            </div>
+          </div>
+
+          {/* Full Width Bottom Section */}
+          <div className="flex flex-col gap-6">
+            {/* Tech Logs */}
+            <TechLogs data={scanData} open={logsOpen} />
+
+            {/* Action Buttons */}
+            <TacticalActions
+              data={scanData}
+              onToggleLogs={() => setLogsOpen((prev) => !prev)}
+              logsOpen={logsOpen}
             />
-          </motion.div>
-
-          {/* Analysis Pipeline */}
-          <AnalysisPipeline data={scanData} />
-
-          {/* Deep Forensics */}
-          <ForensicsPanel data={scanData} />
-
-          {/* Tech Logs */}
-          <TechLogs data={scanData} open={logsOpen} />
-
-          {/* Action Buttons */}
-          <TacticalActions
-            data={scanData}
-            onToggleLogs={() => setLogsOpen((prev) => !prev)}
-            logsOpen={logsOpen}
-          />
+          </div>
         </div>
       </div>
     </div>
