@@ -1,95 +1,123 @@
-// Initialize Web Worker
-const aiWorker = new Worker('worker.js', { type: 'module' });
+﻿import { analyzeTier1 } from './tier1.js';
 
-// UI Elements
-const progressBar = document.getElementById('ai-progress-bar');
-const loadingContainer = document.getElementById('ai-loading-container');
-const statusText = document.getElementById('status-text');
+const BACKEND_BERT_URL = 'http://127.0.0.1:8000/tier1/bert';
 
-// 1. Safety Net: Initialize AI Worker
-aiWorker.postMessage({ action: 'init' });
+const scanButton = document.getElementById('scan-btn');
+const threatScoreEl = document.getElementById('threat-score');
+const statusTextEl = document.getElementById('status-text');
+const mlStatusEl = document.getElementById('ml-status');
+const evidenceListEl = document.getElementById('evidence-list');
 
-aiWorker.onmessage = (e) => {
-    const { status, progress, output, message } = e.data;
+function clampScore(score) {
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
 
-    if (status === 'loading') {
-        loadingContainer.style.display = 'block';
-        progressBar.style.width = `${progress}%`;
-        statusText.innerText = `Downloading Intelligence: ${Math.round(progress)}%`;
-    } else if (status === 'ready') {
-        loadingContainer.style.display = 'none';
-        statusText.innerText = "🛡️ Tier 1 Guard Active";
-    } else if (status === 'error') {
-        console.error("AI Worker Error:", message);
-        loadingContainer.style.display = 'none';
-        statusText.innerText = "⚠️ AI Offline (Heuristics Only)";
-    }
-};
+function setStatus(text) {
+  statusTextEl.innerText = text;
+}
 
-// 2. Main Scan Function
-document.getElementById('scan-btn').addEventListener('click', async () => {
-    const statusText = document.getElementById('status-text');
-    statusText.innerText = "🔍 Accessing Gmail Content...";
-
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-    // Ensure we are actually on Gmail
-    if (!tab.url.includes("mail.google.com")) {
-        statusText.innerText = "❌ Please open a Gmail message.";
-        return;
-    }
-
-    chrome.tabs.sendMessage(tab.id, { action: "EXTRACT_EMAIL" }, async (response) => {
-        if (chrome.runtime.lastError || !response) {
-            statusText.innerText = "❌ Error: Refresh Gmail and try again.";
-            return;
-        }
-
-        // --- TIER 1: INSTANT HEURISTICS (<10ms) ---
-        let t1Score = 0;
-        let evidence = [];
-        
-        // Regex Check
-        if (/urgent|verify|suspend|action required/i.test(response.body)) {
-            t1Score += 20;
-            evidence.push("🚩 Heuristic: High-pressure keywords.");
-        }
-
-        // Homograph/Link Mismatch Check
-        response.links.forEach(link => {
-            if (/[^\u0000-\u007F]/.test(link)) { t1Score += 40; evidence.push("🚨 Homograph URL detected."); }
-        });
-
-        // --- TIER 1: BERT AI (WEB WORKER) ---
-        statusText.innerText = "🧠 Running Local BERT Analysis...";
-        aiWorker.postMessage({ action: 'classify', text: response.body.substring(0, 512) });
-
-        aiWorker.onmessage = (e) => {
-            if (e.data.status === 'result') {
-                const ai = e.data.output[0];
-                if (ai.label === 'NEGATIVE' && ai.score > 0.8) {
-                    t1Score += 30;
-                    evidence.push(`🤖 Local AI: Fear/Urgency intent detected.`);
-                }
-
-                // Final UI Update
-                document.getElementById('threat-score').innerText = Math.min(t1Score, 100);
-                updateEvidenceUI(evidence);
-                statusText.innerText = "Tier 1 Complete. Syncing with Backend...";
-                
-                // CALL PERSON B
-                sendToBackend(response, t1Score);
-            }
-        };
-    });
-});
-
-function updateEvidenceUI(items) {
-    const list = document.getElementById('evidence-list');
-    list.innerHTML = items.map(i => `<li>${i}</li>`).join('');
+function setMlStatus(text) {
+  mlStatusEl.innerText = text;
 }
 
 function renderEvidence(items) {
-    const list = document.getElementById('evidence-list');
-    list.innerHTML = items.map(i => `<li>${i}</li>`).join('');
+  if (!Array.isArray(items) || items.length === 0) {
+    evidenceListEl.innerHTML = '';
+    return;
+  }
+
+  evidenceListEl.innerHTML = items
+    .map((i) => {
+      const points = typeof i?.points === 'number' ? `(+${i.points}) ` : '';
+      const detail = i?.detail ? i.detail : String(i);
+      const check = i?.check ? `[${i.check}] ` : '';
+      return `<li>${check}${points}${detail}</li>`;
+    })
+    .join('');
 }
+
+async function extractEmailFromGmailActiveTab() {
+  const tabs = await new Promise((resolve) =>
+    chrome.tabs.query({ active: true, currentWindow: true }, resolve),
+  );
+  const [tab] = tabs || [];
+  if (!tab?.id || !tab?.url?.includes('mail.google.com')) {
+    throw new Error('Please open a Gmail message first.');
+  }
+
+  const response = await new Promise((resolve, reject) => {
+    chrome.tabs.sendMessage(tab.id, { action: 'EXTRACT_EMAIL' }, (res) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(res);
+    });
+  });
+  if (!response?.body) {
+    throw new Error('Could not read the email. Refresh Gmail and try again.');
+  }
+
+  return response;
+}
+
+async function fetchBertThreat(emailText) {
+  const res = await fetch(BACKEND_BERT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: emailText }),
+  });
+
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(`Backend error (${res.status}): ${msg}`);
+  }
+
+  return res.json();
+}
+
+scanButton.addEventListener('click', async () => {
+  threatScoreEl.innerText = '0';
+  renderEvidence([]);
+  setMlStatus('');
+
+  try {
+    setStatus('Reading Gmail content...');
+    const email = await extractEmailFromGmailActiveTab();
+
+    // Tier 1A: instant heuristics
+    const heur = analyzeTier1(email);
+    threatScoreEl.innerText = String(heur.t1_score);
+    renderEvidence(heur.t1_evidence);
+    setStatus(`Tier 1 heuristics: ${heur.t1_status}`);
+
+    // Tier 1B: optional local HuggingFace/BERT backend
+    setMlStatus('Local ML: pending (127.0.0.1:8000)');
+
+    try {
+      const ml = await fetchBertThreat((email.body || '').substring(0, 2500));
+
+      const combined = clampScore(heur.t1_score * 0.65 + (ml.threat_level || 0) * 0.35);
+
+      const mergedEvidence = [...(heur.t1_evidence || [])];
+      mergedEvidence.push({
+        check: 'ml',
+        points: Math.max(0, combined - heur.t1_score),
+        detail: `Local ML: ${ml.label} (${Math.round((ml.confidence || 0) * 100)}%) - ${ml.reasoning}`,
+      });
+
+      threatScoreEl.innerText = String(combined);
+      renderEvidence(mergedEvidence);
+      setMlStatus(`Local ML: online (${ml.model})`);
+      setStatus('Tier 1 complete.');
+    } catch (mlErr) {
+      console.warn(mlErr);
+      setMlStatus('Local ML: offline (heuristics only)');
+      setStatus('Tier 1 heuristics complete (ML offline).');
+    }
+  } catch (err) {
+    console.error(err);
+    setMlStatus('Local ML: offline (heuristics only)');
+    setStatus(err?.message || 'Scan failed.');
+  }
+});
