@@ -24,9 +24,8 @@ wheels/
 venv/
 ENV/
 env/
-.venv
 
-# Environment Variables
+# Environment variables - CRITICAL: Never commit secrets!
 .env
 .env.local
 .env.*.local
@@ -41,14 +40,17 @@ env/
 # OS
 .DS_Store
 Thumbs.db
-desktop.ini
 
 # Logs
 *.log
 logs/
 
-# Redis
-dump.rdb
+# ML Models (large files)
+models/
+*.bin
+*.pt
+*.pth
+*.onnx
 
 # Testing
 .pytest_cache/
@@ -58,4 +60,4 @@ htmlcov/
 # Temporary files
 *.tmp
 *.bak
-*.cache
+*.swp

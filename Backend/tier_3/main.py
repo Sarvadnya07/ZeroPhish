@@ -11,10 +11,17 @@ from pydantic import BaseModel, Field
 
 class T3Result(BaseModel):
     """Tier 3 Semantic AI Analysis Result."""
-    threat_score: float = Field(..., ge=0.0, le=100.0, description="Weighted AI score from 0.0 to 100.0")
-    category: str = Field(..., description="One of: Financial, Urgency, Credential, Safe, AI_UNAVAILABLE")
+
+    threat_score: float = Field(
+        ..., ge=0.0, le=100.0, description="Weighted AI score from 0.0 to 100.0"
+    )
+    category: str = Field(
+        ..., description="One of: Financial, Urgency, Credential, Safe, AI_UNAVAILABLE"
+    )
     reasoning: str = Field(..., description="Brief user-friendly explanation of threat assessment")
-    flagged_phrases: list[str] = Field(default_factory=list, description="Email snippets that triggered alarm")
+    flagged_phrases: list[str] = Field(
+        default_factory=list, description="Email snippets that triggered alarm"
+    )
 
 
 class T3Service:
@@ -42,25 +49,26 @@ Do NOT include markdown, code blocks, explanations, or conversational text. ONLY
     def __init__(self):
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key or api_key == "your_actual_gemini_api_key_here":
-            raise ValueError("GEMINI_API_KEY not set in .env file. Please add your actual Gemini API key.")
-        
+            raise ValueError(
+                "GEMINI_API_KEY not set in .env file. Please add your actual Gemini API key."
+            )
+
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
-            system_instruction=self.SYSTEM_INSTRUCTION
+            model_name="gemini-1.5-flash", system_instruction=self.SYSTEM_INSTRUCTION
         )
         self.timeout_sec = 2.5  # Leave buffer for orchestration
 
     async def analyze_email_intent(self, email_body: str) -> T3Result:
         """
         Analyze email for semantic phishing/social engineering markers.
-        
+
         Args:
             email_body: Full email text to analyze
-            
+
         Returns:
             T3Result with threat assessment and flagged content
-            
+
         Fallback: Returns neutral/warning state if AI analysis fails
         """
         if not email_body or not email_body.strip():
@@ -68,7 +76,7 @@ Do NOT include markdown, code blocks, explanations, or conversational text. ONLY
                 threat_score=0.0,
                 category="Safe",
                 reasoning="Email body is empty.",
-                flagged_phrases=[]
+                flagged_phrases=[],
             )
 
         prompt = f"""Analyze this email for malicious intent and social engineering:
@@ -85,9 +93,9 @@ Do NOT include markdown, code blocks, explanations, or conversational text. ONLY
                     prompt,
                     generation_config=genai.types.GenerationConfig(
                         response_mime_type="application/json"
-                    )
+                    ),
                 ),
-                timeout=self.timeout_sec
+                timeout=self.timeout_sec,
             )
 
             if not response or not response.text:
@@ -103,7 +111,7 @@ Do NOT include markdown, code blocks, explanations, or conversational text. ONLY
                 threat_score=25.0,
                 category="AI_UNAVAILABLE",
                 reasoning="AI analysis timeout. Escalate to human review if high T2 score.",
-                flagged_phrases=["[timeout]"]
+                flagged_phrases=["[timeout]"],
             )
 
         except json.JSONDecodeError as e:
@@ -112,7 +120,7 @@ Do NOT include markdown, code blocks, explanations, or conversational text. ONLY
                 threat_score=35.0,
                 category="AI_UNAVAILABLE",
                 reasoning="AI response parsing failed. Check email content validity.",
-                flagged_phrases=["[parse_error]"]
+                flagged_phrases=["[parse_error]"],
             )
 
         except Exception as e:
@@ -121,7 +129,7 @@ Do NOT include markdown, code blocks, explanations, or conversational text. ONLY
                 threat_score=50.0,
                 category="AI_UNAVAILABLE",
                 reasoning=f"Deep semantic scan failed: {type(e).__name__}. Technical metadata (T2) takes priority.",
-                flagged_phrases=[]
+                flagged_phrases=[],
             )
 
 

@@ -1,33 +1,35 @@
 # ==============================
 # Core Framework
 # ==============================
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
 
 # ==============================
 # AI / ML Components
 # ==============================
-google-generativeai>=0.3.2
-transformers>=4.36.0
+google-generativeai==0.8.3
+transformers==4.47.1
+torch==2.5.1
+sentencepiece==0.2.0
 
 # ==============================
 # Data Models & Validation
 # ==============================
-pydantic==2.5.0
-pydantic-settings==2.1.0
-email-validator==2.1.0.post1
+pydantic==2.10.5
+pydantic-settings==2.7.1
+email-validator==2.2.0
 
 # ==============================
 # Domain & Network Analysis
 # ==============================
-python-whois==0.9.3
-httpx==0.25.2
+python-whois==0.9.4
+httpx==0.28.1
 
 # ==============================
 # Caching Layer
 # ==============================
 # OPTION 1: Use Redis (Production)
-redis[hiredis]==5.0.1
+redis[hiredis]==5.2.1
 
 # OPTION 2: Use FakeRedis (Testing)
 # fakeredis==2.19.0
@@ -35,16 +37,17 @@ redis[hiredis]==5.0.1
 # ==============================
 # Environment Management
 # ==============================
-python-dotenv==1.0.0
+python-dotenv==1.0.1
 
 # ==============================
 # Async Utilities & Reliability
 # ==============================
 asyncio-throttle==1.0.2
-tenacity==8.2.3
-aiofiles==23.2.1
+tenacity==9.0.0
+aiofiles==24.1.0
+slowapi==0.1.9
 
 # ==============================
 # Logging
 # ==============================
-loguru==0.7.2
+loguru==0.7.3

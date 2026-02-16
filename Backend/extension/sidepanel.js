@@ -1,5 +1,11 @@
 ﻿import { analyzeTier1 } from './tier1.js';
 
+// Gateway endpoints for 3-tier analysis
+const GATEWAY_SCAN_URL = 'http://127.0.0.1:8001/gateway/scan';
+const GATEWAY_STATUS_URL = 'http://127.0.0.1:8001/gateway/status';
+const GATEWAY_RESULT_URL = 'http://127.0.0.1:8001/gateway/result';
+
+// Legacy Tier 1 endpoints (fallback)
 const BACKEND_BERT_URL = 'http://127.0.0.1:8000/tier1/bert';
 const BACKEND_REPORT_URL = 'http://127.0.0.1:8000/tier1/report';
 
@@ -38,22 +44,21 @@ function setMlStatus(text) {
 }
 
 function renderEvidence(items) {
+  evidenceListEl.innerHTML = ''; // Clear first
   if (!Array.isArray(items) || items.length === 0) {
-    evidenceListEl.innerHTML = '';
     return;
   }
 
-  evidenceListEl.innerHTML = items
-    .map((i) => {
-      const points =
-        typeof i?.points === 'number'
-          ? `(${i.points > 0 ? '+' : ''}${i.points}) `
-          : '';
-      const detail = i?.detail ? i.detail : String(i);
-      const check = i?.check ? `[${i.check}] ` : '';
-      return `<li>${check}${points}${detail}</li>`;
-    })
-    .join('');
+  items.forEach(i => {
+    const li = document.createElement('li');
+    const points = typeof i?.points === 'number'
+      ? `(${i.points > 0 ? '+' : ''}${i.points}) `
+      : '';
+    const detail = i?.detail ? i.detail : String(i);
+    const check = i?.check ? `[${i.check}] ` : '';
+    li.textContent = `${check}${points}${detail}`;  // SAFE - no XSS
+    evidenceListEl.appendChild(li);
+  });
 }
 
 function friendlyReasonsFromEvidence(items, category) {
@@ -108,8 +113,13 @@ function friendlyReasonsFromEvidence(items, category) {
 }
 
 function renderReasons(items, category) {
+  reasonsListEl.innerHTML = ''; // Clear first
   const reasons = friendlyReasonsFromEvidence(items, category);
-  reasonsListEl.innerHTML = reasons.map((r) => `<li>${r}</li>`).join('');
+  reasons.forEach(r => {
+    const li = document.createElement('li');
+    li.textContent = r;  // SAFE - no XSS
+    reasonsListEl.appendChild(li);
+  });
 }
 
 function getReasonsFromUi() {
@@ -184,8 +194,9 @@ async function fetchBertThreat(emailText) {
   return res.json();
 }
 
+// NEW: Gateway integration for 3-tier analysis
 scanButton.addEventListener('click', async () => {
-  threatScoreEl.innerText = '0';
+  threatScoreEl.innerText = '...';
   renderEvidence([]);
   reasonsListEl.innerHTML = '';
   setMlStatus('');
@@ -197,126 +208,153 @@ scanButton.addEventListener('click', async () => {
   const scanId = safeUuid();
 
   try {
-    setStatus('Reading Gmail content...');
+    setStatus('🔍 Reading Gmail content...');
     const email = await extractEmailFromGmailActiveTab();
 
-    // Tier 1A: instant heuristics
+    // Step 1: Run local Tier 1 heuristics (instant feedback)
+    setStatus('⚡ Tier 1: Local analysis...');
     const heur = analyzeTier1(email);
     threatScoreEl.innerText = String(heur.t1_score);
     renderEvidence(heur.t1_evidence);
     renderReasons(heur.t1_evidence, heur.t1_category);
     setCategory(heur.t1_category);
-    setSummary(heur.User_Friendly_Summary || '');
-    setStatus(`Tier 1: ${(heur.t1_category || 'safe').toUpperCase()} (${heur.t1_status})`);
+    setSummary(heur.User_Friendly_Summary || 'Analyzing...');
 
-    void postLiveReport({
-      version: 1,
-      scan_id: scanId,
-      created_at: new Date().toISOString(),
-      source: 'chrome_sidepanel',
-      email: {
-        subject: email.subject || null,
-        senderEmail: email.senderEmail || email.sender || null,
-        senderName: email.senderName || null,
-      },
-      links: (email.links || []).map((l) => (typeof l === 'string' ? { href: l, text: null } : { href: l.href, text: l.text || null })),
-      tier1: {
-        score: heur.t1_score,
-        category: heur.t1_category || 'safe',
-        summary: heur.User_Friendly_Summary || '',
-        evidence: heur.t1_evidence || [],
-        reasons: getReasonsFromUi(),
-        heuristics_score: heur.t1_score,
-        ml_enabled: false,
-      },
+    // Step 2: Send to gateway for Tier 2 + Tier 3
+    setStatus('🌐 Tier 2: Analyzing metadata...');
+
+    const gatewayPayload = {
+      tier1_score: heur.t1_score,
+      tier1_evidence: heur.t1_evidence.map(e => e.detail || String(e)),
+      sender: email.senderEmail || email.sender || 'unknown@unknown.com',
+      body: email.body || '',
+      links: (email.links || []).map(l => typeof l === 'string' ? l : l.href),
+      subject: email.subject || 'No Subject',
+      timestamp: new Date().toISOString()
+    };
+
+    const gatewayResponse = await fetch(GATEWAY_SCAN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(gatewayPayload)
     });
 
-    // Tier 1B: optional local HuggingFace/BERT backend
-    setMlStatus('Extra language check: Checking...');
-
-    try {
-      const ml = await fetchBertThreat((email.body || '').substring(0, 2500));
-
-      let combinedRaw = heur.t1_score * 0.65 + (ml.threat_level || 0) * 0.35;
-
-      // Multiplier: if heuristics show urgency/action AND ML thinks it's risky, amplify the score.
-      const hasUrgency = (heur.t1_evidence || []).some((e) => e?.kind === 'urgency');
-      const mlRisky = (ml.category || '').toLowerCase() !== 'safe' || (ml.threat_level || 0) >= 20;
-      if (hasUrgency && mlRisky) {
-        combinedRaw *= 1.5;
-      }
-
-      const combined = clampScore(combinedRaw);
-
-      const mergedEvidence = [...(heur.t1_evidence || [])];
-      mergedEvidence.push({
-        check: 'ml',
-        points: Math.max(0, combined - heur.t1_score),
-        detail: `Local ML: ${ml.category?.toUpperCase?.() || ml.label} (${Math.round((ml.confidence || 0) * 100)}%) - ${ml.reasoning}`,
-      });
-      if (hasUrgency && mlRisky) {
-        mergedEvidence.push({
-          check: 'ml_multiplier',
-          points: 0,
-          detail: 'Applied 1.5x multiplier due to urgency/action cues + ML risk.',
-        });
-      }
-
-      threatScoreEl.innerText = String(combined);
-      renderEvidence(mergedEvidence);
-      const combinedCategory = combined >= 60 ? 'phishing' : combined >= 20 ? 'spam' : 'safe';
-      renderReasons(mergedEvidence, combinedCategory);
-      setMlStatus('Extra language check: On');
-      setCategory(combinedCategory);
-      setSummary(
-        combinedCategory === 'phishing'
-          ? 'High risk: likely phishing. Do not click links; verify via official site/app.'
-          : combinedCategory === 'spam'
-            ? 'Medium risk: suspicious/spam-like. Be cautious with links and requests.'
-            : 'Low risk: looks safe based on local Tier 1 checks.',
-      );
-      setStatus(`Tier 1: ${combinedCategory.toUpperCase()} (complete)`);
-
-      void postLiveReport({
-        version: 1,
-        scan_id: scanId,
-        created_at: new Date().toISOString(),
-        source: 'chrome_sidepanel',
-        email: {
-          subject: email.subject || null,
-          senderEmail: email.senderEmail || email.sender || null,
-          senderName: email.senderName || null,
-        },
-        links: (email.links || []).map((l) => (typeof l === 'string' ? { href: l, text: null } : { href: l.href, text: l.text || null })),
-        tier1: {
-          score: combined,
-          category: combinedCategory,
-          summary:
-            combinedCategory === 'phishing'
-              ? 'High risk: likely phishing. Do not click links; verify via official site/app.'
-              : combinedCategory === 'spam'
-                ? 'Medium risk: suspicious/spam-like. Be cautious with links and requests.'
-                : 'Low risk: looks safe based on local Tier 1 checks.',
-          evidence: mergedEvidence,
-          reasons: getReasonsFromUi(),
-          heuristics_score: heur.t1_score,
-          ml_enabled: true,
-          ml_threat_level: ml.threat_level ?? null,
-          ml_category: ml.category ?? null,
-          ml_confidence: ml.confidence ?? null,
-          ml_label: ml.label ?? null,
-          ml_model: ml.model ?? null,
-          ml_reasoning: ml.reasoning ?? null,
-        },
-      });
-    } catch (mlErr) {
-      console.warn(mlErr);
-      setMlStatus('Extra language check: Off');
-      setStatus(`Tier 1: ${(heur.t1_category || 'safe').toUpperCase()} (ML offline)`);
+    if (!gatewayResponse.ok) {
+      throw new Error(`Gateway error: ${gatewayResponse.status}`);
     }
+
+    const gatewayData = await gatewayResponse.json();
+    const gatewayScanId = gatewayData.scan_id;
+
+    // Step 3: Show partial score (T1 + T2)
+    const partialScore = Math.round(gatewayData.partial_score || heur.t1_score);
+    threatScoreEl.innerText = String(partialScore);
+
+    // Merge Tier 1 + Tier 2 evidence
+    const tier2Evidence = gatewayData.tier2?.evidence || [];
+    const combinedEvidence = [...heur.t1_evidence];
+    tier2Evidence.forEach(e => {
+      combinedEvidence.push({ detail: e, check: 'tier2' });
+    });
+
+    renderEvidence(combinedEvidence);
+    renderReasons(combinedEvidence, gatewayData.verdict.toLowerCase());
+    setCategory(gatewayData.verdict.toLowerCase());
+    setSummary(`Tier 2 complete. Domain: ${gatewayData.tier2?.domain_status || 'analyzed'}`);
+    setStatus('🤖 Tier 3: AI analyzing...');
+
+    // Step 4: Poll for Tier 3 completion
+    let pollCount = 0;
+    const maxPolls = 20; // 10 seconds max (500ms * 20)
+
+    const pollInterval = setInterval(async () => {
+      pollCount++;
+
+      try {
+        const statusRes = await fetch(`${GATEWAY_STATUS_URL}/${gatewayScanId}`);
+        if (!statusRes.ok) {
+          clearInterval(pollInterval);
+          setStatus('⚠️ Status check failed');
+          return;
+        }
+
+        const status = await statusRes.json();
+
+        if (status.complete || pollCount >= maxPolls) {
+          clearInterval(pollInterval);
+
+          // Get full result
+          const resultRes = await fetch(`${GATEWAY_RESULT_URL}/${gatewayScanId}`);
+          const fullResult = await resultRes.json();
+
+          // Update with final score
+          const finalScore = Math.round(fullResult.final_score || partialScore);
+          threatScoreEl.innerText = String(finalScore);
+
+          // Merge all evidence
+          const allEvidence = [...combinedEvidence];
+          if (fullResult.tier3 && fullResult.tier3.flagged_phrases) {
+            fullResult.tier3.flagged_phrases.forEach(phrase => {
+              allEvidence.push({ detail: `AI: ${phrase}`, check: 'tier3' });
+            });
+          }
+
+          renderEvidence(allEvidence);
+          renderReasons(allEvidence, fullResult.verdict.toLowerCase());
+          setCategory(fullResult.verdict.toLowerCase());
+
+          // Update summary based on final verdict
+          const verdictMessages = {
+            'CRITICAL': '🚨 HIGH RISK: Likely phishing. Do NOT click links. Verify via official channels.',
+            'SUSPICIOUS': '⚠️ MEDIUM RISK: Suspicious patterns detected. Exercise caution.',
+            'SAFE': '✅ LOW RISK: No significant threats detected.'
+          };
+          setSummary(verdictMessages[fullResult.verdict] || 'Analysis complete.');
+
+          setStatus(`✅ Complete! Verdict: ${fullResult.verdict} (Score: ${finalScore}/100)`);
+          setMlStatus(`AI Analysis: ${fullResult.tier3?.category || 'Complete'}`);
+
+          // Send report to dashboard (for real-time updates)
+          try {
+            const reportPayload = {
+              scan_id: gatewayScanId,
+              timestamp: new Date().toISOString(),
+              sender: email.senderEmail || email.sender || 'unknown@unknown.com',
+              subject: email.subject || 'No Subject',
+              final_score: finalScore,
+              verdict: fullResult.verdict,
+              evidence: allEvidence.map(e => e.detail || String(e)),
+              threat_analysis: fullResult.tier3 || {},
+              tier_details: {
+                tier1: { score: heur.t1_score, status: heur.t1_category },
+                tier2: fullResult.tier2 || {},
+                tier3: fullResult.tier3 || {}
+              }
+            };
+
+            await fetch('http://127.0.0.1:8000/tier1/report', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(reportPayload)
+            }).catch(err => console.warn('Dashboard report failed:', err));
+          } catch (reportErr) {
+            console.warn('Failed to send dashboard report:', reportErr);
+          }
+        }
+      } catch (pollErr) {
+        console.error('Poll error:', pollErr);
+        if (pollCount >= maxPolls) {
+          clearInterval(pollInterval);
+          setStatus('⚠️ AI analysis timeout (using Tier 1+2 results)');
+        }
+      }
+    }, 500); // Poll every 500ms
+
   } catch (err) {
     console.error(err);
-    setMlStatus('Extra language check: Off');
-    setStatus(err?.message || 'Scan failed.');
+    setMlStatus('');
+    setStatus(`❌ ${err?.message || 'Scan failed.'}`);
+    threatScoreEl.innerText = '0';
   }
 });
+

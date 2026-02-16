@@ -1,29 +1,37 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
+import sys
 import time
-import asyncio
 from collections import OrderedDict
+from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
-from fastapi import Request
 from pydantic import BaseModel, Field
+
+# Add Backend to path for imports
+sys.path.insert(0, str(Path(__file__).parent))
 
 from tier_3.main import T3Result, analyze_email_intent
 
-
 app = FastAPI(title="ZeroPhish Tier 1 (Local)", version="0.1.0")
+
+# CORS Configuration - Environment-based for security
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,chrome-extension://*").split(
+    ","
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 
@@ -93,6 +101,7 @@ _CACHE_TTL_SEC = 60 * 10  # 10 minutes
 
 
 def _cache_get(key: str) -> BertResponse | None:
+    """Retrieve cached BERT response if available and not expired."""
     item = _cache.get(key)
     if not item:
         return None
@@ -105,6 +114,7 @@ def _cache_get(key: str) -> BertResponse | None:
 
 
 def _cache_put(key: str, value: BertResponse) -> None:
+    """Store BERT response in cache with timestamp."""
     _cache[key] = (time.time(), value)
     _cache.move_to_end(key)
     while len(_cache) > _CACHE_MAX:
@@ -112,6 +122,7 @@ def _cache_put(key: str, value: BertResponse) -> None:
 
 
 def _label_to_risk(label: str, confidence: float) -> float:
+    """Convert model label and confidence to risk score (0-100)."""
     l = (label or "").strip().lower()
     if any(k in l for k in ("phish", "spam", "scam", "fraud", "malicious")):
         return confidence * 100.0
@@ -129,6 +140,7 @@ def _label_to_risk(label: str, confidence: float) -> float:
 
 
 def _load_pipeline() -> tuple[Any, str]:
+    """Load or retrieve cached HuggingFace pipeline for text classification."""
     global _pipeline, _pipeline_model_id
 
     if os.getenv("ZERO_PHISH_DISABLE_ML", "").strip() in {"1", "true", "yes"}:
