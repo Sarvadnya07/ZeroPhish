@@ -1,13 +1,15 @@
-﻿import { analyzeTier1 } from './tier1.js';
+import { analyzeTier1 } from './tier1.js';
 
 // Gateway endpoints for 3-tier analysis
 const GATEWAY_SCAN_URL = 'http://127.0.0.1:8001/gateway/scan';
 const GATEWAY_STATUS_URL = 'http://127.0.0.1:8001/gateway/status';
 const GATEWAY_RESULT_URL = 'http://127.0.0.1:8001/gateway/result';
 
-// Legacy Tier 1 endpoints (fallback)
-const BACKEND_BERT_URL = 'http://127.0.0.1:8000/tier1/bert';
+// Dashboard endpoint
 const BACKEND_REPORT_URL = 'http://127.0.0.1:8000/tier1/report';
+const POLL_INTERVAL_MS = 500;
+const MAX_POLLS = 20;
+const MAX_POLL_ERRORS = 3;
 
 const scanButton = document.getElementById('scan-btn');
 const threatScoreEl = document.getElementById('threat-score');
@@ -20,15 +22,56 @@ const detailsContainerEl = document.getElementById('details-container');
 const threatCategoryEl = document.getElementById('threat-category');
 const summaryTextEl = document.getElementById('summary-text');
 
+const requiredUi = [
+  scanButton,
+  threatScoreEl,
+  statusTextEl,
+  mlStatusEl,
+  evidenceListEl,
+  reasonsListEl,
+  toggleDetailsBtn,
+  detailsContainerEl,
+  threatCategoryEl,
+  summaryTextEl,
+];
+
+const isUiReady = requiredUi.every(Boolean);
+let activePollInterval = null;
+let activeRunId = 0;
+
+function toErrorMessage(err, fallback = 'Unknown error.') {
+  if (typeof err === 'string' && err.trim()) return err.trim();
+  const msg = err?.message;
+  if (typeof msg === 'string' && msg.trim()) return msg.trim();
+  return fallback;
+}
+
 function clampScore(score) {
-  return Math.max(0, Math.min(100, Math.round(score)));
+  return Math.max(0, Math.min(100, Math.round(Number(score) || 0)));
+}
+
+function normalizeVerdict(verdict, fallback = 'SAFE') {
+  const raw = typeof verdict === 'string' ? verdict.trim().toUpperCase() : '';
+  if (raw === 'CRITICAL' || raw === 'SUSPICIOUS' || raw === 'SAFE') {
+    return raw;
+  }
+  return fallback;
+}
+
+function categoryFromVerdict(verdict) {
+  const normalized = normalizeVerdict(verdict);
+  if (normalized === 'CRITICAL') return 'phishing';
+  if (normalized === 'SUSPICIOUS') return 'spam';
+  return 'safe';
 }
 
 function setStatus(text) {
+  if (!statusTextEl) return;
   statusTextEl.innerText = text;
 }
 
 function setCategory(category) {
+  if (!threatCategoryEl) return;
   const c = (category || 'safe').toLowerCase();
   threatCategoryEl.innerText = c.toUpperCase();
   threatCategoryEl.classList.remove('pill-safe', 'pill-spam', 'pill-phishing');
@@ -36,27 +79,30 @@ function setCategory(category) {
 }
 
 function setSummary(text) {
+  if (!summaryTextEl) return;
   summaryTextEl.innerText = text || '';
 }
 
 function setMlStatus(text) {
+  if (!mlStatusEl) return;
   mlStatusEl.innerText = text;
 }
 
 function renderEvidence(items) {
-  evidenceListEl.innerHTML = ''; // Clear first
+  if (!evidenceListEl) return;
+  evidenceListEl.innerHTML = '';
   if (!Array.isArray(items) || items.length === 0) {
     return;
   }
 
-  items.forEach(i => {
+  items.forEach((i) => {
     const li = document.createElement('li');
     const points = typeof i?.points === 'number'
       ? `(${i.points > 0 ? '+' : ''}${i.points}) `
       : '';
     const detail = i?.detail ? i.detail : String(i);
     const check = i?.check ? `[${i.check}] ` : '';
-    li.textContent = `${check}${points}${detail}`;  // SAFE - no XSS
+    li.textContent = `${check}${points}${detail}`;
     evidenceListEl.appendChild(li);
   });
 }
@@ -67,8 +113,7 @@ function friendlyReasonsFromEvidence(items, category) {
 
   function add(msg) {
     const m = (msg || '').trim();
-    if (!m) return;
-    if (seen.has(m)) return;
+    if (!m || seen.has(m)) return;
     seen.add(m);
     reasons.push(m);
   }
@@ -82,9 +127,9 @@ function friendlyReasonsFromEvidence(items, category) {
 
     if (check === 'brand_mismatch') add('A link goes to a different website than it claims (common phishing trick).');
     if (check === 'shortener') add('A shortened link was used (can hide the real destination).');
-    if (check === 'homograph' || check === 'punycode') add('A link domain looks suspicious (possible look‑alike domain).');
+    if (check === 'homograph' || check === 'punycode') add('A link domain looks suspicious (possible look-alike domain).');
     if (check === 'ip_url') add('A link uses a raw IP address instead of a normal website name.');
-    if (check === 'sender_spoof') add('The sender name looks like a known brand, but the email domain doesn’t match.');
+    if (check === 'sender_spoof') add('The sender name looks like a known brand, but the email domain does not match.');
     if (check === 'tld') add('A link uses an uncommon or risky domain ending (TLD).');
     if (check === 'fp_mitigation') add('Links look related to the sender organization (reduced false positives).');
 
@@ -113,19 +158,22 @@ function friendlyReasonsFromEvidence(items, category) {
 }
 
 function renderReasons(items, category) {
-  reasonsListEl.innerHTML = ''; // Clear first
+  if (!reasonsListEl) return;
+  reasonsListEl.innerHTML = '';
   const reasons = friendlyReasonsFromEvidence(items, category);
-  reasons.forEach(r => {
+  reasons.forEach((r) => {
     const li = document.createElement('li');
-    li.textContent = r;  // SAFE - no XSS
+    li.textContent = r;
     reasonsListEl.appendChild(li);
   });
 }
 
-function getReasonsFromUi() {
-  return Array.from(reasonsListEl.querySelectorAll('li'))
-    .map((li) => (li?.textContent || '').trim())
-    .filter(Boolean);
+function renderOperationalReason(message) {
+  if (!reasonsListEl) return;
+  reasonsListEl.innerHTML = '';
+  const li = document.createElement('li');
+  li.textContent = message;
+  reasonsListEl.appendChild(li);
 }
 
 function safeUuid() {
@@ -144,17 +192,70 @@ async function postLiveReport(payload) {
       body: JSON.stringify(payload),
     });
   } catch (e) {
-    console.warn('Live dashboard post failed', e);
+    // Dashboard sync is non-blocking for sidepanel UX.
   }
 }
 
-toggleDetailsBtn.addEventListener('click', () => {
-  const open = detailsContainerEl.style.display !== 'none';
-  detailsContainerEl.style.display = open ? 'none' : 'block';
-  toggleDetailsBtn.innerText = open ? 'Show details' : 'Hide details';
-});
+function clearActivePoll() {
+  if (activePollInterval) {
+    clearInterval(activePollInterval);
+    activePollInterval = null;
+  }
+}
+
+function setScanBusy(isBusy) {
+  if (!scanButton) return;
+  scanButton.disabled = isBusy;
+  scanButton.innerText = isBusy ? 'SCANNING...' : 'INITIALIZE SCAN';
+}
+
+function resetUiForNewScan() {
+  if (threatScoreEl) threatScoreEl.innerText = '...';
+  renderEvidence([]);
+  renderReasons([], 'safe');
+  setMlStatus('');
+  setCategory('safe');
+  setSummary('');
+  if (detailsContainerEl) detailsContainerEl.style.display = 'none';
+  if (toggleDetailsBtn) toggleDetailsBtn.innerText = 'Show details';
+}
+
+if (toggleDetailsBtn && detailsContainerEl) {
+  toggleDetailsBtn.addEventListener('click', () => {
+    const open = detailsContainerEl.style.display !== 'none';
+    detailsContainerEl.style.display = open ? 'none' : 'block';
+    toggleDetailsBtn.innerText = open ? 'Show details' : 'Hide details';
+  });
+}
 
 async function extractEmailFromGmailActiveTab() {
+  async function sendExtractMessage(tabId) {
+    return new Promise((resolve, reject) => {
+      chrome.tabs.sendMessage(tabId, { action: 'EXTRACT_EMAIL' }, (res) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        resolve(res);
+      });
+    });
+  }
+
+  async function injectContentScript(tabId) {
+    return new Promise((resolve, reject) => {
+      chrome.scripting.executeScript(
+        { target: { tabId }, files: ['content.js'] },
+        () => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          resolve();
+        },
+      );
+    });
+  }
+
   const tabs = await new Promise((resolve) =>
     chrome.tabs.query({ active: true, currentWindow: true }, resolve),
   );
@@ -163,15 +264,19 @@ async function extractEmailFromGmailActiveTab() {
     throw new Error('Please open a Gmail message first.');
   }
 
-  const response = await new Promise((resolve, reject) => {
-    chrome.tabs.sendMessage(tab.id, { action: 'EXTRACT_EMAIL' }, (res) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(res);
-    });
-  });
+  let response;
+  try {
+    response = await sendExtractMessage(tab.id);
+  } catch (err) {
+    const message = toErrorMessage(err);
+    const missingReceiver = /Receiving end does not exist/i.test(message);
+    if (!missingReceiver) {
+      throw err;
+    }
+    await injectContentScript(tab.id);
+    response = await sendExtractMessage(tab.id);
+  }
+
   if (!response?.body) {
     throw new Error('Could not read the email. Refresh Gmail and try again.');
   }
@@ -179,182 +284,217 @@ async function extractEmailFromGmailActiveTab() {
   return response;
 }
 
-async function fetchBertThreat(emailText) {
-  const res = await fetch(BACKEND_BERT_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: emailText }),
-  });
+if (!isUiReady) {
+  console.error('Sidepanel UI not ready: one or more required elements are missing.');
+} else {
+  scanButton.addEventListener('click', async () => {
+    clearActivePoll();
+    activeRunId += 1;
+    const runId = activeRunId;
+    resetUiForNewScan();
+    setScanBusy(true);
 
-  if (!res.ok) {
-    const msg = await res.text().catch(() => '');
-    throw new Error(`Backend error (${res.status}): ${msg}`);
-  }
+    try {
+      setStatus('Reading Gmail content...');
+      const email = await extractEmailFromGmailActiveTab();
+      if (runId !== activeRunId) return;
 
-  return res.json();
-}
+      setStatus('Tier 1: Local analysis...');
+      const heur = analyzeTier1(email);
+      const tier1Score = clampScore(heur?.t1_score ?? 0);
+      const tier1Evidence = Array.isArray(heur?.t1_evidence) ? heur.t1_evidence : [];
+      const tier1Category = typeof heur?.t1_category === 'string' ? heur.t1_category : 'safe';
 
-// NEW: Gateway integration for 3-tier analysis
-scanButton.addEventListener('click', async () => {
-  threatScoreEl.innerText = '...';
-  renderEvidence([]);
-  reasonsListEl.innerHTML = '';
-  setMlStatus('');
-  setCategory('safe');
-  setSummary('');
-  detailsContainerEl.style.display = 'none';
-  toggleDetailsBtn.innerText = 'Show details';
+      if (threatScoreEl) threatScoreEl.innerText = String(tier1Score);
+      renderEvidence(tier1Evidence);
+      renderReasons(tier1Evidence, tier1Category);
+      setCategory(tier1Category);
+      setSummary(typeof heur?.User_Friendly_Summary === 'string' ? heur.User_Friendly_Summary : 'Analyzing...');
 
-  const scanId = safeUuid();
+      setStatus('Tier 2: Analyzing metadata...');
+      const gatewayPayload = {
+        tier1_score: tier1Score,
+        tier1_evidence: tier1Evidence.map((e) => e.detail || String(e)),
+        sender: email.senderEmail || email.sender || 'unknown@unknown.com',
+        body: email.body || '',
+        links: (Array.isArray(email?.links) ? email.links : [])
+          .map((l) => (typeof l === 'string' ? l : l?.href))
+          .filter(Boolean),
+        subject: email.subject || 'No Subject',
+        timestamp: new Date().toISOString()
+      };
 
-  try {
-    setStatus('🔍 Reading Gmail content...');
-    const email = await extractEmailFromGmailActiveTab();
-
-    // Step 1: Run local Tier 1 heuristics (instant feedback)
-    setStatus('⚡ Tier 1: Local analysis...');
-    const heur = analyzeTier1(email);
-    threatScoreEl.innerText = String(heur.t1_score);
-    renderEvidence(heur.t1_evidence);
-    renderReasons(heur.t1_evidence, heur.t1_category);
-    setCategory(heur.t1_category);
-    setSummary(heur.User_Friendly_Summary || 'Analyzing...');
-
-    // Step 2: Send to gateway for Tier 2 + Tier 3
-    setStatus('🌐 Tier 2: Analyzing metadata...');
-
-    const gatewayPayload = {
-      tier1_score: heur.t1_score,
-      tier1_evidence: heur.t1_evidence.map(e => e.detail || String(e)),
-      sender: email.senderEmail || email.sender || 'unknown@unknown.com',
-      body: email.body || '',
-      links: (email.links || []).map(l => typeof l === 'string' ? l : l.href),
-      subject: email.subject || 'No Subject',
-      timestamp: new Date().toISOString()
-    };
-
-    const gatewayResponse = await fetch(GATEWAY_SCAN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(gatewayPayload)
-    });
-
-    if (!gatewayResponse.ok) {
-      throw new Error(`Gateway error: ${gatewayResponse.status}`);
-    }
-
-    const gatewayData = await gatewayResponse.json();
-    const gatewayScanId = gatewayData.scan_id;
-
-    // Step 3: Show partial score (T1 + T2)
-    const partialScore = Math.round(gatewayData.partial_score || heur.t1_score);
-    threatScoreEl.innerText = String(partialScore);
-
-    // Merge Tier 1 + Tier 2 evidence
-    const tier2Evidence = gatewayData.tier2?.evidence || [];
-    const combinedEvidence = [...heur.t1_evidence];
-    tier2Evidence.forEach(e => {
-      combinedEvidence.push({ detail: e, check: 'tier2' });
-    });
-
-    renderEvidence(combinedEvidence);
-    renderReasons(combinedEvidence, gatewayData.verdict.toLowerCase());
-    setCategory(gatewayData.verdict.toLowerCase());
-    setSummary(`Tier 2 complete. Domain: ${gatewayData.tier2?.domain_status || 'analyzed'}`);
-    setStatus('🤖 Tier 3: AI analyzing...');
-
-    // Step 4: Poll for Tier 3 completion
-    let pollCount = 0;
-    const maxPolls = 20; // 10 seconds max (500ms * 20)
-
-    const pollInterval = setInterval(async () => {
-      pollCount++;
-
+      let gatewayData;
       try {
-        const statusRes = await fetch(`${GATEWAY_STATUS_URL}/${gatewayScanId}`);
-        if (!statusRes.ok) {
-          clearInterval(pollInterval);
-          setStatus('⚠️ Status check failed');
+        const gatewayResponse = await fetch(GATEWAY_SCAN_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(gatewayPayload)
+        });
+        if (runId !== activeRunId) return;
+
+        if (!gatewayResponse.ok) {
+          setStatus(`Tier 2/3 unavailable (gateway ${gatewayResponse.status}). Using Tier 1 result.`);
+          setMlStatus('AI analysis unavailable.');
           return;
         }
 
-        const status = await statusRes.json();
+        gatewayData = await gatewayResponse.json();
+      } catch (gatewayErr) {
+        if (runId !== activeRunId) return;
+        setStatus('Tier 2/3 unavailable. Using Tier 1 result.');
+        setMlStatus('AI analysis unavailable.');
+        return;
+      }
 
-        if (status.complete || pollCount >= maxPolls) {
-          clearInterval(pollInterval);
+      const gatewayScanId = gatewayData?.scan_id;
+      if (!gatewayScanId) {
+        setStatus('Gateway returned incomplete response. Using Tier 1 result.');
+        setMlStatus('AI analysis unavailable.');
+        return;
+      }
 
-          // Get full result
-          const resultRes = await fetch(`${GATEWAY_RESULT_URL}/${gatewayScanId}`);
-          const fullResult = await resultRes.json();
+      const partialScore = clampScore(gatewayData.partial_score ?? tier1Score);
+      if (threatScoreEl) threatScoreEl.innerText = String(partialScore);
+      const tier2Verdict = normalizeVerdict(gatewayData?.verdict, 'SAFE');
+      const tier2Category = categoryFromVerdict(tier2Verdict);
 
-          // Update with final score
-          const finalScore = Math.round(fullResult.final_score || partialScore);
-          threatScoreEl.innerText = String(finalScore);
+      const tier2EvidenceRaw = gatewayData?.tier2?.evidence;
+      const tier2Evidence = Array.isArray(tier2EvidenceRaw)
+        ? tier2EvidenceRaw
+        : (tier2EvidenceRaw ? [String(tier2EvidenceRaw)] : []);
+      const combinedEvidence = [...tier1Evidence];
+      tier2Evidence.forEach((e) => {
+        combinedEvidence.push({ detail: e, check: 'tier2' });
+      });
 
-          // Merge all evidence
-          const allEvidence = [...combinedEvidence];
-          if (fullResult.tier3 && fullResult.tier3.flagged_phrases) {
-            fullResult.tier3.flagged_phrases.forEach(phrase => {
-              allEvidence.push({ detail: `AI: ${phrase}`, check: 'tier3' });
-            });
+      renderEvidence(combinedEvidence);
+      renderReasons(combinedEvidence, tier2Category);
+      setCategory(tier2Category);
+      setSummary(`Tier 2 complete. Domain: ${gatewayData?.tier2?.domain_status || 'analyzed'}`);
+      setStatus('Tier 3: AI analyzing...');
+
+      let pollCount = 0;
+      let pollErrorCount = 0;
+      let pollInFlight = false;
+
+      activePollInterval = setInterval(async () => {
+        if (pollInFlight || runId !== activeRunId) return;
+        pollInFlight = true;
+        pollCount++;
+
+        try {
+          const statusRes = await fetch(`${GATEWAY_STATUS_URL}/${gatewayScanId}`);
+          if (runId !== activeRunId) return;
+
+          if (!statusRes.ok) {
+            clearActivePoll();
+            setStatus('Status check failed.');
+            setMlStatus('AI analysis unavailable.');
+            return;
           }
 
-          renderEvidence(allEvidence);
-          renderReasons(allEvidence, fullResult.verdict.toLowerCase());
-          setCategory(fullResult.verdict.toLowerCase());
+          const status = await statusRes.json();
+          pollErrorCount = 0;
 
-          // Update summary based on final verdict
-          const verdictMessages = {
-            'CRITICAL': '🚨 HIGH RISK: Likely phishing. Do NOT click links. Verify via official channels.',
-            'SUSPICIOUS': '⚠️ MEDIUM RISK: Suspicious patterns detected. Exercise caution.',
-            'SAFE': '✅ LOW RISK: No significant threats detected.'
-          };
-          setSummary(verdictMessages[fullResult.verdict] || 'Analysis complete.');
+          if (!status?.complete && pollCount >= MAX_POLLS) {
+            clearActivePoll();
+            setStatus('AI analysis timeout (using Tier 1+2 results).');
+            setMlStatus('AI analysis unavailable.');
+            return;
+          }
 
-          setStatus(`✅ Complete! Verdict: ${fullResult.verdict} (Score: ${finalScore}/100)`);
-          setMlStatus(`AI Analysis: ${fullResult.tier3?.category || 'Complete'}`);
+          if (status?.complete) {
+            clearActivePoll();
 
-          // Send report to dashboard (for real-time updates)
-          try {
+            const resultRes = await fetch(`${GATEWAY_RESULT_URL}/${gatewayScanId}`);
+            if (runId !== activeRunId) return;
+
+            if (!resultRes.ok) {
+              setStatus(`Final AI result unavailable (${resultRes.status}). Using Tier 1+2.`);
+              setMlStatus('AI analysis unavailable.');
+              return;
+            }
+
+            const fullResult = await resultRes.json();
+            const finalScore = clampScore(fullResult?.final_score ?? partialScore);
+            if (threatScoreEl) threatScoreEl.innerText = String(finalScore);
+
+            const finalVerdict = normalizeVerdict(fullResult?.verdict, tier2Verdict);
+            const finalCategory = categoryFromVerdict(finalVerdict);
+
+            const allEvidence = [...combinedEvidence];
+            if (Array.isArray(fullResult?.tier3?.flagged_phrases)) {
+              fullResult.tier3.flagged_phrases.forEach((phrase) => {
+                allEvidence.push({ detail: `AI: ${phrase}`, check: 'tier3' });
+              });
+            }
+
+            renderEvidence(allEvidence);
+            renderReasons(allEvidence, finalCategory);
+            setCategory(finalCategory);
+
+            const verdictMessages = {
+              'CRITICAL': 'HIGH RISK: Likely phishing. Do NOT click links. Verify via official channels.',
+              'SUSPICIOUS': 'MEDIUM RISK: Suspicious patterns detected. Exercise caution.',
+              'SAFE': 'LOW RISK: No significant threats detected.'
+            };
+            setSummary(verdictMessages[finalVerdict] || 'Analysis complete.');
+
+            setStatus(`Complete. Verdict: ${finalVerdict} (Score: ${finalScore}/100)`);
+            setMlStatus(`AI Analysis: ${fullResult?.tier3?.category || 'Complete'}`);
+
             const reportPayload = {
-              scan_id: gatewayScanId,
+              scan_id: safeUuid(),
+              gateway_scan_id: gatewayScanId,
               timestamp: new Date().toISOString(),
               sender: email.senderEmail || email.sender || 'unknown@unknown.com',
               subject: email.subject || 'No Subject',
               final_score: finalScore,
-              verdict: fullResult.verdict,
-              evidence: allEvidence.map(e => e.detail || String(e)),
-              threat_analysis: fullResult.tier3 || {},
+              verdict: finalVerdict,
+              evidence: allEvidence.map((e) => e.detail || String(e)),
+              threat_analysis: fullResult?.tier3 || {},
               tier_details: {
-                tier1: { score: heur.t1_score, status: heur.t1_category },
-                tier2: fullResult.tier2 || {},
-                tier3: fullResult.tier3 || {}
+                tier1: { score: tier1Score, status: tier1Category },
+                tier2: fullResult?.tier2 || {},
+                tier3: fullResult?.tier3 || {}
               }
             };
 
-            await fetch('http://127.0.0.1:8000/tier1/report', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(reportPayload)
-            }).catch(err => console.warn('Dashboard report failed:', err));
-          } catch (reportErr) {
-            console.warn('Failed to send dashboard report:', reportErr);
+            await postLiveReport(reportPayload);
           }
+        } catch (pollErr) {
+          pollErrorCount++;
+          if (pollErrorCount >= MAX_POLL_ERRORS || pollCount >= MAX_POLLS) {
+            clearActivePoll();
+            setStatus('AI analysis interrupted (using Tier 1+2 results).');
+            setMlStatus('AI analysis unavailable.');
+          }
+        } finally {
+          pollInFlight = false;
         }
-      } catch (pollErr) {
-        console.error('Poll error:', pollErr);
-        if (pollCount >= maxPolls) {
-          clearInterval(pollInterval);
-          setStatus('⚠️ AI analysis timeout (using Tier 1+2 results)');
-        }
+      }, POLL_INTERVAL_MS);
+    } catch (err) {
+      if (runId !== activeRunId) return;
+      const message = toErrorMessage(err);
+      const receivingEndMissing = /Receiving end does not exist/i.test(message);
+      setMlStatus('');
+      setStatus(`Scan failed: ${message}`);
+      setSummary(
+        receivingEndMissing
+          ? 'Gmail page connection failed. Refresh the Gmail tab and run scan again.'
+          : 'Scan did not complete.',
+      );
+      renderOperationalReason(
+        receivingEndMissing
+          ? 'Refresh Gmail (Ctrl+R) and open the email before scanning again.'
+          : 'Scan could not complete. Check Gmail tab and backend availability, then retry.',
+      );
+      if (threatScoreEl) threatScoreEl.innerText = '0';
+    } finally {
+      if (runId === activeRunId) {
+        setScanBusy(false);
       }
-    }, 500); // Poll every 500ms
-
-  } catch (err) {
-    console.error(err);
-    setMlStatus('');
-    setStatus(`❌ ${err?.message || 'Scan failed.'}`);
-    threatScoreEl.innerText = '0';
-  }
-});
-
+    }
+  });
+}

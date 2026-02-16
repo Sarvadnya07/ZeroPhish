@@ -25,7 +25,7 @@ export function StatusTicker({ phase }: { phase: ScanPhase }) {
         : "Analysis complete."
 
   return (
-    <div className="flex items-center gap-2 rounded-md border border-[hsl(187,100%,47%)]/10 bg-[hsl(0,0%,5%)] px-3 py-2">
+    <div className="flex items-center gap-2 rounded-md border border-[hsl(187,100%,47%)]/10 bg-[hsl(0,0%,5%)] px-3 py-2" suppressHydrationWarning>
       <Terminal className="h-3.5 w-3.5 shrink-0 text-[#00F0FF]" />
       <div className="relative overflow-hidden flex-1 h-4">
         <AnimatePresence mode="wait">

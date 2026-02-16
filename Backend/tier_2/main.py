@@ -15,6 +15,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+# Configure logging FIRST before using logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Security imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from security.middleware import (
@@ -41,10 +45,6 @@ except ImportError:
 
 # Load environment variables
 load_dotenv()
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # Redis imports
 try:

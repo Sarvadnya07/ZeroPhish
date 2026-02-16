@@ -92,6 +92,54 @@ class Tier1Report(BaseModel):
     tier1: Tier1Result
 
 
+def _category_from_verdict(verdict: str | None) -> str:
+    v = (verdict or "").strip().upper()
+    if v == "CRITICAL":
+        return "phishing"
+    if v == "SUSPICIOUS":
+        return "spam"
+    return "safe"
+
+
+def _coerce_extension_report(report: dict[str, Any]) -> Tier1Report:
+    verdict = str(report.get("verdict", "SAFE"))
+    category = _category_from_verdict(verdict)
+    evidence_raw = report.get("evidence", [])
+    evidence_list = evidence_raw if isinstance(evidence_raw, list) else []
+
+    tier_details = report.get("tier_details", {}) if isinstance(report.get("tier_details"), dict) else {}
+    tier1_details = tier_details.get("tier1", {}) if isinstance(tier_details.get("tier1"), dict) else {}
+    tier2_details = tier_details.get("tier2", {}) if isinstance(tier_details.get("tier2"), dict) else {}
+    threat_analysis = report.get("threat_analysis", {}) if isinstance(report.get("threat_analysis"), dict) else {}
+
+    return Tier1Report(
+        scan_id=str(report.get("scan_id") or f"ext_{time.time()}"),
+        created_at=str(report.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%S")),
+        source="chrome_sidepanel",
+        email=EmailMeta(
+            subject=str(report.get("subject") or "No Subject"),
+            senderEmail=str(report.get("sender") or "unknown@unknown.com"),
+            senderName=None,
+        ),
+        links=[],
+        tier1=Tier1Result(
+            score=int(report.get("final_score") or 0),
+            category=category,
+            summary=f"Scan complete: {verdict}",
+            evidence=[HeuristicItem(check="extension", detail=str(e)) for e in evidence_list],
+            reasons=[str(e) for e in evidence_list],
+            heuristics_score=tier1_details.get("score"),
+            ml_enabled=True,
+            ml_threat_level=tier2_details.get("score"),
+            ml_category=category,
+            ml_confidence=None,
+            ml_label=verdict,
+            ml_model="ZeroPhish 3-Tier",
+            ml_reasoning=str(threat_analysis.get("reasoning") or ""),
+        ),
+    )
+
+
 _pipeline: Any | None = None
 _pipeline_model_id: str | None = None
 
@@ -189,21 +237,22 @@ def tier1_latest() -> Tier1Report | None:
 
 
 @app.post("/tier1/report", response_model=Tier1Report)
-async def tier1_report(report: Tier1Report) -> Tier1Report:
+async def tier1_report(report: Tier1Report | dict[str, Any]) -> Tier1Report:
     global _latest_tier1_report
-    _latest_tier1_report = report
+    normalized = report if isinstance(report, Tier1Report) else _coerce_extension_report(report)
+    _latest_tier1_report = normalized
 
     dead: list[asyncio.Queue[Tier1Report]] = []
     for q in list(_tier1_stream_queues):
         try:
-            q.put_nowait(report)
+            q.put_nowait(normalized)
         except Exception:
             dead.append(q)
 
     for q in dead:
         _tier1_stream_queues.discard(q)
 
-    return report
+    return normalized
 
 
 @app.get("/tier1/stream")

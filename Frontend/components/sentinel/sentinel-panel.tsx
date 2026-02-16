@@ -114,7 +114,7 @@ export function SentinelPanel() {
   }, [demo, runScan])
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col bg-[#050505] px-4 lg:px-8">
+    <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col bg-[#050505] px-4 lg:px-8" suppressHydrationWarning>
       {/* Header */}
       <header className="sticky top-0 z-10 flex items-center justify-between border-b border-[hsl(0,0%,100%)]/[0.06] bg-[#050505]/95 backdrop-blur-md py-4 -mx-4 px-4 lg:-mx-8 lg:px-8">
         <div className="flex items-center gap-3">

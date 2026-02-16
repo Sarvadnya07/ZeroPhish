@@ -1,0 +1,11 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/Backend/.venv/Scripts/python.exe",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/Backend",
+    "${workspaceFolder}/Backend/tier_2",
+    "${workspaceFolder}/Backend/tier_3",
+    "${workspaceFolder}/Backend/models",
+    "${workspaceFolder}/Backend/security"
+  ],
+  "python.analysis.typeCheckingMode": "basic"
+}
