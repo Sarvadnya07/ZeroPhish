@@ -11,6 +11,7 @@ export interface Tier1HeuristicItem {
 
 export interface Tier1Report {
   version: number
+  event_id?: string | null
   scan_id: string
   created_at: string
   source: string
@@ -40,6 +41,12 @@ export interface Tier1Report {
 function threatLevelFromCategory(category: Tier1Category): ThreatLevel {
   if (category === "phishing") return "threat"
   if (category === "spam") return "warning"
+  return "safe"
+}
+
+function categoryFromScore(score: number): Tier1Category {
+  if (score >= 70) return "phishing"
+  if (score >= 30) return "spam"
   return "safe"
 }
 
@@ -103,7 +110,8 @@ function urlsFromLinks(links: { href: string; text?: string | null }[], category
 
 export function tier1ReportToScanResult(report: Tier1Report): ScanResult {
   const score = Math.max(0, Math.min(100, Math.round(report?.tier1?.score ?? 0)))
-  const category = report?.tier1?.category ?? "safe"
+  // Use score-derived category to keep gauge value and severity label consistent.
+  const category = categoryFromScore(score)
   const threatLevel = threatLevelFromCategory(category)
 
   const evidence = report?.tier1?.evidence ?? []

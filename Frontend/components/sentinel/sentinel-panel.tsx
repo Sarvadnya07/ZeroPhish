@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect } from "react"
 import { motion } from "framer-motion"
 import { Shield, Radio } from "lucide-react"
 import { StatusTicker } from "./status-ticker"
@@ -9,50 +9,33 @@ import { AnalysisPipeline } from "./analysis-pipeline"
 import { ForensicsPanel } from "./forensics-panel"
 import { TacticalActions } from "./tactical-actions"
 import { TechLogs } from "./tech-logs"
-import {
-  SAFE_STATE,
-  THREAT_STATE,
-  SCANNING_STATE,
-  LIVE_IDLE_STATE,
-} from "@/lib/sentinel-data"
+import { LIVE_IDLE_STATE } from "@/lib/sentinel-data"
 import type { ScanResult } from "@/lib/sentinel-data"
 import { tier1ReportToScanResult, type Tier1Report } from "@/lib/live-tier1"
 
-type Demo = "safe" | "threat" | "live"
-
 export function SentinelPanel() {
-  const [demo, setDemo] = useState<Demo>("live")
   const [scanData, setScanData] = useState<ScanResult>(LIVE_IDLE_STATE)
   const [logsOpen, setLogsOpen] = useState(false)
   const [liveStatus, setLiveStatus] = useState<"online" | "offline" | "connecting">("connecting")
 
-  const runScan = useCallback((target: Demo) => {
-    if (target === "live") return () => {}
-    setScanData(SCANNING_STATE)
-    setLogsOpen(false)
-
-    const result = target === "safe" ? SAFE_STATE : THREAT_STATE
-
-    // Simulate scanning phase
-    const timer = setTimeout(() => {
-      setScanData(result)
-    }, 3500)
-
-    return () => clearTimeout(timer)
-  }, [])
-
   useEffect(() => {
-    if (demo !== "live") {
-      const cleanup = runScan(demo)
-      return cleanup
-    }
-
     setScanData(LIVE_IDLE_STATE)
     setLogsOpen(false)
 
     const baseUrl = process.env.NEXT_PUBLIC_ZEROPHISH_BACKEND_URL || "http://127.0.0.1:8000"
     let closed = false
     let es: EventSource | null = null
+    let latestPollTimer: ReturnType<typeof setInterval> | null = null
+    let lastSeenEventKey = ""
+
+    function eventKey(report: Tier1Report): string {
+      return String(report?.event_id || `${report?.scan_id || "unknown"}|${report?.created_at || "unknown"}`)
+    }
+
+    function applyLiveReport(data: Tier1Report) {
+      setScanData(tier1ReportToScanResult(data))
+      lastSeenEventKey = eventKey(data)
+    }
 
     async function bootstrapLatest() {
       try {
@@ -60,7 +43,23 @@ export function SentinelPanel() {
         if (!res.ok) return
         const data = (await res.json()) as Tier1Report | null
         if (data && !closed) {
-          setScanData(tier1ReportToScanResult(data))
+          applyLiveReport(data)
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    async function pollLatest() {
+      try {
+        const res = await fetch(`${baseUrl}/tier1/latest`, { cache: "no-store" })
+        if (!res.ok) return
+        const data = (await res.json()) as Tier1Report | null
+        if (!data || closed) return
+        const key = eventKey(data)
+        if (key !== lastSeenEventKey) {
+          applyLiveReport(data)
+          setLiveStatus("online")
         }
       } catch {
         // ignore
@@ -74,7 +73,7 @@ export function SentinelPanel() {
       es.onmessage = (ev) => {
         try {
           const data = JSON.parse(ev.data) as Tier1Report
-          setScanData(tier1ReportToScanResult(data))
+          applyLiveReport(data)
           setLiveStatus("online")
         } catch {
           // ignore
@@ -102,16 +101,18 @@ export function SentinelPanel() {
 
     bootstrapLatest()
     connect()
+    latestPollTimer = setInterval(pollLatest, 2000)
 
     return () => {
       closed = true
+      if (latestPollTimer) clearInterval(latestPollTimer)
       try {
         es?.close()
       } catch {
         // ignore
       }
     }
-  }, [demo, runScan])
+  }, [])
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col bg-[#050505] px-4 lg:px-8" suppressHydrationWarning>
@@ -132,44 +133,15 @@ export function SentinelPanel() {
         </div>
 
         <div className="flex items-center gap-4">
-          {/* Demo Switcher */}
           <div className="flex items-center gap-2">
             <Radio className="h-4 w-4 text-[hsl(0,0%,40%)]" />
             <span className="font-mono text-xs text-[hsl(0,0%,40%)] uppercase tracking-widest hidden sm:inline">
-              Mode
+              Live Stream
             </span>
             <div className="flex rounded-md border border-[hsl(0,0%,100%)]/[0.06] bg-[hsl(0,0%,5%)] overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setDemo("live")}
-                className={`px-4 py-2 font-mono text-xs transition-colors ${
-                  demo === "live"
-                    ? "bg-[#00F0FF]/15 text-[#00F0FF]"
-                    : "text-[hsl(0,0%,45%)] hover:text-[hsl(0,0%,65%)]"
-                }`}
-              >
+              <div className="px-4 py-2 font-mono text-xs bg-[#00F0FF]/15 text-[#00F0FF]">
                 LIVE
-              </button>
-              <button
-                type="button"
-                onClick={() => setDemo("safe")}
-                className={`px-4 py-2 font-mono text-xs transition-colors ${demo === "safe"
-                    ? "bg-[#00F0FF]/15 text-[#00F0FF]"
-                    : "text-[hsl(0,0%,45%)] hover:text-[hsl(0,0%,65%)]"
-                  }`}
-              >
-                SAFE
-              </button>
-              <button
-                type="button"
-                onClick={() => setDemo("threat")}
-                className={`px-4 py-2 font-mono text-xs transition-colors ${demo === "threat"
-                    ? "bg-[#FF003C]/15 text-[#FF003C]"
-                    : "text-[hsl(0,0%,45%)] hover:text-[hsl(0,0%,65%)]"
-                  }`}
-              >
-                THREAT
-              </button>
+              </div>
             </div>
           </div>
 
@@ -179,7 +151,7 @@ export function SentinelPanel() {
               <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#00F0FF]" />
             </span>
             <span className="font-mono text-xs text-[#00F0FF]">
-              {demo === "live" ? liveStatus.toUpperCase() : "ACTIVE"}
+              {liveStatus.toUpperCase()}
             </span>
           </div>
         </div>

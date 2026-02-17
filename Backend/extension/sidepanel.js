@@ -359,7 +359,8 @@ if (!isUiReady) {
         subject,
         links,
         final_score: tier1Score,
-        verdict: categoryToVerdict(tier1Category) || scoreToVerdict(tier1Score),
+        // Keep verdict aligned with numeric score so dashboard severity matches the gauge value.
+        verdict: scoreToVerdict(tier1Score),
         evidence: normalizeEvidenceForReport(tier1Evidence),
         reasons: friendlyReasonsFromEvidence(tier1Evidence, tier1Category),
         threat_analysis: {
@@ -522,6 +523,27 @@ if (!isUiReady) {
             clearActivePoll();
             setStatus('Status check failed.');
             setMlStatus('AI analysis unavailable.');
+            await postLiveReport({
+              event_id: safeUuid(),
+              scan_id: liveScanId,
+              gateway_scan_id: gatewayScanId,
+              timestamp: new Date().toISOString(),
+              sender,
+              subject,
+              links,
+              final_score: partialScore,
+              verdict: tier2Verdict,
+              evidence: normalizeEvidenceForReport(combinedEvidence),
+              reasons: [
+                ...friendlyReasonsFromEvidence(combinedEvidence, tier2Category),
+                'Tier 3 status check failed.',
+              ],
+              threat_analysis: { category: tier2Category, reasoning: 'Tier 3 status check failed', stage: 'tier3_fallback' },
+              tier_details: {
+                tier1: { score: tier1Score, status: tier1Category },
+                tier2: gatewayData?.tier2 || {},
+              },
+            });
             return;
           }
 
@@ -532,6 +554,27 @@ if (!isUiReady) {
             clearActivePoll();
             setStatus('AI analysis timeout (using Tier 1+2 results).');
             setMlStatus('AI analysis unavailable.');
+            await postLiveReport({
+              event_id: safeUuid(),
+              scan_id: liveScanId,
+              gateway_scan_id: gatewayScanId,
+              timestamp: new Date().toISOString(),
+              sender,
+              subject,
+              links,
+              final_score: partialScore,
+              verdict: tier2Verdict,
+              evidence: normalizeEvidenceForReport(combinedEvidence),
+              reasons: [
+                ...friendlyReasonsFromEvidence(combinedEvidence, tier2Category),
+                'Tier 3 timeout. Using Tier 1+2 result.',
+              ],
+              threat_analysis: { category: tier2Category, reasoning: 'Tier 3 timeout; using Tier 1+2', stage: 'tier3_timeout' },
+              tier_details: {
+                tier1: { score: tier1Score, status: tier1Category },
+                tier2: gatewayData?.tier2 || {},
+              },
+            });
             return;
           }
 
@@ -544,6 +587,27 @@ if (!isUiReady) {
             if (!resultRes.ok) {
               setStatus(`Final AI result unavailable (${resultRes.status}). Using Tier 1+2.`);
               setMlStatus('AI analysis unavailable.');
+              await postLiveReport({
+                event_id: safeUuid(),
+                scan_id: liveScanId,
+                gateway_scan_id: gatewayScanId,
+                timestamp: new Date().toISOString(),
+                sender,
+                subject,
+                links,
+                final_score: partialScore,
+                verdict: tier2Verdict,
+                evidence: normalizeEvidenceForReport(combinedEvidence),
+                reasons: [
+                  ...friendlyReasonsFromEvidence(combinedEvidence, tier2Category),
+                  `Final AI result unavailable (${resultRes.status}). Using Tier 1+2.`,
+                ],
+                threat_analysis: { category: tier2Category, reasoning: 'Final AI result unavailable', stage: 'tier3_fallback' },
+                tier_details: {
+                  tier1: { score: tier1Score, status: tier1Category },
+                  tier2: gatewayData?.tier2 || {},
+                },
+              });
               return;
             }
 
@@ -606,6 +670,27 @@ if (!isUiReady) {
             clearActivePoll();
             setStatus('AI analysis interrupted (using Tier 1+2 results).');
             setMlStatus('AI analysis unavailable.');
+            await postLiveReport({
+              event_id: safeUuid(),
+              scan_id: liveScanId,
+              gateway_scan_id: gatewayScanId,
+              timestamp: new Date().toISOString(),
+              sender,
+              subject,
+              links,
+              final_score: partialScore,
+              verdict: tier2Verdict,
+              evidence: normalizeEvidenceForReport(combinedEvidence),
+              reasons: [
+                ...friendlyReasonsFromEvidence(combinedEvidence, tier2Category),
+                'AI analysis interrupted; using Tier 1+2.',
+              ],
+              threat_analysis: { category: tier2Category, reasoning: 'Tier 3 interrupted; using Tier 1+2', stage: 'tier3_interrupted' },
+              tier_details: {
+                tier1: { score: tier1Score, status: tier1Category },
+                tier2: gatewayData?.tier2 || {},
+              },
+            });
           }
         } finally {
           pollInFlight = false;

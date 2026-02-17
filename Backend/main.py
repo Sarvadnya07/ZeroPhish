@@ -107,9 +107,18 @@ def _category_from_verdict(verdict: str | None) -> str:
     return "safe"
 
 
+def _verdict_from_score(score: int) -> str:
+    if score >= 70:
+        return "CRITICAL"
+    if score >= 30:
+        return "SUSPICIOUS"
+    return "SAFE"
+
+
 def _coerce_extension_report(report: dict[str, Any]) -> Tier1Report:
-    verdict = str(report.get("verdict", "SAFE"))
-    category = _category_from_verdict(verdict)
+    verdict = str(report.get("verdict", "SAFE")).strip().upper()
+    if verdict not in {"SAFE", "SUSPICIOUS", "CRITICAL"}:
+        verdict = "SAFE"
     evidence_raw = report.get("evidence", [])
     evidence_list: list[HeuristicItem] = []
     if isinstance(evidence_raw, list):
@@ -166,6 +175,10 @@ def _coerce_extension_report(report: dict[str, Any]) -> Tier1Report:
     except Exception:
         score = 0
     score = max(0, min(100, score))
+    score_verdict = _verdict_from_score(score)
+    # Keep category/verdict consistent with score for live UI severity.
+    verdict = score_verdict
+    category = _category_from_verdict(verdict)
 
     summary = str(
         (threat_analysis.get("reasoning") if isinstance(threat_analysis, dict) else None)

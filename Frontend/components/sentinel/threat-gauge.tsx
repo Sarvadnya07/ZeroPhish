@@ -20,7 +20,7 @@ function getLabel(level: ThreatLevel) {
     case "safe":
       return "SECURE"
     case "warning":
-      return "CAUTION"
+      return "SUSPICIOUS"
     case "threat":
       return "THREAT DETECTED"
   }
