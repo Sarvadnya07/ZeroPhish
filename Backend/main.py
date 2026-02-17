@@ -22,13 +22,18 @@ from tier_3.main import T3Result, analyze_email_intent
 app = FastAPI(title="ZeroPhish Tier 1 (Local)", version="0.1.0")
 
 # CORS Configuration - Environment-based for security
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,chrome-extension://*").split(
-    ","
-)
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,chrome-extension://*").split(
+        ","
+    )
+    if origin.strip() and origin.strip() != "chrome-extension://*"
+]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX", r"chrome-extension://.*"),
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
@@ -84,6 +89,7 @@ class EmailMeta(BaseModel):
 
 class Tier1Report(BaseModel):
     version: int = 1
+    event_id: str | None = None
     scan_id: str
     created_at: str
     source: str = "chrome_sidepanel"
@@ -105,32 +111,87 @@ def _coerce_extension_report(report: dict[str, Any]) -> Tier1Report:
     verdict = str(report.get("verdict", "SAFE"))
     category = _category_from_verdict(verdict)
     evidence_raw = report.get("evidence", [])
-    evidence_list = evidence_raw if isinstance(evidence_raw, list) else []
+    evidence_list: list[HeuristicItem] = []
+    if isinstance(evidence_raw, list):
+        for e in evidence_raw:
+            if isinstance(e, dict):
+                points = e.get("points")
+                evidence_list.append(
+                    HeuristicItem(
+                        check=str(e.get("check") or "extension"),
+                        detail=str(e.get("detail") or e.get("check") or "signal"),
+                        kind=(str(e.get("kind")) if e.get("kind") is not None else None),
+                        points=(float(points) if isinstance(points, (int, float)) else None),
+                    )
+                )
+            else:
+                evidence_list.append(HeuristicItem(check="extension", detail=str(e)))
 
     tier_details = report.get("tier_details", {}) if isinstance(report.get("tier_details"), dict) else {}
     tier1_details = tier_details.get("tier1", {}) if isinstance(tier_details.get("tier1"), dict) else {}
     tier2_details = tier_details.get("tier2", {}) if isinstance(tier_details.get("tier2"), dict) else {}
+    nested_threat = (
+        tier_details.get("threat_analysis", {})
+        if isinstance(tier_details.get("threat_analysis"), dict)
+        else {}
+    )
     threat_analysis = report.get("threat_analysis", {}) if isinstance(report.get("threat_analysis"), dict) else {}
+    heuristics_score = tier1_details.get("score")
+    ml_threat_level = tier2_details.get("score")
+    if ml_threat_level is None:
+        ml_threat_level = nested_threat.get("score")
+
+    reasons_raw = report.get("reasons")
+    reasons = [str(r) for r in reasons_raw] if isinstance(reasons_raw, list) else []
+    if not reasons:
+        reasons = [e.detail for e in evidence_list if e.detail]
+
+    links_raw = report.get("links", [])
+    links: list[LinkItem] = []
+    if isinstance(links_raw, list):
+        for l in links_raw:
+            if isinstance(l, dict):
+                href = str(l.get("href") or "").strip()
+                text = l.get("text")
+                if href:
+                    links.append(LinkItem(href=href, text=str(text) if isinstance(text, str) else None))
+            else:
+                href = str(l).strip()
+                if href:
+                    links.append(LinkItem(href=href, text=None))
+
+    score_raw = report.get("final_score", 0)
+    try:
+        score = int(round(float(score_raw)))
+    except Exception:
+        score = 0
+    score = max(0, min(100, score))
+
+    summary = str(
+        (threat_analysis.get("reasoning") if isinstance(threat_analysis, dict) else None)
+        or f"Scan update: {verdict}"
+    )
 
     return Tier1Report(
+        event_id=(str(report.get("event_id")) if report.get("event_id") is not None else None),
         scan_id=str(report.get("scan_id") or f"ext_{time.time()}"),
         created_at=str(report.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%S")),
-        source="chrome_sidepanel",
+        source=str(report.get("source") or "extension"),
         email=EmailMeta(
             subject=str(report.get("subject") or "No Subject"),
             senderEmail=str(report.get("sender") or "unknown@unknown.com"),
             senderName=None,
         ),
-        links=[],
+        links=links,
         tier1=Tier1Result(
-            score=int(report.get("final_score") or 0),
+            score=score,
             category=category,
-            summary=f"Scan complete: {verdict}",
-            evidence=[HeuristicItem(check="extension", detail=str(e)) for e in evidence_list],
-            reasons=[str(e) for e in evidence_list],
-            heuristics_score=tier1_details.get("score"),
+            summary=summary,
+            evidence=evidence_list,
+            reasons=reasons,
+            heuristics_score=heuristics_score,
             ml_enabled=True,
-            ml_threat_level=tier2_details.get("score"),
+            ml_threat_level=ml_threat_level,
             ml_category=category,
             ml_confidence=None,
             ml_label=verdict,

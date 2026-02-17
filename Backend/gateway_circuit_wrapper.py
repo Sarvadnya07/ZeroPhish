@@ -4,11 +4,11 @@ Wraps execute_tier3 with circuit breaker protection
 """
 
 import asyncio
-from typing import Callable
-from tier_3.main import analyze_email_intent
-from models.gateway_models import Tier3Result
 import os
 import time
+
+from models.gateway_models import Tier3Result
+from tier_3.main import analyze_email_intent
 
 # This will be imported by gateway.py
 async def execute_tier3_with_circuit_breaker(
@@ -59,7 +59,7 @@ async def execute_tier3_with_circuit_breaker(
                 status="unavailable",
                 execution_time_ms=(time.time() - start_time) * 1000,
             )
-        except Exception as e:
+        except Exception:
             # Other errors are failures
             raise
 

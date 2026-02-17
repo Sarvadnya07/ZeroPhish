@@ -184,6 +184,42 @@ function safeUuid() {
   }
 }
 
+function scoreToVerdict(score) {
+  const s = clampScore(score);
+  if (s >= 70) return 'CRITICAL';
+  if (s >= 30) return 'SUSPICIOUS';
+  return 'SAFE';
+}
+
+function categoryToVerdict(category) {
+  const c = String(category || '').toLowerCase();
+  if (c === 'phishing') return 'CRITICAL';
+  if (c === 'spam') return 'SUSPICIOUS';
+  return 'SAFE';
+}
+
+function normalizeEvidenceForReport(items) {
+  if (!Array.isArray(items)) return [];
+  return items.map((item) => {
+    if (item && typeof item === 'object') {
+      return {
+        check: item.check || 'extension',
+        kind: item.kind || null,
+        points: typeof item.points === 'number' ? item.points : null,
+        detail: item.detail || String(item.check || 'signal'),
+      };
+    }
+    return { check: 'extension', kind: null, points: null, detail: String(item) };
+  });
+}
+
+function normalizeLinksForReport(email) {
+  const links = Array.isArray(email?.links) ? email.links : [];
+  return links
+    .map((l) => (typeof l === 'string' ? { href: l, text: null } : { href: l?.href || '', text: l?.text || null }))
+    .filter((l) => typeof l.href === 'string' && l.href.length > 0);
+}
+
 async function postLiveReport(payload) {
   try {
     await fetch(BACKEND_REPORT_URL, {
@@ -291,6 +327,7 @@ if (!isUiReady) {
     clearActivePoll();
     activeRunId += 1;
     const runId = activeRunId;
+    const liveScanId = safeUuid();
     resetUiForNewScan();
     setScanBusy(true);
 
@@ -304,6 +341,9 @@ if (!isUiReady) {
       const tier1Score = clampScore(heur?.t1_score ?? 0);
       const tier1Evidence = Array.isArray(heur?.t1_evidence) ? heur.t1_evidence : [];
       const tier1Category = typeof heur?.t1_category === 'string' ? heur.t1_category : 'safe';
+      const sender = email.senderEmail || email.sender || 'unknown@unknown.com';
+      const subject = email.subject || 'No Subject';
+      const links = normalizeLinksForReport(email);
 
       if (threatScoreEl) threatScoreEl.innerText = String(tier1Score);
       renderEvidence(tier1Evidence);
@@ -311,16 +351,37 @@ if (!isUiReady) {
       setCategory(tier1Category);
       setSummary(typeof heur?.User_Friendly_Summary === 'string' ? heur.User_Friendly_Summary : 'Analyzing...');
 
+      await postLiveReport({
+        event_id: safeUuid(),
+        scan_id: liveScanId,
+        timestamp: new Date().toISOString(),
+        sender,
+        subject,
+        links,
+        final_score: tier1Score,
+        verdict: categoryToVerdict(tier1Category) || scoreToVerdict(tier1Score),
+        evidence: normalizeEvidenceForReport(tier1Evidence),
+        reasons: friendlyReasonsFromEvidence(tier1Evidence, tier1Category),
+        threat_analysis: {
+          category: tier1Category,
+          reasoning: typeof heur?.User_Friendly_Summary === 'string' ? heur.User_Friendly_Summary : 'Tier 1 complete',
+          stage: 'tier1',
+        },
+        tier_details: {
+          tier1: { score: tier1Score, status: tier1Category },
+        },
+      });
+
       setStatus('Tier 2: Analyzing metadata...');
       const gatewayPayload = {
         tier1_score: tier1Score,
         tier1_evidence: tier1Evidence.map((e) => e.detail || String(e)),
-        sender: email.senderEmail || email.sender || 'unknown@unknown.com',
+        sender,
         body: email.body || '',
         links: (Array.isArray(email?.links) ? email.links : [])
           .map((l) => (typeof l === 'string' ? l : l?.href))
           .filter(Boolean),
-        subject: email.subject || 'No Subject',
+        subject,
         timestamp: new Date().toISOString()
       };
 
@@ -336,6 +397,23 @@ if (!isUiReady) {
         if (!gatewayResponse.ok) {
           setStatus(`Tier 2/3 unavailable (gateway ${gatewayResponse.status}). Using Tier 1 result.`);
           setMlStatus('AI analysis unavailable.');
+          await postLiveReport({
+            event_id: safeUuid(),
+            scan_id: liveScanId,
+            timestamp: new Date().toISOString(),
+            sender,
+            subject,
+            links,
+            final_score: tier1Score,
+            verdict: scoreToVerdict(tier1Score),
+            evidence: normalizeEvidenceForReport(tier1Evidence),
+            reasons: [
+              ...friendlyReasonsFromEvidence(tier1Evidence, tier1Category),
+              `Tier 2/3 unavailable (gateway ${gatewayResponse.status}).`,
+            ],
+            threat_analysis: { category: tier1Category, reasoning: 'Tier 2/3 unavailable', stage: 'tier1_fallback' },
+            tier_details: { tier1: { score: tier1Score, status: tier1Category } },
+          });
           return;
         }
 
@@ -344,6 +422,23 @@ if (!isUiReady) {
         if (runId !== activeRunId) return;
         setStatus('Tier 2/3 unavailable. Using Tier 1 result.');
         setMlStatus('AI analysis unavailable.');
+        await postLiveReport({
+          event_id: safeUuid(),
+          scan_id: liveScanId,
+          timestamp: new Date().toISOString(),
+          sender,
+          subject,
+          links,
+          final_score: tier1Score,
+          verdict: scoreToVerdict(tier1Score),
+          evidence: normalizeEvidenceForReport(tier1Evidence),
+          reasons: [
+            ...friendlyReasonsFromEvidence(tier1Evidence, tier1Category),
+            'Tier 2/3 unavailable.',
+          ],
+          threat_analysis: { category: tier1Category, reasoning: 'Tier 2/3 unavailable', stage: 'tier1_fallback' },
+          tier_details: { tier1: { score: tier1Score, status: tier1Category } },
+        });
         return;
       }
 
@@ -351,6 +446,23 @@ if (!isUiReady) {
       if (!gatewayScanId) {
         setStatus('Gateway returned incomplete response. Using Tier 1 result.');
         setMlStatus('AI analysis unavailable.');
+        await postLiveReport({
+          event_id: safeUuid(),
+          scan_id: liveScanId,
+          timestamp: new Date().toISOString(),
+          sender,
+          subject,
+          links,
+          final_score: tier1Score,
+          verdict: scoreToVerdict(tier1Score),
+          evidence: normalizeEvidenceForReport(tier1Evidence),
+          reasons: [
+            ...friendlyReasonsFromEvidence(tier1Evidence, tier1Category),
+            'Gateway returned incomplete response.',
+          ],
+          threat_analysis: { category: tier1Category, reasoning: 'Gateway incomplete response', stage: 'tier1_fallback' },
+          tier_details: { tier1: { score: tier1Score, status: tier1Category } },
+        });
         return;
       }
 
@@ -371,8 +483,27 @@ if (!isUiReady) {
       renderEvidence(combinedEvidence);
       renderReasons(combinedEvidence, tier2Category);
       setCategory(tier2Category);
-      setSummary(`Tier 2 complete. Domain: ${gatewayData?.tier2?.domain_status || 'analyzed'}`);
+      setSummary(`Tier 2 complete. Domain: ${gatewayData?.tier2?.domain_analysis?.status || 'analyzed'}`);
       setStatus('Tier 3: AI analyzing...');
+
+      await postLiveReport({
+        event_id: safeUuid(),
+        scan_id: liveScanId,
+        gateway_scan_id: gatewayScanId,
+        timestamp: new Date().toISOString(),
+        sender,
+        subject,
+        links,
+        final_score: partialScore,
+        verdict: tier2Verdict,
+        evidence: normalizeEvidenceForReport(combinedEvidence),
+        reasons: friendlyReasonsFromEvidence(combinedEvidence, tier2Category),
+        threat_analysis: { category: tier2Category, reasoning: 'Tier 2 complete; Tier 3 running', stage: 'tier2' },
+        tier_details: {
+          tier1: { score: tier1Score, status: tier1Category },
+          tier2: gatewayData?.tier2 || {},
+        },
+      });
 
       let pollCount = 0;
       let pollErrorCount = 0;
@@ -445,15 +576,21 @@ if (!isUiReady) {
             setMlStatus(`AI Analysis: ${fullResult?.tier3?.category || 'Complete'}`);
 
             const reportPayload = {
-              scan_id: safeUuid(),
+              event_id: safeUuid(),
+              scan_id: liveScanId,
               gateway_scan_id: gatewayScanId,
               timestamp: new Date().toISOString(),
-              sender: email.senderEmail || email.sender || 'unknown@unknown.com',
-              subject: email.subject || 'No Subject',
+              sender,
+              subject,
+              links,
               final_score: finalScore,
               verdict: finalVerdict,
-              evidence: allEvidence.map((e) => e.detail || String(e)),
-              threat_analysis: fullResult?.tier3 || {},
+              evidence: normalizeEvidenceForReport(allEvidence),
+              reasons: friendlyReasonsFromEvidence(allEvidence, finalCategory),
+              threat_analysis: {
+                ...(fullResult?.tier3 || {}),
+                stage: 'tier3_complete',
+              },
               tier_details: {
                 tier1: { score: tier1Score, status: tier1Category },
                 tier2: fullResult?.tier2 || {},

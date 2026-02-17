@@ -24,6 +24,13 @@ function clampScore(score) {
     return Math.max(0, Math.min(100, Math.round(score)));
 }
 
+function verdictToCategory(verdict) {
+    const v = (verdict || '').toString().trim().toUpperCase();
+    if (v === 'CRITICAL') return 'phishing';
+    if (v === 'SUSPICIOUS') return 'spam';
+    return 'safe';
+}
+
 function setStatus(text) {
     statusTextEl.innerText = text;
 }
@@ -243,9 +250,10 @@ scanButton.addEventListener('click', async () => {
         });
 
         renderEvidence(combinedEvidence);
-        renderReasons(combinedEvidence, gatewayData.verdict.toLowerCase());
-        setCategory(gatewayData.verdict.toLowerCase());
-        setSummary(`Tier 2 complete. Domain: ${gatewayData.tier2?.domain_status || 'analyzed'}`);
+        const gatewayCategory = verdictToCategory(gatewayData.verdict);
+        renderReasons(combinedEvidence, gatewayCategory);
+        setCategory(gatewayCategory);
+        setSummary(`Tier 2 complete. Domain: ${gatewayData.tier2?.domain_analysis?.status || 'analyzed'}`);
         setStatus('🤖 Tier 3: AI analyzing...');
 
         // Step 4: Poll for Tier 3 completion
@@ -285,8 +293,9 @@ scanButton.addEventListener('click', async () => {
                     }
 
                     renderEvidence(allEvidence);
-                    renderReasons(allEvidence, fullResult.verdict.toLowerCase());
-                    setCategory(fullResult.verdict.toLowerCase());
+                    const fullCategory = verdictToCategory(fullResult.verdict);
+                    renderReasons(allEvidence, fullCategory);
+                    setCategory(fullCategory);
 
                     // Update summary based on final verdict
                     const verdictMessages = {

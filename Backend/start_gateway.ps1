@@ -26,7 +26,7 @@ if (-not (Test-Path ".env")) {
     Write-Host "⚠️  .env file not found. Creating default..." -ForegroundColor Yellow
     @"
 # Gateway Configuration
-GATEWAY_PORT=8000
+GATEWAY_PORT=8001
 TIER3_TIMEOUT=5
 
 # Gemini API Key (Optional)
@@ -48,7 +48,7 @@ Write-Host "   - POST /gateway/scan - Main scan endpoint" -ForegroundColor White
 Write-Host "   - GET  /gateway/status/{scan_id} - Poll status" -ForegroundColor White
 Write-Host "   - GET  /gateway/result/{scan_id} - Full result" -ForegroundColor White
 Write-Host "   - GET  /gateway/health - Health check" -ForegroundColor White
-Write-Host "   - API Docs: http://localhost:8000/docs" -ForegroundColor White
+Write-Host "   - API Docs: http://localhost:8001/docs" -ForegroundColor White
 Write-Host ""
 Write-Host "Press Ctrl+C to stop the gateway" -ForegroundColor Yellow
 Write-Host ""

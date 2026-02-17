@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -25,23 +26,30 @@ from security.middleware import (
     SecurityHeadersMiddleware,
     RequestSizeLimitMiddleware,
     InputValidator,
-    sanitize_email_content,
 )
 
 # Import ML model and WHOIS client
 try:
-    from ml_model import get_ml_model
+    from tier_2.ml_model import get_ml_model
     ML_AVAILABLE = True
 except ImportError:
-    ML_AVAILABLE = False
-    logger.warning("⚠️ ML model not available (missing torch/transformers)")
+    try:
+        from ml_model import get_ml_model
+        ML_AVAILABLE = True
+    except ImportError:
+        ML_AVAILABLE = False
+        logger.warning("ML model not available (missing torch/transformers)")
 
 try:
-    from whois_client import get_whois_client
+    from tier_2.whois_client import get_whois_client
     WHOIS_CLIENT_AVAILABLE = True
 except ImportError:
-    WHOIS_CLIENT_AVAILABLE = False
-    logger.warning("⚠️ Enhanced WHOIS client not available")
+    try:
+        from whois_client import get_whois_client
+        WHOIS_CLIENT_AVAILABLE = True
+    except ImportError:
+        WHOIS_CLIENT_AVAILABLE = False
+        logger.warning("Enhanced WHOIS client not available")
 
 # Load environment variables
 load_dotenv()
@@ -98,13 +106,18 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestSizeLimitMiddleware, max_size=1_000_000)  # 1MB limit
 
 # CORS Configuration - Environment-based
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,chrome-extension://*").split(
-    ","
-)
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,chrome-extension://*").split(
+        ","
+    )
+    if origin.strip() and origin.strip() != "chrome-extension://*"
+]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX", r"chrome-extension://.*"),
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Content-Type"],
     allow_credentials=False,
@@ -132,6 +145,15 @@ class ScanResponse(BaseModel):
     tier_details: dict
     threat_analysis: ThreatAnalysis
     cached: bool = False
+
+
+def _category_from_verdict(verdict: str | None) -> str:
+    value = (verdict or "").strip().upper()
+    if value == "CRITICAL":
+        return "phishing"
+    if value == "SUSPICIOUS":
+        return "spam"
+    return "safe"
 
 
 # --- THREAT ANALYSIS LOGIC ---
@@ -259,6 +281,7 @@ class ThreatAnalyzer:
     ) -> ThreatAnalysis:
         """Analyze email for threat indicators using patterns + ML."""
         body_lower = email_body.lower()
+        sender_lower = (sender or "").lower()
 
         # Initialize counters
         urgency_score = 0
@@ -268,7 +291,7 @@ class ThreatAnalyzer:
         scare_score = 0
         link_score = 0
 
-        flagged_phrases = []
+        flagged_phrases: List[str] = []
 
         # Check for urgency patterns
         for pattern in cls.URGENCY_PATTERNS:
@@ -302,11 +325,31 @@ class ThreatAnalyzer:
 
         # Check for suspicious URLs
         for link in links:
+            lowered_link = (link or "").lower()
             for suspicious in cls.SUSPICIOUS_URLS:
-                if suspicious in link.lower():
+                if suspicious in lowered_link:
                     link_score += 15
                     flagged_phrases.append(f"suspicious_url:{suspicious}")
                     break
+
+            if re.search(r"https?://\d{1,3}(?:\.\d{1,3}){3}(?:[:/]|$)", lowered_link):
+                link_score += 20
+                flagged_phrases.append("ip_based_link")
+
+            if "xn--" in lowered_link:
+                link_score += 18
+                flagged_phrases.append("punycode_link")
+
+            if re.search(r"\.(zip|mov|top|xyz|click|country|stream|gq|tk|ml|ga|cf)(?:/|$)", lowered_link):
+                link_score += 10
+                flagged_phrases.append("suspicious_tld")
+
+        # Sender context checks
+        if "@" not in sender_lower:
+            authority_score += 10
+            flagged_phrases.append("invalid_sender_format")
+        elif any(term in sender_lower for term in ("security", "support", "admin", "billing")):
+            authority_score += 5
 
         # Calculate threat level (0-100)
         base_threat = min(
@@ -327,27 +370,38 @@ class ThreatAnalyzer:
             base_threat = min(100, base_threat + 25)
 
         # Determine category
-        categories = []
-        if urgency_score >= 20:
+        categories: List[str] = []
+        if urgency_score > 0:
             categories.append("Urgency")
-        if financial_score >= 15:
+        if financial_score > 0:
             categories.append("Financial")
-        if credential_score >= 15:
+        if credential_score > 0:
             categories.append("Credential")
-        if authority_score >= 10:
+        if authority_score > 0:
             categories.append("Authority")
-        if scare_score >= 15:
+        if scare_score > 0:
             categories.append("ScareTactics")
+        if link_score > 0:
+            categories.append("SuspiciousLinks")
 
-        if not categories:
+        if not categories and base_threat < 20:
             category = "Safe"
             reasoning = "No significant threat indicators detected"
+        elif not categories:
+            category = "GeneralSuspicion"
+            reasoning = "Suspicious signals detected but not enough to classify a specific category"
         else:
             category = "/".join(categories[:3])  # Max 3 categories
             reasoning = f"Detected {len(categories)} threat categories: {', '.join(categories)}"
 
-        # Deduplicate flagged phrases
-        flagged_phrases = list(set(flagged_phrases))[:10]  # Limit to 10
+        # Deduplicate flagged phrases while preserving order
+        deduped_phrases: List[str] = []
+        seen_phrases = set()
+        for phrase in flagged_phrases:
+            if phrase not in seen_phrases:
+                seen_phrases.add(phrase)
+                deduped_phrases.append(phrase)
+        flagged_phrases = deduped_phrases[:10]  # Limit to 10
 
         # ML Enhancement (if available and enabled)
         ml_score = None
@@ -376,7 +430,7 @@ class ThreatAnalyzer:
                 logger.warning(f"ML inference failed: {e}")
 
         return ThreatAnalysis(
-            threat_level=int(base_threat),
+            threat_level=int(min(100, max(0, round(base_threat)))),
             category=category,
             reasoning=reasoning,
             flagged_phrases=flagged_phrases,
@@ -558,6 +612,14 @@ def get_domain_age(domain: str) -> int:
 @app.post("/scan", response_model=ScanResponse)
 async def scan_endpoint(request: ScanRequest):
     """Scan email for phishing using speed layer + local threat analysis."""
+    validation = InputValidator.validate_scan_request(
+        sender=request.sender,
+        body=request.body,
+        links=request.links,
+    )
+    if not validation["valid"]:
+        raise HTTPException(status_code=400, detail={"errors": validation["errors"]})
+
     # Check cache first (Speed Layer)
     cached_result = await cache.get_cached_result(request.sender, request.body)
 
@@ -759,14 +821,19 @@ async def stream_scans():
         # Send initial ping
         yield f"event: ping\ndata: {json.dumps({'status': 'connected'})}\n\n"
         
-        last_scan_id = None
+        last_event_id = None
         
         while True:
             try:
                 # Check for new scans
                 async with latest_scan_lock:
-                    if latest_scan_result and latest_scan_result.get("scan_id") != last_scan_id:
-                        last_scan_id = latest_scan_result.get("scan_id")
+                    if latest_scan_result:
+                        current_event_id = latest_scan_result.get("event_id") or latest_scan_result.get("scan_id")
+                    else:
+                        current_event_id = None
+
+                    if latest_scan_result and current_event_id != last_event_id:
+                        last_event_id = current_event_id
                         # Send new scan data
                         yield f"data: {json.dumps(latest_scan_result)}\n\n"
                 
@@ -795,10 +862,62 @@ async def receive_extension_report(report: Dict):
     try:
         async with latest_scan_lock:
             global latest_scan_result
-            
+
+            verdict = str(report.get("verdict", "SAFE"))
+            mapped_category = _category_from_verdict(verdict)
+            tier_details = report.get("tier_details", {}) if isinstance(report.get("tier_details"), dict) else {}
+            tier1_details = tier_details.get("tier1", {}) if isinstance(tier_details.get("tier1"), dict) else {}
+            tier2_details = tier_details.get("tier2", {}) if isinstance(tier_details.get("tier2"), dict) else {}
+            nested_threat = (
+                tier_details.get("threat_analysis", {})
+                if isinstance(tier_details.get("threat_analysis"), dict)
+                else {}
+            )
+            heuristics_score = tier1_details.get("score")
+            ml_threat_level = tier2_details.get("score")
+            if ml_threat_level is None:
+                ml_threat_level = nested_threat.get("score")
+
+            raw_evidence = report.get("evidence", [])
+            normalized_evidence = []
+            if isinstance(raw_evidence, list):
+                for item in raw_evidence:
+                    if isinstance(item, dict):
+                        normalized_evidence.append(
+                            {
+                                "check": str(item.get("check", "extension")),
+                                "detail": str(item.get("detail", item.get("check", "signal"))),
+                                "kind": item.get("kind"),
+                                "points": item.get("points") if isinstance(item.get("points"), (int, float)) else None,
+                            }
+                        )
+                    else:
+                        normalized_evidence.append(
+                            {"check": "extension", "detail": str(item), "kind": None, "points": None}
+                        )
+
+            raw_links = report.get("links", [])
+            normalized_links = []
+            if isinstance(raw_links, list):
+                for link in raw_links:
+                    if isinstance(link, dict):
+                        href = str(link.get("href", "")).strip()
+                        text = link.get("text")
+                    else:
+                        href = str(link).strip()
+                        text = None
+
+                    if href:
+                        normalized_links.append({"href": href, "text": text if isinstance(text, str) else None})
+
+            reason_list = report.get("reasons")
+            if not isinstance(reason_list, list):
+                reason_list = [e.get("detail", "") for e in normalized_evidence if e.get("detail")]
+
             # Transform to match frontend Tier1Report format
             latest_scan_result = {
                 "version": 1,
+                "event_id": report.get("event_id", f"evt_{datetime.now().timestamp()}"),
                 "scan_id": report.get("scan_id", f"ext_{datetime.now().timestamp()}"),
                 "created_at": report.get("timestamp", datetime.now().isoformat()),
                 "source": "extension",
@@ -807,22 +926,19 @@ async def receive_extension_report(report: Dict):
                     "senderEmail": report.get("sender", "unknown@unknown.com"),
                     "senderName": None
                 },
-                "links": [],
+                "links": normalized_links,
                 "tier1": {
                     "score": report.get("final_score", 0),
-                    "category": report.get("verdict", "SAFE").lower(),
-                    "summary": f"Scan complete: {report.get('verdict', 'SAFE')}",
-                    "evidence": [
-                        {"check": "extension", "detail": str(e)} 
-                        for e in (report.get("evidence", []) if isinstance(report.get("evidence"), list) else [])
-                    ],
-                    "reasons": report.get("evidence", []) if isinstance(report.get("evidence"), list) else [],
-                    "heuristics_score": report.get("tier_details", {}).get("tier1", {}).get("score"),
+                    "category": mapped_category,
+                    "summary": f"Scan complete: {verdict}",
+                    "evidence": normalized_evidence,
+                    "reasons": reason_list,
+                    "heuristics_score": heuristics_score,
                     "ml_enabled": True,
-                    "ml_threat_level": report.get("tier_details", {}).get("tier2", {}).get("score"),
-                    "ml_category": report.get("verdict", "SAFE").lower(),
+                    "ml_threat_level": ml_threat_level,
+                    "ml_category": mapped_category,
                     "ml_confidence": None,
-                    "ml_label": report.get("verdict", "SAFE"),
+                    "ml_label": verdict,
                     "ml_model": "ZeroPhish 3-Tier",
                     "ml_reasoning": report.get("threat_analysis", {}).get("reasoning", "")
                 }
@@ -865,3 +981,4 @@ if __name__ == "__main__":
     print("=" * 50)
 
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+
