@@ -94,7 +94,11 @@ ALLOWED_ORIGINS = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX", r"chrome-extension://.*"),
+    # For security, do not default to allowing all Chrome extensions.
+    # To allow a specific extension, set ALLOW_ORIGIN_REGEX to match your
+    # extension's origin (e.g., r"chrome-extension://abcdefg...") or add
+    # the specific origin to ALLOWED_ORIGINS.
+    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX"),
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
     allow_credentials=False,
