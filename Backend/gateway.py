@@ -141,24 +141,34 @@ def _determine_threat_status(score: float) -> str:
     return "OK"
 
 
+def _calculate_weighted_score(scores: list[float], weights: list[float]) -> float:
+    """
+    Unified weighted score calculation with fallback to simple average.
+    Ensures final score is clamped between 0 and 100.
+    """
+    if not scores:
+        return 0.0
+
+    if len(scores) != len(weights):
+        raise ValueError("Scores and weights must have the same length")
+
+    total_weight = sum(weights)
+    if total_weight <= 0:
+        return _clamp_score(sum(scores) / len(scores))
+
+    weighted_sum = sum(s * w for s, w in zip(scores, weights))
+    return _clamp_score(weighted_sum / total_weight)
+
+
 def _calculate_partial_score(tier1_score: float, tier2_score: float) -> float:
-    partial_weight = WEIGHTS.tier1 + WEIGHTS.tier2
-    if partial_weight <= 0:
-        return _clamp_score((tier1_score + tier2_score) / 2.0)
-    partial = (tier1_score * WEIGHTS.tier1) + (tier2_score * WEIGHTS.tier2)
-    return _clamp_score(partial / partial_weight)
+    return _calculate_weighted_score([tier1_score, tier2_score], [WEIGHTS.tier1, WEIGHTS.tier2])
 
 
 def _calculate_final_score(tier1_score: float, tier2_score: float, tier3_score: float) -> float:
-    total_weight = WEIGHTS.tier1 + WEIGHTS.tier2 + WEIGHTS.tier3
-    if total_weight <= 0:
-        return _clamp_score((tier1_score + tier2_score + tier3_score) / 3.0)
-    total = (
-        (tier1_score * WEIGHTS.tier1)
-        + (tier2_score * WEIGHTS.tier2)
-        + (tier3_score * WEIGHTS.tier3)
+    return _calculate_weighted_score(
+        [tier1_score, tier2_score, tier3_score],
+        [WEIGHTS.tier1, WEIGHTS.tier2, WEIGHTS.tier3],
     )
-    return _clamp_score(total / total_weight)
 
 
 def _merge_evidence(
@@ -229,7 +239,7 @@ async def execute_tier2(sender: str, body: str, links: list[str]) -> Tier2Result
 
         threat_score = _clamp_score(threat_data.threat_level)
         threat_status = _determine_threat_status(threat_score)
-        tier2_score = (domain_score * 0.3) + (threat_score * 0.7)
+        tier2_score = _calculate_weighted_score([domain_score, threat_score], [0.3, 0.7])
 
         if threat_data.category != "Safe":
             evidence.append(f"Threat indicators detected: {threat_data.category}.")
