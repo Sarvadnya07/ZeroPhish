@@ -232,7 +232,6 @@ Backend/
 ├── .env                   # Environment variables
 ├── tier_2/                # Main backend application
 │   ├── main.py           # FastAPI server with Tier 2 analysis
-│   ├── speed_layer.py    # In-memory cache fallback
 │   └── .env              # Redis configuration
 └── extension/             # Chrome extension
     ├── manifest.json     # Extension configuration
