@@ -39,8 +39,12 @@ from models.gateway_models import (
     Tier2Result,
     Tier3Result,
 )
-from security.middleware import InputValidator, RequestSizeLimitMiddleware, SecurityHeadersMiddleware
-from tier_2.main import ThreatAnalyzer, get_domain_age
+from security.middleware import (
+    InputValidator,
+    RequestSizeLimitMiddleware,
+    SecurityHeadersMiddleware,
+)
+from tier_2.main import ThreatAnalyzer, analyze_domain_age, get_domain_age
 
 load_dotenv()
 
@@ -176,7 +180,7 @@ def _merge_evidence(
         if text:
             merged.append(text)
 
-    for phrase in (tier3_flagged_phrases or []):
+    for phrase in tier3_flagged_phrases or []:
         text = str(phrase).strip()
         if text:
             merged.append(f"AI: {text}")
@@ -208,18 +212,8 @@ async def execute_tier2(sender: str, body: str, links: list[str]) -> Tier2Result
             evidence.append("Could not parse sender domain.")
         else:
             age_days = await asyncio.to_thread(get_domain_age, domain)
-            if age_days == 0:
-                domain_score, domain_status = 70.0, "UNKNOWN"
-                evidence.append("Could not verify domain age.")
-            elif age_days < 30:
-                domain_score, domain_status = 100.0, "CRITICAL"
-                evidence.append(f"Domain is very new ({age_days} days old).")
-            elif age_days < 365:
-                domain_score, domain_status = 60.0, "SUSPICIOUS"
-                evidence.append(f"Domain is relatively new ({age_days} days old).")
-            else:
-                domain_score, domain_status = 10.0, "OK"
-                evidence.append(f"Domain is established ({age_days} days old).")
+            domain_score, domain_status, msg = analyze_domain_age(age_days)
+            evidence.append(msg)
 
         threat_data = await ThreatAnalyzer.analyze_threat(
             email_body=body,
