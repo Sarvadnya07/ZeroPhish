@@ -21,20 +21,22 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Security imports
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from security.middleware import (
-    SecurityHeadersMiddleware,
-    RequestSizeLimitMiddleware,
     InputValidator,
+    RequestSizeLimitMiddleware,
+    SecurityHeadersMiddleware,
 )
 
 # Import ML model and WHOIS client
 try:
     from tier_2.ml_model import get_ml_model
+
     ML_AVAILABLE = True
 except ImportError:
     try:
         from ml_model import get_ml_model
+
         ML_AVAILABLE = True
     except ImportError:
         ML_AVAILABLE = False
@@ -42,10 +44,12 @@ except ImportError:
 
 try:
     from tier_2.whois_client import get_whois_client
+
     WHOIS_CLIENT_AVAILABLE = True
 except ImportError:
     try:
         from whois_client import get_whois_client
+
         WHOIS_CLIENT_AVAILABLE = True
     except ImportError:
         WHOIS_CLIENT_AVAILABLE = False
@@ -71,7 +75,7 @@ async def lifespan(app: FastAPI):
     """Manage application lifespan (startup/shutdown)."""
     # Startup
     await cache.connect()
-    
+
     # Load ML model if available
     if ML_AVAILABLE and os.getenv("ML_ENABLED", "true").lower() == "true":
         try:
@@ -79,7 +83,7 @@ async def lifespan(app: FastAPI):
             logger.info("✅ ML model loaded successfully")
         except Exception as e:
             logger.warning(f"⚠️ Failed to load ML model: {e}")
-    
+
     # Initialize WHOIS client
     if WHOIS_CLIENT_AVAILABLE:
         try:
@@ -87,7 +91,7 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Enhanced WHOIS client initialized")
         except Exception as e:
             logger.warning(f"⚠️ Failed to initialize WHOIS client: {e}")
-    
+
     logger.info("✅ ZeroPhish Backend started")
     logger.info("📊 Speed Layer: Redis")
     logger.info(f"🧠 Threat Analysis: {'ML + Patterns' if ML_AVAILABLE else 'Patterns Only'}")
@@ -275,6 +279,11 @@ class ThreatAnalyzer:
         "shorturl",
     ]
 
+    IP_LINK_REGEX = re.compile(r"https?://\d{1,3}(?:\.\d{1,3}){3}(?:[:/]|$)")
+    SUSPICIOUS_TLD_REGEX = re.compile(
+        r"\.(zip|mov|top|xyz|click|country|stream|gq|tk|ml|ga|cf)(?:/|$)"
+    )
+
     @classmethod
     async def analyze_threat(
         cls, email_body: str, sender: str, links: List[str], use_ml: bool = True
@@ -332,7 +341,7 @@ class ThreatAnalyzer:
                     flagged_phrases.append(f"suspicious_url:{suspicious}")
                     break
 
-            if re.search(r"https?://\d{1,3}(?:\.\d{1,3}){3}(?:[:/]|$)", lowered_link):
+            if cls.IP_LINK_REGEX.search(lowered_link):
                 link_score += 20
                 flagged_phrases.append("ip_based_link")
 
@@ -340,7 +349,7 @@ class ThreatAnalyzer:
                 link_score += 18
                 flagged_phrases.append("punycode_link")
 
-            if re.search(r"\.(zip|mov|top|xyz|click|country|stream|gq|tk|ml|ga|cf)(?:/|$)", lowered_link):
+            if cls.SUSPICIOUS_TLD_REGEX.search(lowered_link):
                 link_score += 10
                 flagged_phrases.append("suspicious_tld")
 
@@ -406,24 +415,26 @@ class ThreatAnalyzer:
         # ML Enhancement (if available and enabled)
         ml_score = None
         ml_confidence = None
-        
+
         if use_ml and ML_AVAILABLE and os.getenv("ML_ENABLED", "true").lower() == "true":
             try:
                 ml_model = await get_ml_model()
                 if ml_model.is_loaded():
                     ml_score, ml_confidence = await ml_model.predict(email_body)
                     logger.debug(f"ML prediction: score={ml_score:.2f}, confidence={ml_confidence}")
-                    
+
                     # Combine ML score (60%) + pattern score (40%)
                     combined_threat = (ml_score * 0.6) + (base_threat * 0.4)
-                    
+
                     # Update category if ML provides stronger signal
                     if ml_confidence == "phishing" and "ML:Phishing" not in category:
-                        category = f"{category}/ML:Phishing" if category != "Safe" else "ML:Phishing"
-                    
+                        category = (
+                            f"{category}/ML:Phishing" if category != "Safe" else "ML:Phishing"
+                        )
+
                     # Update reasoning
                     reasoning = f"{reasoning}. ML confidence: {ml_confidence} ({ml_score:.1f}%)"
-                    
+
                     # Use combined score
                     base_threat = combined_threat
             except Exception as e:
@@ -524,11 +535,7 @@ class SpeedLayerCache:
 
         try:
             key = self._generate_key(sender, body)
-            await self.client.set(
-                key,
-                json.dumps(result),
-                ex=86400  # 24 hour TTL (86400 seconds)
-            )
+            await self.client.set(key, json.dumps(result), ex=86400)  # 24 hour TTL (86400 seconds)
 
             # Track recent scans
             await self.client.lpush("recent_scans", key)
@@ -645,7 +652,7 @@ async def scan_endpoint(request: ScanRequest):
 
     try:
         domain = request.sender.split("@")[-1]
-        
+
         # Try enhanced WHOIS client first
         if WHOIS_CLIENT_AVAILABLE:
             whois_client = await get_whois_client(cache_client=cache.client)
@@ -698,12 +705,11 @@ async def scan_endpoint(request: ScanRequest):
             "Financial": "Requests payment or financial information",
             "Impersonation": "Impersonates a trusted organization",
             "Malware": "May contain malicious software or links",
-            "Scam": "Appears to be a scam or fraudulent message"
+            "Scam": "Appears to be a scam or fraudulent message",
         }
-        
+
         friendly_message = category_messages.get(
-            threat_data.category,
-            f"Suspicious patterns detected ({threat_data.category})"
+            threat_data.category, f"Suspicious patterns detected ({threat_data.category})"
         )
         evidence.append(f"🔍 {friendly_message}")
 
@@ -751,7 +757,7 @@ async def scan_endpoint(request: ScanRequest):
             "scan_id": f"scan_{datetime.now().timestamp()}",
             "timestamp": datetime.now().isoformat(),
             "sender": request.sender,
-            "subject": getattr(request, 'subject', 'No Subject'),
+            "subject": getattr(request, "subject", "No Subject"),
             "final_score": round(final_score, 2),
             "verdict": verdict,
             "evidence": evidence,
@@ -815,20 +821,22 @@ async def get_latest_scan():
 @app.get("/tier1/stream")
 async def stream_scans():
     """Server-Sent Events stream for real-time scan updates."""
-    
+
     async def event_generator():
         """Generate SSE events for scan updates."""
         # Send initial ping
         yield f"event: ping\ndata: {json.dumps({'status': 'connected'})}\n\n"
-        
+
         last_event_id = None
-        
+
         while True:
             try:
                 # Check for new scans
                 async with latest_scan_lock:
                     if latest_scan_result:
-                        current_event_id = latest_scan_result.get("event_id") or latest_scan_result.get("scan_id")
+                        current_event_id = latest_scan_result.get(
+                            "event_id"
+                        ) or latest_scan_result.get("scan_id")
                     else:
                         current_event_id = None
 
@@ -836,15 +844,15 @@ async def stream_scans():
                         last_event_id = current_event_id
                         # Send new scan data
                         yield f"data: {json.dumps(latest_scan_result)}\n\n"
-                
+
                 # Send periodic ping to keep connection alive
                 await asyncio.sleep(5)
                 yield f"event: ping\ndata: {json.dumps({'status': 'alive'})}\n\n"
-                
+
             except Exception as e:
                 logger.error(f"SSE stream error: {e}")
                 break
-    
+
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
@@ -852,7 +860,7 @@ async def stream_scans():
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",  # Disable nginx buffering
-        }
+        },
     )
 
 
@@ -865,9 +873,17 @@ async def receive_extension_report(report: Dict):
 
             verdict = str(report.get("verdict", "SAFE"))
             mapped_category = _category_from_verdict(verdict)
-            tier_details = report.get("tier_details", {}) if isinstance(report.get("tier_details"), dict) else {}
-            tier1_details = tier_details.get("tier1", {}) if isinstance(tier_details.get("tier1"), dict) else {}
-            tier2_details = tier_details.get("tier2", {}) if isinstance(tier_details.get("tier2"), dict) else {}
+            tier_details = (
+                report.get("tier_details", {})
+                if isinstance(report.get("tier_details"), dict)
+                else {}
+            )
+            tier1_details = (
+                tier_details.get("tier1", {}) if isinstance(tier_details.get("tier1"), dict) else {}
+            )
+            tier2_details = (
+                tier_details.get("tier2", {}) if isinstance(tier_details.get("tier2"), dict) else {}
+            )
             nested_threat = (
                 tier_details.get("threat_analysis", {})
                 if isinstance(tier_details.get("threat_analysis"), dict)
@@ -888,12 +904,21 @@ async def receive_extension_report(report: Dict):
                                 "check": str(item.get("check", "extension")),
                                 "detail": str(item.get("detail", item.get("check", "signal"))),
                                 "kind": item.get("kind"),
-                                "points": item.get("points") if isinstance(item.get("points"), (int, float)) else None,
+                                "points": (
+                                    item.get("points")
+                                    if isinstance(item.get("points"), (int, float))
+                                    else None
+                                ),
                             }
                         )
                     else:
                         normalized_evidence.append(
-                            {"check": "extension", "detail": str(item), "kind": None, "points": None}
+                            {
+                                "check": "extension",
+                                "detail": str(item),
+                                "kind": None,
+                                "points": None,
+                            }
                         )
 
             raw_links = report.get("links", [])
@@ -908,7 +933,9 @@ async def receive_extension_report(report: Dict):
                         text = None
 
                     if href:
-                        normalized_links.append({"href": href, "text": text if isinstance(text, str) else None})
+                        normalized_links.append(
+                            {"href": href, "text": text if isinstance(text, str) else None}
+                        )
 
             reason_list = report.get("reasons")
             if not isinstance(reason_list, list):
@@ -924,7 +951,7 @@ async def receive_extension_report(report: Dict):
                 "email": {
                     "subject": report.get("subject", "No Subject"),
                     "senderEmail": report.get("sender", "unknown@unknown.com"),
-                    "senderName": None
+                    "senderName": None,
                 },
                 "links": normalized_links,
                 "tier1": {
@@ -940,13 +967,13 @@ async def receive_extension_report(report: Dict):
                     "ml_confidence": None,
                     "ml_label": verdict,
                     "ml_model": "ZeroPhish 3-Tier",
-                    "ml_reasoning": report.get("threat_analysis", {}).get("reasoning", "")
-                }
+                    "ml_reasoning": report.get("threat_analysis", {}).get("reasoning", ""),
+                },
             }
-        
+
         logger.info(f"✅ Received extension report: {latest_scan_result['scan_id']}")
         return {"status": "success", "message": "Report received"}
-    
+
     except Exception as e:
         logger.error(f"❌ Failed to process extension report: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -981,4 +1008,3 @@ if __name__ == "__main__":
     print("=" * 50)
 
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
-
