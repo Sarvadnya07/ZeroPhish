@@ -39,7 +39,11 @@ from models.gateway_models import (
     Tier2Result,
     Tier3Result,
 )
-from security.middleware import InputValidator, RequestSizeLimitMiddleware, SecurityHeadersMiddleware
+from security.middleware import (
+    InputValidator,
+    RequestSizeLimitMiddleware,
+    SecurityHeadersMiddleware,
+)
 from tier_2.main import ThreatAnalyzer, get_domain_age
 
 load_dotenv()
@@ -94,7 +98,7 @@ ALLOWED_ORIGINS = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX", r"chrome-extension://.*"),
+    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX") or None,
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
     allow_credentials=False,
@@ -176,7 +180,7 @@ def _merge_evidence(
         if text:
             merged.append(text)
 
-    for phrase in (tier3_flagged_phrases or []):
+    for phrase in tier3_flagged_phrases or []:
         text = str(phrase).strip()
         if text:
             merged.append(f"AI: {text}")
