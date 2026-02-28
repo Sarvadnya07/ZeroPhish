@@ -159,121 +159,30 @@ def _category_from_verdict(verdict: str | None) -> str:
 # --- THREAT ANALYSIS LOGIC ---
 
 
+def _load_threat_patterns() -> Dict[str, List[str]]:
+    """Load threat patterns from JSON file."""
+    pattern_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "threat_patterns.json")
+    try:
+        with open(pattern_file, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to load threat patterns from {pattern_file}: {e}")
+        return {}
+
+
+_THREAT_PATTERNS = _load_threat_patterns()
+
+
 class ThreatAnalyzer:
     """Local threat analysis engine (no external AI)"""
 
     # Threat patterns database
-    URGENCY_PATTERNS = [
-        "urgent",
-        "immediately",
-        "asap",
-        "right away",
-        "deadline",
-        "expire",
-        "last chance",
-        "limited time",
-        "act now",
-        "don't delay",
-        "emergency",
-        "urgent action",
-        "immediate attention",
-        "time sensitive",
-    ]
-
-    FINANCIAL_PATTERNS = [
-        "money",
-        "payment",
-        "invoice",
-        "bank",
-        "wire",
-        "transfer",
-        "account",
-        "fund",
-        "cash",
-        "credit",
-        "debit",
-        "refund",
-        "prize",
-        "lottery",
-        "inheritance",
-        "million",
-        "billion",
-        "dollar",
-        "euro",
-        "pound",
-    ]
-
-    CREDENTIAL_PATTERNS = [
-        "password",
-        "login",
-        "verify",
-        "confirm",
-        "account",
-        "security",
-        "update",
-        "authenticate",
-        "validate",
-        "credentials",
-        "username",
-        "sign in",
-        "log in",
-        "access",
-        "reset",
-        "change password",
-    ]
-
-    AUTHORITY_PATTERNS = [
-        "irs",
-        "tax",
-        "government",
-        "police",
-        "fbi",
-        "court",
-        "legal",
-        "official",
-        "authority",
-        "administration",
-        "department",
-        "agency",
-        "ceo",
-        "manager",
-        "director",
-        "president",
-        "executive",
-    ]
-
-    SCARE_TACTICS = [
-        "suspend",
-        "terminate",
-        "locked",
-        "blocked",
-        "compromised",
-        "unauthorized",
-        "breach",
-        "hacked",
-        "security alert",
-        "warning",
-        "violation",
-        "penalty",
-        "fine",
-        "arrest",
-        "lawsuit",
-    ]
-
-    SUSPICIOUS_URLS = [
-        "bit.ly",
-        "tinyurl",
-        "goo.gl",
-        "ow.ly",
-        "is.gd",
-        "buff.ly",
-        "adf.ly",
-        "shorte.st",
-        "bc.vc",
-        "adfly",
-        "bitly",
-        "shorturl",
-    ]
+    URGENCY_PATTERNS = _THREAT_PATTERNS.get("URGENCY_PATTERNS", [])
+    FINANCIAL_PATTERNS = _THREAT_PATTERNS.get("FINANCIAL_PATTERNS", [])
+    CREDENTIAL_PATTERNS = _THREAT_PATTERNS.get("CREDENTIAL_PATTERNS", [])
+    AUTHORITY_PATTERNS = _THREAT_PATTERNS.get("AUTHORITY_PATTERNS", [])
+    SCARE_TACTICS = _THREAT_PATTERNS.get("SCARE_TACTICS", [])
+    SUSPICIOUS_URLS = _THREAT_PATTERNS.get("SUSPICIOUS_URLS", [])
 
     @classmethod
     async def analyze_threat(
