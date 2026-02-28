@@ -6,6 +6,7 @@ Implements input validation, sanitization, and security headers
 import re
 from typing import Optional
 from fastapi import Request, HTTPException
+from email_validator import validate_email, EmailNotValidError
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 import html
@@ -90,9 +91,12 @@ def validate_email_address(email: str) -> bool:
     if not email or len(email) > 320:  # RFC 5321
         return False
     
-    # Basic email regex (not perfect but good enough)
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return bool(re.match(pattern, email))
+    try:
+        # Use email-validator library for robust and secure validation
+        validate_email(email, check_deliverability=False)
+        return True
+    except EmailNotValidError:
+        return False
 
 
 def validate_url(url: str) -> bool:
