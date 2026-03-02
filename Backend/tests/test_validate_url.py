@@ -1,4 +1,4 @@
-from Backend.security.middleware import validate_url
+from security.middleware import validate_url
 
 
 def test_validate_url_valid():
