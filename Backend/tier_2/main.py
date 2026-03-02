@@ -184,6 +184,14 @@ class ThreatAnalyzer:
     SCARE_TACTICS = _THREAT_PATTERNS.get("SCARE_TACTICS", [])
     SUSPICIOUS_URLS = _THREAT_PATTERNS.get("SUSPICIOUS_URLS", [])
 
+    # Pre-compiled regexes for optimized pattern matching
+    URGENCY_RE = re.compile("|".join(map(re.escape, sorted(URGENCY_PATTERNS, key=len, reverse=True))))
+    FINANCIAL_RE = re.compile("|".join(map(re.escape, sorted(FINANCIAL_PATTERNS, key=len, reverse=True))))
+    CREDENTIAL_RE = re.compile("|".join(map(re.escape, sorted(CREDENTIAL_PATTERNS, key=len, reverse=True))))
+    AUTHORITY_RE = re.compile("|".join(map(re.escape, sorted(AUTHORITY_PATTERNS, key=len, reverse=True))))
+    SCARE_RE = re.compile("|".join(map(re.escape, sorted(SCARE_TACTICS, key=len, reverse=True))))
+    SUSPICIOUS_URLS_RE = re.compile("|".join(map(re.escape, sorted(SUSPICIOUS_URLS, key=len, reverse=True))))
+
     @classmethod
     async def analyze_threat(
         cls, email_body: str, sender: str, links: List[str], use_ml: bool = True
@@ -203,43 +211,42 @@ class ThreatAnalyzer:
         flagged_phrases: List[str] = []
 
         # Check for urgency patterns
-        for pattern in cls.URGENCY_PATTERNS:
-            if pattern in body_lower:
-                urgency_score += 10
-                flagged_phrases.append(pattern)
+        urgency_matches = set(cls.URGENCY_RE.findall(body_lower))
+        if urgency_matches:
+            urgency_score = len(urgency_matches) * 10
+            flagged_phrases.extend(urgency_matches)
 
         # Check for financial patterns
-        for pattern in cls.FINANCIAL_PATTERNS:
-            if pattern in body_lower:
-                financial_score += 8
-                flagged_phrases.append(pattern)
+        financial_matches = set(cls.FINANCIAL_RE.findall(body_lower))
+        if financial_matches:
+            financial_score = len(financial_matches) * 8
+            flagged_phrases.extend(financial_matches)
 
         # Check for credential patterns
-        for pattern in cls.CREDENTIAL_PATTERNS:
-            if pattern in body_lower:
-                credential_score += 7
-                flagged_phrases.append(pattern)
+        credential_matches = set(cls.CREDENTIAL_RE.findall(body_lower))
+        if credential_matches:
+            credential_score = len(credential_matches) * 7
+            flagged_phrases.extend(credential_matches)
 
         # Check for authority impersonation
-        for pattern in cls.AUTHORITY_PATTERNS:
-            if pattern in body_lower:
-                authority_score += 9
-                flagged_phrases.append(pattern)
+        authority_matches = set(cls.AUTHORITY_RE.findall(body_lower))
+        if authority_matches:
+            authority_score = len(authority_matches) * 9
+            flagged_phrases.extend(authority_matches)
 
         # Check for scare tactics
-        for pattern in cls.SCARE_TACTICS:
-            if pattern in body_lower:
-                scare_score += 8
-                flagged_phrases.append(pattern)
+        scare_matches = set(cls.SCARE_RE.findall(body_lower))
+        if scare_matches:
+            scare_score = len(scare_matches) * 8
+            flagged_phrases.extend(scare_matches)
 
         # Check for suspicious URLs
         for link in links:
             lowered_link = (link or "").lower()
-            for suspicious in cls.SUSPICIOUS_URLS:
-                if suspicious in lowered_link:
-                    link_score += 15
-                    flagged_phrases.append(f"suspicious_url:{suspicious}")
-                    break
+            suspicious_match = cls.SUSPICIOUS_URLS_RE.search(lowered_link)
+            if suspicious_match:
+                link_score += 15
+                flagged_phrases.append(f"suspicious_url:{suspicious_match.group()}")
 
             if re.search(r"https?://\d{1,3}(?:\.\d{1,3}){3}(?:[:/]|$)", lowered_link):
                 link_score += 20
