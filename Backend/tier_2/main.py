@@ -108,7 +108,7 @@ app.add_middleware(RequestSizeLimitMiddleware, max_size=1_000_000)  # 1MB limit
 # CORS Configuration - Environment-based
 ALLOWED_ORIGINS = [
     origin.strip()
-    for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,chrome-extension://*").split(
+    for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(
         ","
     )
     if origin.strip() and origin.strip() != "chrome-extension://*"
@@ -117,7 +117,11 @@ ALLOWED_ORIGINS = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX", r"chrome-extension://.*"),
+    # For security, do not default to allowing all Chrome extensions.
+    # To allow a specific extension, set ALLOW_ORIGIN_REGEX to match your
+    # extension's origin (e.g., r"chrome-extension://abcdefg...") or add
+    # the specific origin to ALLOWED_ORIGINS.
+    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX"),
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Content-Type"],
     allow_credentials=False,
