@@ -15,9 +15,10 @@ from pathlib import Path
 from typing import Dict
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Security, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from fastapi.security import APIKeyHeader
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -39,10 +40,28 @@ from models.gateway_models import (
     Tier2Result,
     Tier3Result,
 )
-from security.middleware import InputValidator, RequestSizeLimitMiddleware, SecurityHeadersMiddleware
+from security.middleware import (
+    InputValidator,
+    RequestSizeLimitMiddleware,
+    SecurityHeadersMiddleware,
+)
 from tier_2.main import ThreatAnalyzer, get_domain_age
 
 load_dotenv()
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(api_key: str = Security(api_key_header)):
+    expected_api_key = os.getenv("API_KEY")
+    if not expected_api_key:
+        return api_key
+    if not api_key or api_key != expected_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Could not validate API key"
+        )
+    return api_key
+
 
 TIER3_TIMEOUT = int(os.getenv("TIER3_TIMEOUT", "5"))
 WEIGHTS = ScoringWeights()
@@ -176,7 +195,7 @@ def _merge_evidence(
         if text:
             merged.append(text)
 
-    for phrase in (tier3_flagged_phrases or []):
+    for phrase in tier3_flagged_phrases or []:
         text = str(phrase).strip()
         if text:
             merged.append(f"AI: {text}")
@@ -326,6 +345,7 @@ async def gateway_scan(
     request: Request,
     scan_request: GatewayScanRequest,
     background_tasks: BackgroundTasks,
+    api_key: str = Depends(verify_api_key),
 ) -> GatewayScanResponse:
     validation = InputValidator.validate_scan_request(
         sender=scan_request.sender,
@@ -380,7 +400,9 @@ async def gateway_scan(
 
 @app.get("/gateway/status/{scan_id}", response_model=ScanStatusResponse)
 @limiter.limit("120/minute")
-async def gateway_status(request: Request, scan_id: str) -> ScanStatusResponse:
+async def gateway_status(
+    request: Request, scan_id: str, api_key: str = Depends(verify_api_key)
+) -> ScanStatusResponse:
     async with scan_results_lock:
         result = scan_results.get(scan_id)
 
@@ -405,7 +427,9 @@ async def gateway_status(request: Request, scan_id: str) -> ScanStatusResponse:
 
 @app.get("/gateway/result/{scan_id}", response_model=GatewayScanResponse)
 @limiter.limit("120/minute")
-async def gateway_result(request: Request, scan_id: str) -> GatewayScanResponse:
+async def gateway_result(
+    request: Request, scan_id: str, api_key: str = Depends(verify_api_key)
+) -> GatewayScanResponse:
     async with scan_results_lock:
         result = scan_results.get(scan_id)
     if result is None:
