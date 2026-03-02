@@ -54,7 +54,7 @@ function tierStatus(label: string, status: TierStatus["status"]): TierStatus {
   return { label, status }
 }
 
-function evidenceToItems(evidence: Tier1HeuristicItem[]): EvidenceItem[] {
+export function evidenceToItems(evidence: Tier1HeuristicItem[]): EvidenceItem[] {
   const items: EvidenceItem[] = []
 
   for (const e of evidence || []) {
