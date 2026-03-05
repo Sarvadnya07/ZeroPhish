@@ -8,9 +8,10 @@ import re
 import urllib.parse
 from typing import Optional
 
-from fastapi import Request
+from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from email_validator import validate_email, EmailNotValidError
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -22,6 +23,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Security headers
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
+        # Note: X-XSS-Protection is largely legacy but kept for older browsers
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; script-src 'none'; object-src 'none'"
@@ -53,26 +55,12 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
 
 
 def sanitize_email_content(text: str, max_length: int = 50000) -> str:
-    """
-    Sanitize email content to prevent XSS and injection attacks.
-
-    Args:
-        text: Raw email content
-        max_length: Maximum allowed length
-
-    Returns:
-        Sanitized text
-    """
+    """Sanitize email content to prevent XSS and injection attacks."""
     if not text:
         return ""
 
-    # Truncate to max length
     text = text[:max_length]
-
-    # HTML escape to prevent XSS
     text = html.escape(text)
-
-    # Remove null bytes
     text = text.replace("\x00", "")
 
     return text
@@ -80,52 +68,33 @@ def sanitize_email_content(text: str, max_length: int = 50000) -> str:
 
 def validate_email_address(email: str) -> bool:
     """
-    Validate email address format.
-
-    Args:
-        email: Email address to validate
-
-    Returns:
-        True if valid, False otherwise
+    Validate email address format using email-validator to prevent ReDoS.
     """
     if not email or len(email) > 320:  # RFC 5321
         return False
-
-    # Basic email regex (not perfect but good enough)
-    pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-    return bool(re.match(pattern, email))
+    
+    try:
+        # check_deliverability=False avoids performing a DNS lookup during validation
+        validate_email(email, check_deliverability=False)
+        return True
+    except EmailNotValidError:
+        return False
 
 
 def validate_url(url: str) -> bool:
-    """
-    Validate URL format.
-
-    Args:
-        url: URL to validate
-
-    Returns:
-        True if valid, False otherwise
-    """
-    if not url or len(url) > 2048:  # Common max URL length
+    """Validate URL format and prevent CRLF/Injection."""
+    if not url or len(url) > 2048:
         return False
 
-    # Block control characters and whitespace in the URL structure
-    # This prevents various bypasses including CRLF and space-based bypasses
     if re.search(r"[\s\x00-\x1F\x7F]", url):
         return False
 
     try:
         parsed = urllib.parse.urlparse(url)
-        # Scheme must be exactly http or https (case-insensitive)
         if parsed.scheme.lower() not in ("http", "https"):
             return False
 
-        # Must have a netloc (domain/IP)
-        if not parsed.netloc:
-            return False
-
-        # Ensure hostname exists
-        if not parsed.hostname:
+        if not parsed.netloc or not parsed.hostname:
             return False
 
         return True
@@ -134,22 +103,12 @@ def validate_url(url: str) -> bool:
 
 
 def sanitize_log_message(message: str) -> str:
-    """
-    Sanitize log messages to prevent log injection.
-
-    Args:
-        message: Log message
-
-    Returns:
-        Sanitized message
-    """
+    """Sanitize log messages to prevent log injection."""
     if not message:
         return ""
 
-    # Remove newlines and carriage returns to prevent log injection
     message = message.replace("\n", " ").replace("\r", " ")
 
-    # Truncate long messages
     if len(message) > 500:
         message = message[:497] + "..."
 
@@ -157,15 +116,7 @@ def sanitize_log_message(message: str) -> str:
 
 
 def get_generic_error_message(status_code: int) -> str:
-    """
-    Get generic error message for client (hide internal details).
-
-    Args:
-        status_code: HTTP status code
-
-    Returns:
-        Generic error message
-    """
+    """Get generic error message for client (hide internal details)."""
     error_messages = {
         400: "Invalid request",
         401: "Authentication required",
@@ -176,7 +127,6 @@ def get_generic_error_message(status_code: int) -> str:
         500: "Internal server error",
         503: "Service temporarily unavailable",
     }
-
     return error_messages.get(status_code, "An error occurred")
 
 
@@ -187,36 +137,24 @@ class InputValidator:
     def validate_scan_request(
         sender: str, body: str, links: list, subject: Optional[str] = None
     ) -> dict:
-        """
-        Validate scan request inputs.
-
-        Returns:
-            dict with 'valid' bool and 'errors' list
-        """
         errors = []
 
-        # Validate sender email
         if not validate_email_address(sender):
             errors.append("Invalid sender email format")
 
-        # Validate body length
         if not body:
             errors.append("Email body is required")
-        elif len(body) > 100000:  # 100KB max
+        elif len(body) > 100000:
             errors.append("Email body too large (max 100KB)")
 
-        # Validate links
         if links:
-            if len(links) > 100:  # Max 100 links
+            if len(links) > 100:
                 errors.append("Too many links (max 100)")
+            for link in links[:100]:
+                if isinstance(link, str) and len(link) > 2048:
+                    errors.append(f"Link too long: {link[:50]}...")
+                    break
 
-            for link in links[:100]:  # Validate first 100
-                if isinstance(link, str):
-                    if len(link) > 2048:
-                        errors.append(f"Link too long: {link[:50]}...")
-                        break
-
-        # Validate subject
         if subject and len(subject) > 1000:
             errors.append("Subject too long (max 1000 chars)")
 
