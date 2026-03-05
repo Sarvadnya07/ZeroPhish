@@ -24,7 +24,7 @@ app = FastAPI(title="ZeroPhish Tier 1 (Local)", version="0.1.0")
 # CORS Configuration - Environment-based for security
 ALLOWED_ORIGINS = [
     origin.strip()
-    for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,chrome-extension://*").split(
+    for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(
         ","
     )
     if origin.strip() and origin.strip() != "chrome-extension://*"
@@ -33,7 +33,11 @@ ALLOWED_ORIGINS = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX", r"chrome-extension://.*"),
+    # For security, do not default to allowing all Chrome extensions.
+    # To allow a specific extension, set ALLOW_ORIGIN_REGEX to match your
+    # extension's origin (e.g., r"chrome-extension://abcdefg...") or add
+    # the specific origin to ALLOWED_ORIGINS.
+    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX"),
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],

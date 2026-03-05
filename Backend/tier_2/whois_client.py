@@ -43,7 +43,6 @@ class WhoisClient:
         self.api_endpoints = {
             "whoisxml": "https://www.whoisxmlapi.com/whoisserver/WhoisService",
             "whoisapi": "https://www.whoisapi.com/api/v1",
-            "ipapi": "http://ip-api.com/json/{domain}",
         }
 
     async def get_domain_age(self, domain: str) -> Tuple[int, str]:
@@ -120,8 +119,6 @@ class WhoisClient:
                 age = await self._query_whoisxml(domain)
             elif self.api_provider == "whoisapi":
                 age = await self._query_whoisapi(domain)
-            elif self.api_provider == "ipapi":
-                age = await self._query_ipapi(domain)
             else:
                 logger.warning(f"⚠️ Unknown API provider: {self.api_provider}")
                 return None
@@ -168,13 +165,6 @@ class WhoisClient:
             age = (datetime.now(timezone.utc) - created_date).days
             return age
 
-        return None
-
-    async def _query_ipapi(self, domain: str) -> Optional[int]:
-        """Query ip-api.com (free, limited features)."""
-        # Note: ip-api doesn't provide WHOIS data, this is a placeholder
-        # You might want to use a different free API or remove this
-        logger.warning("⚠️ ip-api doesn't provide domain age, skipping")
         return None
 
     async def _get_from_cache(self, domain: str) -> Optional[int]:

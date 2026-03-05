@@ -15,9 +15,10 @@ from pathlib import Path
 from typing import Dict
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Security, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from fastapi.security import APIKeyHeader
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -39,10 +40,28 @@ from models.gateway_models import (
     Tier2Result,
     Tier3Result,
 )
-from security.middleware import InputValidator, RequestSizeLimitMiddleware, SecurityHeadersMiddleware
+from security.middleware import (
+    InputValidator,
+    RequestSizeLimitMiddleware,
+    SecurityHeadersMiddleware,
+)
 from tier_2.main import ThreatAnalyzer, get_domain_age
 
 load_dotenv()
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(api_key: str = Security(api_key_header)):
+    expected_api_key = os.getenv("API_KEY")
+    if not expected_api_key:
+        return api_key
+    if not api_key or api_key != expected_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Could not validate API key"
+        )
+    return api_key
+
 
 TIER3_TIMEOUT = int(os.getenv("TIER3_TIMEOUT", "5"))
 WEIGHTS = ScoringWeights()
@@ -94,7 +113,11 @@ ALLOWED_ORIGINS = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX", r"chrome-extension://.*"),
+    # For security, do not default to allowing all Chrome extensions.
+    # To allow a specific extension, set ALLOW_ORIGIN_REGEX to match your
+    # extension's origin (e.g., r"chrome-extension://abcdefg...") or add
+    # the specific origin to ALLOWED_ORIGINS.
+    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX"),
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
     allow_credentials=False,
@@ -141,24 +164,34 @@ def _determine_threat_status(score: float) -> str:
     return "OK"
 
 
+def _calculate_weighted_score(scores: list[float], weights: list[float]) -> float:
+    """
+    Unified weighted score calculation with fallback to simple average.
+    Ensures final score is clamped between 0 and 100.
+    """
+    if not scores:
+        return 0.0
+
+    if len(scores) != len(weights):
+        raise ValueError("Scores and weights must have the same length")
+
+    total_weight = sum(weights)
+    if total_weight <= 0:
+        return _clamp_score(sum(scores) / len(scores))
+
+    weighted_sum = sum(s * w for s, w in zip(scores, weights))
+    return _clamp_score(weighted_sum / total_weight)
+
+
 def _calculate_partial_score(tier1_score: float, tier2_score: float) -> float:
-    partial_weight = WEIGHTS.tier1 + WEIGHTS.tier2
-    if partial_weight <= 0:
-        return _clamp_score((tier1_score + tier2_score) / 2.0)
-    partial = (tier1_score * WEIGHTS.tier1) + (tier2_score * WEIGHTS.tier2)
-    return _clamp_score(partial / partial_weight)
+    return _calculate_weighted_score([tier1_score, tier2_score], [WEIGHTS.tier1, WEIGHTS.tier2])
 
 
 def _calculate_final_score(tier1_score: float, tier2_score: float, tier3_score: float) -> float:
-    total_weight = WEIGHTS.tier1 + WEIGHTS.tier2 + WEIGHTS.tier3
-    if total_weight <= 0:
-        return _clamp_score((tier1_score + tier2_score + tier3_score) / 3.0)
-    total = (
-        (tier1_score * WEIGHTS.tier1)
-        + (tier2_score * WEIGHTS.tier2)
-        + (tier3_score * WEIGHTS.tier3)
+    return _calculate_weighted_score(
+        [tier1_score, tier2_score, tier3_score],
+        [WEIGHTS.tier1, WEIGHTS.tier2, WEIGHTS.tier3],
     )
-    return _clamp_score(total / total_weight)
 
 
 def _merge_evidence(
@@ -176,7 +209,7 @@ def _merge_evidence(
         if text:
             merged.append(text)
 
-    for phrase in (tier3_flagged_phrases or []):
+    for phrase in tier3_flagged_phrases or []:
         text = str(phrase).strip()
         if text:
             merged.append(f"AI: {text}")
@@ -229,7 +262,7 @@ async def execute_tier2(sender: str, body: str, links: list[str]) -> Tier2Result
 
         threat_score = _clamp_score(threat_data.threat_level)
         threat_status = _determine_threat_status(threat_score)
-        tier2_score = (domain_score * 0.3) + (threat_score * 0.7)
+        tier2_score = _calculate_weighted_score([domain_score, threat_score], [0.3, 0.7])
 
         if threat_data.category != "Safe":
             evidence.append(f"Threat indicators detected: {threat_data.category}.")
@@ -326,6 +359,7 @@ async def gateway_scan(
     request: Request,
     scan_request: GatewayScanRequest,
     background_tasks: BackgroundTasks,
+    api_key: str = Depends(verify_api_key),
 ) -> GatewayScanResponse:
     validation = InputValidator.validate_scan_request(
         sender=scan_request.sender,
@@ -380,7 +414,9 @@ async def gateway_scan(
 
 @app.get("/gateway/status/{scan_id}", response_model=ScanStatusResponse)
 @limiter.limit("120/minute")
-async def gateway_status(request: Request, scan_id: str) -> ScanStatusResponse:
+async def gateway_status(
+    request: Request, scan_id: str, api_key: str = Depends(verify_api_key)
+) -> ScanStatusResponse:
     async with scan_results_lock:
         result = scan_results.get(scan_id)
 
@@ -405,7 +441,9 @@ async def gateway_status(request: Request, scan_id: str) -> ScanStatusResponse:
 
 @app.get("/gateway/result/{scan_id}", response_model=GatewayScanResponse)
 @limiter.limit("120/minute")
-async def gateway_result(request: Request, scan_id: str) -> GatewayScanResponse:
+async def gateway_result(
+    request: Request, scan_id: str, api_key: str = Depends(verify_api_key)
+) -> GatewayScanResponse:
     async with scan_results_lock:
         result = scan_results.get(scan_id)
     if result is None:
