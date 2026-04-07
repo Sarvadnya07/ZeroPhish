@@ -270,7 +270,7 @@ self.ttl = 300  # Change to desired seconds (default: 5 minutes)
 
 ### Customizing Threat Patterns
 
-Edit the threat patterns in `tier_2/main.py` in the `ThreatAnalyzer` class:
+Edit the threat patterns in `tier_2/threat_patterns.json`:
 - `URGENCY_PATTERNS`
 - `FINANCIAL_PATTERNS`
 - `CREDENTIAL_PATTERNS`

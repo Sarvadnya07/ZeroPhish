@@ -112,7 +112,7 @@ app.add_middleware(RequestSizeLimitMiddleware, max_size=1_000_000)  # 1MB limit
 # CORS Configuration - Environment-based
 ALLOWED_ORIGINS = [
     origin.strip()
-    for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,chrome-extension://*").split(
+    for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(
         ","
     )
     if origin.strip() and origin.strip() != "chrome-extension://*"
@@ -121,7 +121,11 @@ ALLOWED_ORIGINS = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX", r"chrome-extension://.*"),
+    # For security, do not default to allowing all Chrome extensions.
+    # To allow a specific extension, set ALLOW_ORIGIN_REGEX to match your
+    # extension's origin (e.g., r"chrome-extension://abcdefg...") or add
+    # the specific origin to ALLOWED_ORIGINS.
+    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX"),
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Content-Type"],
     allow_credentials=False,
@@ -163,121 +167,43 @@ def _category_from_verdict(verdict: str | None) -> str:
 # --- THREAT ANALYSIS LOGIC ---
 
 
+def _load_threat_patterns() -> Dict[str, List[str]]:
+    """Load threat patterns from JSON file."""
+    pattern_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "threat_patterns.json")
+    try:
+        with open(pattern_file, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to load threat patterns from {pattern_file}: {e}")
+        return {}
+
+
+_THREAT_PATTERNS = _load_threat_patterns()
+
+
 class ThreatAnalyzer:
     """Local threat analysis engine (no external AI)"""
 
     # Threat patterns database
-    URGENCY_PATTERNS = [
-        "urgent",
-        "immediately",
-        "asap",
-        "right away",
-        "deadline",
-        "expire",
-        "last chance",
-        "limited time",
-        "act now",
-        "don't delay",
-        "emergency",
-        "urgent action",
-        "immediate attention",
-        "time sensitive",
-    ]
+    URGENCY_PATTERNS = _THREAT_PATTERNS.get("URGENCY_PATTERNS", [])
+    FINANCIAL_PATTERNS = _THREAT_PATTERNS.get("FINANCIAL_PATTERNS", [])
+    CREDENTIAL_PATTERNS = _THREAT_PATTERNS.get("CREDENTIAL_PATTERNS", [])
+    AUTHORITY_PATTERNS = _THREAT_PATTERNS.get("AUTHORITY_PATTERNS", [])
+    SCARE_TACTICS = _THREAT_PATTERNS.get("SCARE_TACTICS", [])
+    SUSPICIOUS_URLS = _THREAT_PATTERNS.get("SUSPICIOUS_URLS", [])
 
-    FINANCIAL_PATTERNS = [
-        "money",
-        "payment",
-        "invoice",
-        "bank",
-        "wire",
-        "transfer",
-        "account",
-        "fund",
-        "cash",
-        "credit",
-        "debit",
-        "refund",
-        "prize",
-        "lottery",
-        "inheritance",
-        "million",
-        "billion",
-        "dollar",
-        "euro",
-        "pound",
-    ]
+    # Pre-compiled regexes for optimized pattern matching
+    URGENCY_RE = re.compile("|".join(map(re.escape, sorted(URGENCY_PATTERNS, key=len, reverse=True))))
+    FINANCIAL_RE = re.compile("|".join(map(re.escape, sorted(FINANCIAL_PATTERNS, key=len, reverse=True))))
+    CREDENTIAL_RE = re.compile("|".join(map(re.escape, sorted(CREDENTIAL_PATTERNS, key=len, reverse=True))))
+    AUTHORITY_RE = re.compile("|".join(map(re.escape, sorted(AUTHORITY_PATTERNS, key=len, reverse=True))))
+    SCARE_RE = re.compile("|".join(map(re.escape, sorted(SCARE_TACTICS, key=len, reverse=True))))
+    SUSPICIOUS_URLS_RE = re.compile("|".join(map(re.escape, sorted(SUSPICIOUS_URLS, key=len, reverse=True))))
 
-    CREDENTIAL_PATTERNS = [
-        "password",
-        "login",
-        "verify",
-        "confirm",
-        "account",
-        "security",
-        "update",
-        "authenticate",
-        "validate",
-        "credentials",
-        "username",
-        "sign in",
-        "log in",
-        "access",
-        "reset",
-        "change password",
-    ]
-
-    AUTHORITY_PATTERNS = [
-        "irs",
-        "tax",
-        "government",
-        "police",
-        "fbi",
-        "court",
-        "legal",
-        "official",
-        "authority",
-        "administration",
-        "department",
-        "agency",
-        "ceo",
-        "manager",
-        "director",
-        "president",
-        "executive",
-    ]
-
-    SCARE_TACTICS = [
-        "suspend",
-        "terminate",
-        "locked",
-        "blocked",
-        "compromised",
-        "unauthorized",
-        "breach",
-        "hacked",
-        "security alert",
-        "warning",
-        "violation",
-        "penalty",
-        "fine",
-        "arrest",
-        "lawsuit",
-    ]
-
-    SUSPICIOUS_URLS = [
-        "bit.ly",
-        "tinyurl",
-        "goo.gl",
-        "ow.ly",
-        "is.gd",
-        "buff.ly",
-        "adf.ly",
-        "shorte.st",
-        "bc.vc",
-        "adfly",
-        "bitly",
-        "shorturl",
-    ]
+    IP_LINK_REGEX = re.compile(r"https?://\d{1,3}(?:\.\d{1,3}){3}(?:[:/]|$)")
+    SUSPICIOUS_TLD_REGEX = re.compile(
+        r"\.(zip|mov|top|xyz|click|country|stream|gq|tk|ml|ga|cf)(?:/|$)"
+    )
 
     @classmethod
     async def analyze_threat(
@@ -298,45 +224,44 @@ class ThreatAnalyzer:
         flagged_phrases: List[str] = []
 
         # Check for urgency patterns
-        for pattern in cls.URGENCY_PATTERNS:
-            if pattern in body_lower:
-                urgency_score += 10
-                flagged_phrases.append(pattern)
+        urgency_matches = set(cls.URGENCY_RE.findall(body_lower))
+        if urgency_matches:
+            urgency_score = len(urgency_matches) * 10
+            flagged_phrases.extend(urgency_matches)
 
         # Check for financial patterns
-        for pattern in cls.FINANCIAL_PATTERNS:
-            if pattern in body_lower:
-                financial_score += 8
-                flagged_phrases.append(pattern)
+        financial_matches = set(cls.FINANCIAL_RE.findall(body_lower))
+        if financial_matches:
+            financial_score = len(financial_matches) * 8
+            flagged_phrases.extend(financial_matches)
 
         # Check for credential patterns
-        for pattern in cls.CREDENTIAL_PATTERNS:
-            if pattern in body_lower:
-                credential_score += 7
-                flagged_phrases.append(pattern)
+        credential_matches = set(cls.CREDENTIAL_RE.findall(body_lower))
+        if credential_matches:
+            credential_score = len(credential_matches) * 7
+            flagged_phrases.extend(credential_matches)
 
         # Check for authority impersonation
-        for pattern in cls.AUTHORITY_PATTERNS:
-            if pattern in body_lower:
-                authority_score += 9
-                flagged_phrases.append(pattern)
+        authority_matches = set(cls.AUTHORITY_RE.findall(body_lower))
+        if authority_matches:
+            authority_score = len(authority_matches) * 9
+            flagged_phrases.extend(authority_matches)
 
         # Check for scare tactics
-        for pattern in cls.SCARE_TACTICS:
-            if pattern in body_lower:
-                scare_score += 8
-                flagged_phrases.append(pattern)
+        scare_matches = set(cls.SCARE_RE.findall(body_lower))
+        if scare_matches:
+            scare_score = len(scare_matches) * 8
+            flagged_phrases.extend(scare_matches)
 
         # Check for suspicious URLs
         for link in links:
             lowered_link = (link or "").lower()
-            for suspicious in cls.SUSPICIOUS_URLS:
-                if suspicious in lowered_link:
-                    link_score += 15
-                    flagged_phrases.append(f"suspicious_url:{suspicious}")
-                    break
+            suspicious_match = cls.SUSPICIOUS_URLS_RE.search(lowered_link)
+            if suspicious_match:
+                link_score += 15
+                flagged_phrases.append(f"suspicious_url:{suspicious_match.group()}")
 
-            if re.search(r"https?://\d{1,3}(?:\.\d{1,3}){3}(?:[:/]|$)", lowered_link):
+            if cls.IP_LINK_REGEX.search(lowered_link):
                 link_score += 20
                 flagged_phrases.append("ip_based_link")
 
@@ -344,9 +269,10 @@ class ThreatAnalyzer:
                 link_score += 18
                 flagged_phrases.append("punycode_link")
 
-            if re.search(
-                r"\.(zip|mov|top|xyz|click|country|stream|gq|tk|ml|ga|cf)(?:/|$)", lowered_link
-            ):
+if cls.SUSPICIOUS_TLD_REGEX.search(lowered_link):
+    link_score += 10
+    flagged_phrases.append("suspicious_tld")
+    main
                 link_score += 10
                 flagged_phrases.append("suspicious_tld")
 
