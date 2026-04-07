@@ -33,11 +33,11 @@ ALLOWED_ORIGINS = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    # For security, do not default to allowing all Chrome extensions.
-    # To allow a specific extension, set ALLOW_ORIGIN_REGEX to match your
-    # extension's origin (e.g., r"chrome-extension://abcdefg...") or add
-    # the specific origin to ALLOWED_ORIGINS.
-    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX"),
+# For security, do not default to allowing all Chrome extensions.
+# To allow a specific extension, set ALLOW_ORIGIN_REGEX to match your
+# extension's origin (e.g., r"chrome-extension://abcdefg...") or add
+# the specific origin to ALLOWED_ORIGINS.
+allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX"), main
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
@@ -140,15 +140,23 @@ def _coerce_extension_report(report: dict[str, Any]) -> Tier1Report:
             else:
                 evidence_list.append(HeuristicItem(check="extension", detail=str(e)))
 
-    tier_details = report.get("tier_details", {}) if isinstance(report.get("tier_details"), dict) else {}
-    tier1_details = tier_details.get("tier1", {}) if isinstance(tier_details.get("tier1"), dict) else {}
-    tier2_details = tier_details.get("tier2", {}) if isinstance(tier_details.get("tier2"), dict) else {}
+    tier_details = (
+        report.get("tier_details", {}) if isinstance(report.get("tier_details"), dict) else {}
+    )
+    tier1_details = (
+        tier_details.get("tier1", {}) if isinstance(tier_details.get("tier1"), dict) else {}
+    )
+    tier2_details = (
+        tier_details.get("tier2", {}) if isinstance(tier_details.get("tier2"), dict) else {}
+    )
     nested_threat = (
         tier_details.get("threat_analysis", {})
         if isinstance(tier_details.get("threat_analysis"), dict)
         else {}
     )
-    threat_analysis = report.get("threat_analysis", {}) if isinstance(report.get("threat_analysis"), dict) else {}
+    threat_analysis = (
+        report.get("threat_analysis", {}) if isinstance(report.get("threat_analysis"), dict) else {}
+    )
     heuristics_score = tier1_details.get("score")
     ml_threat_level = tier2_details.get("score")
     if ml_threat_level is None:
@@ -167,7 +175,9 @@ def _coerce_extension_report(report: dict[str, Any]) -> Tier1Report:
                 href = str(l.get("href") or "").strip()
                 text = l.get("text")
                 if href:
-                    links.append(LinkItem(href=href, text=str(text) if isinstance(text, str) else None))
+                    links.append(
+                        LinkItem(href=href, text=str(text) if isinstance(text, str) else None)
+                    )
             else:
                 href = str(l).strip()
                 if href:
@@ -281,7 +291,7 @@ def _load_pipeline() -> tuple[Any, str]:
         return _pipeline, model_id
 
     try:
-        from transformers import pipeline  # type: ignore
+        from transformers import pipeline
     except Exception as e:  # pragma: no cover
         raise RuntimeError(f"transformers not installed: {e}") from e
 
