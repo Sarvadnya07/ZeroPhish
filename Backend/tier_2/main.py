@@ -509,6 +509,18 @@ latest_scan_lock = asyncio.Lock()
 # --- DOMAIN ANALYSIS ---
 
 
+def analyze_domain_age(age_days: int) -> Tuple[float, str, str]:
+    """Analyze domain age and return (score, status, evidence_message)."""
+    if age_days == 0:
+        return 70.0, "UNKNOWN", "Could not verify domain age."
+    elif age_days < 30:
+        return 100.0, "CRITICAL", f"Domain is very new ({age_days} days old)."
+    elif age_days < 365:
+        return 60.0, "SUSPICIOUS", f"Domain is relatively new ({age_days} days old)."
+    else:
+        return 10.0, "OK", f"Domain is established ({age_days} days old)."
+
+
 def get_domain_age(domain: str) -> int:
     """Tier 2: WHOIS Check. Returns age in days."""
     try:
@@ -586,22 +598,15 @@ async def scan_endpoint(request: ScanRequest):
             age_days = await asyncio.to_thread(get_domain_age, domain)
             source = "library"
 
-        if age_days == 0:
-            domain_score = 70
-            evidence.append("⚠️ Could not verify domain age.")
-            domain_status = "UNKNOWN"
-        elif age_days < 30:
-            domain_score = 100
-            evidence.append(f"🚨 Domain is very young ({age_days} days).")
-            domain_status = "CRITICAL"
-        elif age_days < 365:
-            domain_score = 60
-            evidence.append(f"⚠️ Domain is relatively new ({age_days} days).")
-            domain_status = "SUSPICIOUS"
+        domain_score, domain_status, msg = analyze_domain_age(age_days)
+        if domain_status == "UNKNOWN":
+            evidence.append(f"⚠️ {msg}")
+        elif domain_status == "CRITICAL":
+            evidence.append(f"🚨 {msg}")
+        elif domain_status == "SUSPICIOUS":
+            evidence.append(f"⚠️ {msg}")
         else:
-            domain_score = 10
-            evidence.append(f"✓ Domain is established ({age_days} days old).")
-            domain_status = "OK"
+            evidence.append(f"✓ {msg}")
     except Exception as e:
         logger.error(f"Domain analysis failed: {e}", exc_info=True)
         domain_score = 50

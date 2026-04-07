@@ -46,6 +46,7 @@ from security.middleware import (
     SecurityHeadersMiddleware,
 )
 from tier_2.main import ThreatAnalyzer, get_domain_age
+main
 
 load_dotenv()
 
@@ -241,18 +242,8 @@ async def execute_tier2(sender: str, body: str, links: list[str]) -> Tier2Result
             evidence.append("Could not parse sender domain.")
         else:
             age_days = await asyncio.to_thread(get_domain_age, domain)
-            if age_days == 0:
-                domain_score, domain_status = 70.0, "UNKNOWN"
-                evidence.append("Could not verify domain age.")
-            elif age_days < 30:
-                domain_score, domain_status = 100.0, "CRITICAL"
-                evidence.append(f"Domain is very new ({age_days} days old).")
-            elif age_days < 365:
-                domain_score, domain_status = 60.0, "SUSPICIOUS"
-                evidence.append(f"Domain is relatively new ({age_days} days old).")
-            else:
-                domain_score, domain_status = 10.0, "OK"
-                evidence.append(f"Domain is established ({age_days} days old).")
+            domain_score, domain_status, msg = analyze_domain_age(age_days)
+            evidence.append(msg)
 
         threat_data = await ThreatAnalyzer.analyze_threat(
             email_body=body,
