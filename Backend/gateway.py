@@ -249,7 +249,34 @@ def _merge_evidence(
         if item not in seen:
             seen.add(item)
             deduped.append(item)
-    return deduped[:50]
+    return deduped
+
+
+async def _notify_live_dashboard(res: GatewayScanResponse, sender: str, subject: str) -> None:
+    """Send scan update to the Tier 1 live dashboard (port 8000)."""
+    try:
+        import httpx
+        url = os.getenv("LIVE_DASHBOARD_URL", "http://127.0.0.1:8000/tier1/report")
+        payload = {
+            "scan_id": res.scan_id,
+            "timestamp": res.timestamp,
+            "sender": sender,
+            "subject": subject,
+            "final_score": res.final_score if res.final_score is not None else res.partial_score,
+            "verdict": res.verdict,
+            "layers_completed": res.layers_completed,
+            "evidence": res.combined_evidence,
+            "tier_details": {
+                "tier1": {"score": res.tier1.score},
+                "tier2": {"score": res.tier2.score},
+                "tier3": {"score": res.tier3.score if res.tier3 else 0},
+            },
+        }
+        async with httpx.AsyncClient() as client:
+            await client.post(url, json=payload, timeout=2.0)
+    except Exception as e:
+        # Don't fail the scan if dashboard notification fails
+        pass[:50]
 
 
 def _trim_scan_history() -> None:
@@ -359,6 +386,7 @@ async def _finalize_tier3(scan_id: str, email_body: str) -> None:
                 "tier3": tier3_result,
                 "tier3_status": tier3_result.status,
                 "complete": True,
+                "layers_completed": 3,
                 "final_score": final_score,
                 "verdict": final_verdict,
                 "combined_evidence": _merge_evidence(
@@ -370,6 +398,11 @@ async def _finalize_tier3(scan_id: str, email_body: str) -> None:
             }
         )
         scan_results[scan_id] = updated
+
+        # Notify dashboard of final result (Level 3)
+        sender_meta = getattr(existing, "_sender", "unknown@unknown.com")
+        subject_meta = getattr(existing, "_subject", "No Subject")
+        asyncio.create_task(_notify_live_dashboard(updated, sender_meta, subject_meta))
 
     # Fire webhooks and record analytics (outside the lock)
     if EXTENSIONS_AVAILABLE:
@@ -442,14 +475,21 @@ async def gateway_scan(
         tier3=None,
         tier3_status="processing",
         complete=False,
+        layers_completed=2,
         combined_evidence=_merge_evidence(tier1.evidence, tier2.evidence, None),
         weights=WEIGHTS,
         total_execution_time_ms=(time.perf_counter() - scan_started_at[scan_id]) * 1000,
     )
 
     async with scan_results_lock:
+        # Cache metadata for reporting
+        setattr(response, "_sender", scan_request.sender)
+        setattr(response, "_subject", scan_request.subject or "No Subject")
         scan_results[scan_id] = response
         _trim_scan_history()
+
+    # Notify dashboard of partial result (Level 2)
+    asyncio.create_task(_notify_live_dashboard(response, scan_request.sender, scan_request.subject or "No Subject"))
 
     background_tasks.add_task(_finalize_tier3, scan_id, scan_request.body)
     return response
@@ -474,6 +514,7 @@ async def gateway_status(
     return ScanStatusResponse(
         scan_id=scan_id,
         complete=result.complete,
+        layers_completed=result.layers_completed,
         tier3_status=result.tier3_status,
         final_score=result.final_score,
         verdict=result.verdict,

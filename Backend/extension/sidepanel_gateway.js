@@ -211,7 +211,20 @@ scanButton.addEventListener('click', async () => {
         renderReasons(heur.t1_evidence, heur.t1_category);
         setCategory(heur.t1_category);
         setSummary(heur.User_Friendly_Summary || 'Analyzing...');
-
+ 
+        // Notify dashboard of initial results (Level 1)
+        await postLiveReport({
+            scan_id: scanId,
+            timestamp: new Date().toISOString(),
+            sender: email.senderEmail || email.sender || 'unknown@unknown.com',
+            subject: email.subject || 'No Subject',
+            final_score: heur.t1_score,
+            verdict: heur.t1_category.toUpperCase(),
+            layers_completed: 1,
+            evidence: heur.t1_evidence,
+            links: (email.links || []).map(l => typeof l === 'string' ? l : l.href)
+        });
+ 
         // Step 2: Send to gateway for Tier 2 + Tier 3
         setStatus('🌐 Tier 2: Analyzing metadata...');
 

@@ -100,6 +100,7 @@ class Tier1Report(BaseModel):
     email: EmailMeta = Field(default_factory=EmailMeta)
     links: list[LinkItem] = Field(default_factory=list)
     tier1: Tier1Result
+    layers_completed: int = 1
 
 
 def _category_from_verdict(verdict: str | None) -> str:
@@ -225,6 +226,7 @@ def _coerce_extension_report(report: dict[str, Any]) -> Tier1Report:
             ml_model="ZeroPhish 3-Tier",
             ml_reasoning=str(threat_analysis.get("reasoning") or ""),
         ),
+        layers_completed=int(report.get("layers_completed", report.get("layers", 1))),
     )
 
 

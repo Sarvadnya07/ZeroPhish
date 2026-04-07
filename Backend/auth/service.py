@@ -38,7 +38,7 @@ def _seed_admin() -> None:
     """Seed a default admin account if none exist."""
     if _users_by_email:
         return
-    admin_email = os.getenv("ADMIN_EMAIL", "admin@zerophish.local")
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass  = os.getenv("ADMIN_PASSWORD", "ZeroPhish@Admin1")
     _create_user_internal(
         UserCreate(

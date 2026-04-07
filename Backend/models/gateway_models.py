@@ -131,6 +131,7 @@ class GatewayScanResponse(BaseModel):
     # Status
     tier3_status: str = "processing"  # "processing" | "complete" | "failed" | "timeout"
     complete: bool = False
+    layers_completed: int = 0
 
     # Evidence and metadata
     combined_evidence: List[str]
@@ -146,6 +147,7 @@ class ScanStatusResponse(BaseModel):
 
     scan_id: str
     complete: bool
+    layers_completed: int = 0
     tier3_status: str
     final_score: Optional[float] = None
     verdict: str

@@ -152,6 +152,7 @@ class ScanResponse(BaseModel):
     evidence: List[str]
     tier_details: dict
     threat_analysis: ThreatAnalysis
+    layers_completed: int = 2
     cached: bool = False
 
 
@@ -894,6 +895,7 @@ async def receive_extension_report(report: Dict):
                     "ml_model": "ZeroPhish 3-Tier",
                     "ml_reasoning": report.get("threat_analysis", {}).get("reasoning", ""),
                 },
+                "layers_completed": report.get("layers_completed", report.get("layers", 1)),
             }
 
         logger.info(f"✅ Received extension report: {latest_scan_result['scan_id']}")

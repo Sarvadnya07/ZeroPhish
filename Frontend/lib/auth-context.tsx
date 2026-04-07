@@ -49,7 +49,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const register = async (email: string, password: string, name: string) => {
-    await api.register(email, password, name);
+    await api.auth.register(email, password, name);
   };
 
   return (

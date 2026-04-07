@@ -22,6 +22,7 @@ export interface ScanResult {
   threatScore: number
   threatLevel: ThreatLevel
   phase: ScanPhase
+  layersCompleted: number
 
   tier1: {
     regexCheck: TierStatus
@@ -52,6 +53,7 @@ export const SAFE_STATE: ScanResult = {
   threatScore: 8,
   threatLevel: "safe",
   phase: "complete",
+  layersCompleted: 3,
 
   tier1: {
     regexCheck: { label: "Regex Pattern Check", status: "pass" },
@@ -94,6 +96,7 @@ export const THREAT_STATE: ScanResult = {
   threatScore: 92,
   threatLevel: "threat",
   phase: "complete",
+  layersCompleted: 3,
 
   tier1: {
     regexCheck: { label: "Regex Pattern Check", status: "fail" },
@@ -156,6 +159,7 @@ export const SCANNING_STATE: ScanResult = {
   threatScore: 0,
   threatLevel: "safe",
   phase: "scanning",
+  layersCompleted: 1,
 
   tier1: {
     regexCheck: { label: "Regex Pattern Check", status: "running" },
@@ -186,6 +190,7 @@ export const LIVE_IDLE_STATE: ScanResult = {
   threatScore: 0,
   threatLevel: "safe",
   phase: "idle",
+  layersCompleted: 0,
 
   tier1: {
     regexCheck: { label: "Regex Pattern Check", status: "pending" },
