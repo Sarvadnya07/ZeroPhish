@@ -1,9 +1,22 @@
-import { SentinelPanel } from "@/components/sentinel/sentinel-panel"
+"use client";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/lib/auth-context";
 
-export default function Page() {
+export default function RootPage() {
+  const { token, loading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!loading) {
+      if (token) router.replace("/dashboard");
+      else router.replace("/login");
+    }
+  }, [token, loading, router]);
+
   return (
-    <main className="min-h-screen bg-[#050505]">
-      <SentinelPanel />
-    </main>
-  )
+    <div className="flex h-screen items-center justify-center bg-[#050505]">
+      <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
 }

@@ -45,8 +45,25 @@ from security.middleware import (
     RequestSizeLimitMiddleware,
     SecurityHeadersMiddleware,
 )
-from tier_2.main import ThreatAnalyzer, get_domain_age
-main
+from tier_2.main import ThreatAnalyzer, get_domain_age, analyze_domain_age
+
+# ── New feature modules ────────────────────────────────────────────────────────
+try:
+    from auth.router import router as auth_router
+    from webhooks.router import router as webhooks_router
+    from incidents.router import router as incidents_router
+    from email_scanner.router import router as email_router
+    from analytics.router import router as analytics_router
+    from awareness.router import router as awareness_router
+    from webhooks.service import WebhookService
+    from webhooks.models import WebhookEventType
+    from analytics.service import AnalyticsService
+    from vision.router import router as vision_router
+    EXTENSIONS_AVAILABLE = True
+except ImportError as _ext_err:
+    import logging as _logging
+    _logging.getLogger(__name__).warning("Extension modules not fully loaded: %s", _ext_err)
+    EXTENSIONS_AVAILABLE = False
 
 load_dotenv()
 
@@ -98,7 +115,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="ZeroPhish API Gateway",
-    version="1.1.0",
+    description="AI-powered phishing detection — 3-tier analysis + auth, webhooks, incidents, analytics.",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -135,6 +153,16 @@ async def rate_limit_handler(request: Request, exc: Exception) -> Response:
 
 
 app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
+
+# Register extension routers
+if EXTENSIONS_AVAILABLE:
+    app.include_router(auth_router)
+    app.include_router(webhooks_router)
+    app.include_router(incidents_router)
+    app.include_router(email_router)
+    app.include_router(analytics_router)
+    app.include_router(awareness_router)
+    app.include_router(vision_router)
 
 scan_results: Dict[str, GatewayScanResponse] = {}
 scan_started_at: Dict[str, float] = {}
@@ -343,6 +371,30 @@ async def _finalize_tier3(scan_id: str, email_body: str) -> None:
         )
         scan_results[scan_id] = updated
 
+    # Fire webhooks and record analytics (outside the lock)
+    if EXTENSIONS_AVAILABLE:
+        payload = updated.model_dump()
+        await WebhookService.fire(WebhookEventType.SCAN_COMPLETE, payload)
+        if final_verdict == "CRITICAL":
+            await WebhookService.fire(WebhookEventType.SCAN_CRITICAL, payload)
+        elif final_verdict == "SUSPICIOUS":
+            await WebhookService.fire(WebhookEventType.SCAN_SUSPICIOUS, payload)
+
+        # Record telemetry
+        sender_meta = getattr(existing, "_sender", "unknown@unknown.com")
+        subject_meta = getattr(existing, "_subject", "")
+        AnalyticsService.record_scan(
+            scan_id=scan_id,
+            sender=sender_meta,
+            subject=subject_meta,
+            final_score=final_score,
+            verdict=final_verdict,
+            category=updated.tier2.threat_details.category if updated.tier2 else "Unknown",
+            tier1=float(existing.tier1.score),
+            tier2=float(existing.tier2.score) if existing.tier2 else 0,
+            tier3=float(tier3_result.score),
+        )
+
 
 @app.post("/gateway/scan", response_model=GatewayScanResponse)
 @limiter.limit("20/minute")
@@ -483,3 +535,4 @@ if __name__ == "__main__":
     import uvicorn
 
     port = int(os.getenv("GATEWAY_PORT", "8001"))
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")

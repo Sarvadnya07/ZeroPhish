@@ -37,7 +37,7 @@ app.add_middleware(
 # To allow a specific extension, set ALLOW_ORIGIN_REGEX to match your
 # extension's origin (e.g., r"chrome-extension://abcdefg...") or add
 # the specific origin to ALLOWED_ORIGINS.
-allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX"), main
+    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX"),
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
