@@ -51,6 +51,8 @@ export function SentinelPanel() {
     }
 
     async function pollLatest() {
+      if (es?.readyState === 1) return // Optimization: Skip polling if SSE stream is active
+
       try {
         const res = await fetch(`${baseUrl}/tier1/latest`, { cache: "no-store" })
         if (!res.ok) return
