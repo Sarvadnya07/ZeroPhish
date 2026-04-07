@@ -114,9 +114,32 @@ function TierCard({
 export function AnalysisPipeline({ data }: { data: ScanResult }) {
   return (
     <div className="flex flex-col gap-4">
-      <h2 className="font-mono text-[10px] font-bold uppercase tracking-widest text-[hsl(0,0%,40%)] px-1">
-        Analysis Pipeline
-      </h2>
+      <div className="flex items-center justify-between px-1">
+        <h2 className="font-mono text-[10px] font-bold uppercase tracking-widest text-[hsl(0,0%,40%)]">
+          Analysis Pipeline
+        </h2>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 group">
+            {[1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className={`h-1.5 w-4 rounded-full transition-all duration-500 ${
+                  i <= data.layersCompleted
+                    ? i === 1
+                      ? "bg-[#00F0FF] shadow-[0_0_8px_rgba(0,240,255,0.4)]"
+                      : i === 2
+                        ? "bg-[#00F0FF] shadow-[0_0_8px_rgba(0,240,255,0.4)]"
+                        : "bg-[#00F0FF] shadow-[0_0_10px_rgba(0,240,255,0.6)]"
+                    : "bg-[hsl(0,0%,15%)]"
+                }`}
+              />
+            ))}
+          </div>
+          <span className="font-mono text-[10px] text-[#00F0FF]">
+            L{data.layersCompleted}/3
+          </span>
+        </div>
+      </div>
 
       {/* Tier 1 */}
       <TierCard number={1} title="Local Guard" icon={Fingerprint} delay={0.1}>

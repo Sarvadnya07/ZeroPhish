@@ -152,6 +152,7 @@ class ScanResponse(BaseModel):
     evidence: List[str]
     tier_details: dict
     threat_analysis: ThreatAnalysis
+    layers_completed: int = 2
     cached: bool = False
 
 
@@ -269,10 +270,7 @@ class ThreatAnalyzer:
                 link_score += 18
                 flagged_phrases.append("punycode_link")
 
-if cls.SUSPICIOUS_TLD_REGEX.search(lowered_link):
-    link_score += 10
-    flagged_phrases.append("suspicious_tld")
-    main
+            if cls.SUSPICIOUS_TLD_REGEX.search(lowered_link):
                 link_score += 10
                 flagged_phrases.append("suspicious_tld")
 
@@ -897,6 +895,7 @@ async def receive_extension_report(report: Dict):
                     "ml_model": "ZeroPhish 3-Tier",
                     "ml_reasoning": report.get("threat_analysis", {}).get("reasoning", ""),
                 },
+                "layers_completed": report.get("layers_completed", report.get("layers", 1)),
             }
 
         logger.info(f"✅ Received extension report: {latest_scan_result['scan_id']}")

@@ -70,6 +70,17 @@ The final threat score uses a **weighted 3-tier formula**:
 - **CORS**: environment-based allowlist with regex support for extension IDs
 - **API Key authentication** (optional for production)
 
+### 🕵️‍♀️ Vision & Behavioral Analysis (New)
+- **CNN Inference Ready**: Dedicated Vision API endpoint to analyze browser DOM screenshots, detecting disguised corporate credentials.
+- **Credential Intercepts**: DOM-mutation tracking that immediately intercepts and warns users if they type passwords into spoofed domains.
+
+### 🛡️ Core Enterprise Modules (New in v2.0)
+- **RBAC Authentication**: End-to-end OAuth-ready authentication supporting Admins, Analysts, Users, and Read-only views.
+- **Incident Management**: Automated Ticketing UI and lifecycle management for Security Operations Centers to triage threat reports.
+- **Deep EML Scanner**: Standalone forensic dashboard to drop `.eml` files for rigorous raw-header DMARC/DKIM analysis and deep static attachment triage.
+- **Security Training**: Interactive awareness module allocating 'XP', tracking live performance quizzes, and dynamically adapting to a user's `Personal Risk Score`.
+- **Advanced Telemetry**: Admin panels tracking 7x24 global threat heatmaps, Live threat feeds, False-Positive workflows, and automated Webhook dispatching (e.g. firing Slack alerts on `SCAN_CRITICAL`).
+
 ### 📡 Real-Time Dashboard
 - Server-Sent Events (SSE) stream for live scan updates
 - Tactical `sentinel-panel`, `forensics-panel`, analysis pipeline visualization
@@ -83,7 +94,7 @@ The final threat score uses a **weighted 3-tier formula**:
 ```
 ZeroPhish/
 ├── Backend/
-│   ├── main.py                 # Tier 1 local FastAPI server (port 8000)
+│   ├── main.py                 # Local BERT + T3-aggregation FastAPI server (port 8000)
 │   ├── gateway.py              # API Gateway orchestrator (port 8001)
 │   ├── gateway_circuit_wrapper.py  # Circuit-breaker wrapper for Tier 3 calls
 │   ├── circuit_breaker.py      # Circuit breaker: CLOSED/OPEN/HALF_OPEN FSM
@@ -103,10 +114,9 @@ ZeroPhish/
 │   │   └── style.css           # Extension styles
 │   │
 │   ├── tier_2/                 # Tier 2: Metadata & ML Analysis
-│   │   ├── main.py             # FastAPI service + ThreatAnalyzer engine
+│   │   ├── main.py             # FastAPI service + ThreatAnalyzer engine + SpeedLayerCache
 │   │   ├── ml_model.py         # HuggingFace DistilBERT integration
 │   │   ├── whois_client.py     # Enhanced WHOIS lookup with caching
-│   │   ├── speed_layer.py      # Redis speed layer abstraction
 │   │   ├── threat_patterns.json # Regex threat database (urgency/financial/credential)
 │   │   └── benchmark*.py       # Performance benchmarking scripts
 │   │
@@ -155,7 +165,7 @@ ZeroPhish/
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/ZeroPhish.git
+git clone https://github.com/Sarvadnya07/ZeroPhish.git
 cd ZeroPhish
 ```
 
@@ -255,7 +265,7 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ## 🔌 API Reference
 
-### Gateway (Port 8001)
+### Gateway Orchestrator (Port 8001)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -263,7 +273,10 @@ Open [http://localhost:3000](http://localhost:3000)
 | `GET` | `/gateway/status/{scan_id}` | Poll scan status (Tier 3 pending) |
 | `GET` | `/gateway/result/{scan_id}` | Retrieve completed scan result |
 | `GET` | `/gateway/health` | Gateway health & circuit breaker status |
-| `GET/POST` | `/gateway/circuit/reset` | Manually reset circuit breaker |
+| `POST` | `/vision/analyze` | Submit image for CNN heuristic vision scoring |
+| `GET` | `/auth/me` | Fetch active User/RBAC context |
+| `GET` | `/email/scan-eml` | Upload and sanitize raw .eml file traces |
+| `GET` | `/analytics/threat-feed` | Fetch live IOCs and heuristics across the platform |
 
 ### Tier 2 Backend (Port 8000)
 
@@ -323,7 +336,7 @@ All configuration is driven by the `Backend/.env` file. Key variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GEMINI_API_KEY` | — | Google Gemini API key (required for Tier 3) |
-| `GATEWAY_PORT` | `8000` | Gateway server port |
+| `GATEWAY_PORT` | `8001` | Gateway server port |
 | `TIER3_TIMEOUT` | `5` | Max seconds to wait for Gemini AI response |
 | `ALLOWED_ORIGINS` | `http://localhost:3000` | CORS-allowed origins (comma-separated) |
 | `ALLOW_ORIGIN_REGEX` | — | Regex to allow specific Chrome extension IDs |

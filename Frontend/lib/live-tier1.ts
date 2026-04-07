@@ -36,6 +36,7 @@ export interface Tier1Report {
     ml_model?: string | null
     ml_reasoning?: string | null
   }
+  layers_completed?: number
 }
 
 function threatLevelFromCategory(category: Tier1Category): ThreatLevel {
@@ -141,6 +142,7 @@ export function tier1ReportToScanResult(report: Tier1Report): ScanResult {
     threatScore: score,
     threatLevel,
     phase: "complete",
+    layersCompleted: report?.layers_completed ?? 1,
 
     tier1: {
       regexCheck: tierStatus("Regex Pattern Check", regexStatus),
