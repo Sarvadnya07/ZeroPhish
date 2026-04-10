@@ -48,19 +48,22 @@ The final threat score uses a **weighted 3-tier formula**:
 - **Sender analysis**: brand spoofing detection (Google, Microsoft, PayPal, Apple, Amazon), domain allowlist, email homograph detection
 - **False-positive mitigation**: verified related-domain mapping (e.g., `gmail.com ↔ google.com`)
 
-### 🧠 Tier 2 — Metadata & ML Analysis (Backend)
-- **WHOIS domain age check**: new domains (`< 30 days`) scored critically
-- **Threat pattern engine**: pre-compiled regex matching against urgency, financial, credential, authority, and scare-tactic databases
-- **ML model integration**: fine-tuned DistilBERT (`cybersectony/phishing-email-detection-distilbert_v2.1`) — **97%+ accuracy**
-- **Redis Speed Layer**: 5-minute response caching via SHA-256 key hashing
-- **Combined scoring**: `ML (60%) + Pattern (40%)` fusion for maximal precision
+### 🧠 Tier 2 — Metadata & OSINT Analysis (Backend)
+- **Real-Time Typosquatting Engine**: High-performance Levenshtein distance calculator protecting against top 50 spoofed enterprise brands (`paypaI`, `arnazon`).
+- **Async Redirect Chain Tracker**: Embedded `httpx.AsyncClient` traces suspected URL shorteners (`bit.ly`, `tinyurl`) to their final destination, flagging hidden malicious TLDs dynamically.
+- **WHOIS domain age check**: New domains (`< 30 days`) scored critically.
+- **Threat pattern engine**: Pre-compiled regex matching for advanced linguistic analysis.
+- **ML model integration**: Fine-tuned DistilBERT (`cybersectony/phishing-email-detection-distilbert_v2.1`) — **97%+ accuracy**.
+- **Redis Speed Layer**: 5-minute response caching via SHA-256 key hashing to ensure < 2.0s analysis overhead.
+- **Combined scoring**: `ML (60%) + Pattern/OSINT (40%)` fusion for maximal precision.
 
 ### 🤖 Tier 3 — Semantic AI Brain (Gemini 1.5 Flash)
-- Powered by **Google Gemini 1.5 Flash** with JSON-mode enforcement
-- Detects zero-day threats: impersonation, psychological manipulation, credential harvesting
-- Classifies emails into: `Financial`, `Urgency`, `Credential`, `Impersonation`, `Safe`, or `AI_UNAVAILABLE`
-- Graceful degradation: timeout/parse errors return neutral fallback scores
-- Protected by a full **Circuit Breaker** (CLOSED → OPEN → HALF_OPEN recovery)
+- Powered by **Google Gemini 1.5 Flash** with JSON-mode enforcement.
+- **Business Email Compromise (BEC) & CEO Fraud Detection**: Actively profiles for synthetic urgency hierarchies ("Are you at your desk?", urgent wire transfers).
+- **Zero-Day Impersonation Engine**: Autonomously triggers `requires_visual_check=True` flags for suspect landing pages, paving the way for pixel-by-pixel CNN vision analysis.
+- Classifies emails into: `BEC`, `CEO_Fraud`, `Financial`, `Urgency`, `Credential`, `Impersonation`, `Safe`, or `AI_UNAVAILABLE`.
+- Graceful degradation: Timeout/parse errors return neutral fallback scores, ensuring service continuity.
+- Protected by a full **Circuit Breaker** (CLOSED → OPEN → HALF_OPEN recovery).
 
 ### 🔐 Security Hardening
 - **Rate limiting**: 20 scans/minute per IP via `slowapi`
@@ -71,8 +74,8 @@ The final threat score uses a **weighted 3-tier formula**:
 - **API Key authentication** (optional for production)
 
 ### 🕵️‍♀️ Vision & Behavioral Analysis (New)
-- **CNN Inference Ready**: Dedicated Vision API endpoint to analyze browser DOM screenshots, detecting disguised corporate credentials.
-- **Credential Intercepts**: DOM-mutation tracking that immediately intercepts and warns users if they type passwords into spoofed domains.
+- **CNN Inference Ready**: Dedicated Vision API endpoint `/vision/analyze` processing browser DOM screenshots from the side panel to detect disguised corporate credentials via visual artifacts.
+- **Credential Intercepts**: The "Quick Visual Check" UI feature parses exact DOM rendering structures to intercept pixel-perfect clones acting as spoofed domains.
 
 ### 🛡️ Core Enterprise Modules (New in v2.0)
 - **RBAC Authentication**: End-to-end OAuth-ready authentication supporting Admins, Analysts, Users, and Read-only views.

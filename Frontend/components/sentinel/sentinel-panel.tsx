@@ -209,3 +209,5 @@ export function SentinelPanel() {
     </div>
   )
 }
+
+export default SentinelPanel

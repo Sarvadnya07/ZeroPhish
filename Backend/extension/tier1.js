@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ZeroPhish Tier 1: Local Heuristic Engine (Manifest V3 safe)
  * Runs in the side panel (no Gmail UI injection).
  */
@@ -197,11 +197,6 @@ function classifyFromEvidence(score, evidence) {
 function scoreLinks({ bodyText, links }, evidence) {
   let points = 0;
   const bodyLower = (bodyText || '').toLowerCase();
-  const claimedBrands = new Set();
-
-  for (const brand of TRUSTED_BRANDS) {
-    if (bodyLower.includes(brand)) claimedBrands.add(brand);
-  }
 
   for (const link of links || []) {
     const href = typeof link === 'string' ? link : link?.href;
@@ -214,10 +209,6 @@ function scoreLinks({ bodyText, links }, evidence) {
     const domain = normalizeDomain(url.hostname);
     const tld = domainTld(domain);
     const anchorLower = anchorText.toLowerCase();
-
-    for (const brand of TRUSTED_BRANDS) {
-      if (anchorLower.includes(brand) || anchorLower.includes(brand.split('.')[0])) claimedBrands.add(brand);
-    }
 
     if (domain.includes('xn--')) {
       points += 18;
@@ -244,16 +235,27 @@ function scoreLinks({ bodyText, links }, evidence) {
       evidence.push({ check: 'tld', points: 10, detail: `Suspicious TLD: .${tld}` });
     }
 
-    for (const brand of claimedBrands) {
-      // Identity mapping: allow related domains (e.g., gmail.com -> google.com/youtube.com).
+    // Check if the link text itself claims to be a trusted brand
+    const linkClaimsBrand = [];
+    for (const brand of TRUSTED_BRANDS) {
+      const brandName = brand.split('.')[0];
+      // Match whole word for the brand name to avoid partial matches (e.g., 'pineapple' matching 'apple')
+      const isWordMatch = new RegExp(`\\b${brandName}\\b`, 'i').test(anchorText);
+      if (isWordMatch || anchorLower.includes(brand)) {
+        linkClaimsBrand.push(brand);
+      }
+    }
+
+    for (const brand of linkClaimsBrand) {
+      // Identity mapping: allow related domains
       if (areRelatedDomains(brand, domain)) continue;
       if (domain.includes(brand)) continue;
 
-      points += 50;
+      points += 40;
       evidence.push({
         check: 'brand_mismatch',
-        points: 50,
-        detail: `Claims "${brand}" but links to "${domain}" (no known relationship)`,
+        points: 40,
+        detail: `Link text claims "${brand}" but points to "${domain}" (suspicious routing)`,
       });
       break;
     }

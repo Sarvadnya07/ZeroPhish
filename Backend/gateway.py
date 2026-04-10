@@ -266,6 +266,10 @@ async def _notify_live_dashboard(res: GatewayScanResponse, sender: str, subject:
             "verdict": res.verdict,
             "layers_completed": res.layers_completed,
             "evidence": res.combined_evidence,
+            "threat_analysis": {
+                "category": res.tier3.category if res.tier3 else "Processing",
+                "reasoning": res.tier3.reasoning if res.tier3 else "Awaiting AI Analysis"
+            },
             "tier_details": {
                 "tier1": {"score": res.tier1.score},
                 "tier2": {"score": res.tier2.score},
@@ -276,7 +280,10 @@ async def _notify_live_dashboard(res: GatewayScanResponse, sender: str, subject:
             await client.post(url, json=payload, timeout=2.0)
     except Exception as e:
         # Don't fail the scan if dashboard notification fails
-        pass[:50]
+        import logging as _logging
+
+        _logging.getLogger(__name__).debug("Live dashboard notify failed: %s", str(e)[:200])
+        return
 
 
 def _trim_scan_history() -> None:

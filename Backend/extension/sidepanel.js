@@ -4,178 +4,137 @@ import { analyzeTier1 } from './tier1.js';
 const GATEWAY_SCAN_URL = 'http://127.0.0.1:8001/gateway/scan';
 const GATEWAY_STATUS_URL = 'http://127.0.0.1:8001/gateway/status';
 const GATEWAY_RESULT_URL = 'http://127.0.0.1:8001/gateway/result';
+const VISION_ANALYZE_URL = 'http://127.0.0.1:8001/vision/analyze';
 
 // Dashboard endpoint
 const BACKEND_REPORT_URL = 'http://127.0.0.1:8000/tier1/report';
 const POLL_INTERVAL_MS = 500;
-const MAX_POLLS = 20;
+const MAX_POLLS = 40; // Increased for Gemini logic
 const MAX_POLL_ERRORS = 3;
 
+// UI References
 const scanButton = document.getElementById('scan-btn');
+const visualCheckBtn = document.getElementById('visual-check-btn');
 const threatScoreEl = document.getElementById('threat-score');
-const statusTextEl = document.getElementById('status-text');
-const mlStatusEl = document.getElementById('ml-status');
-const evidenceListEl = document.getElementById('evidence-list');
-const reasonsListEl = document.getElementById('reasons-list');
-const toggleDetailsBtn = document.getElementById('toggle-details');
-const detailsContainerEl = document.getElementById('details-container');
-const threatCategoryEl = document.getElementById('threat-category');
-const summaryTextEl = document.getElementById('summary-text');
+const gaugeProgress = document.getElementById('gauge-progress');
+const scanIndicator = document.getElementById('scan-indicator');
 
-const requiredUi = [
-  scanButton,
-  threatScoreEl,
-  statusTextEl,
-  mlStatusEl,
-  evidenceListEl,
-  reasonsListEl,
-  toggleDetailsBtn,
-  detailsContainerEl,
-  threatCategoryEl,
-  summaryTextEl,
-];
+// Status Pill
+const statusPill = document.getElementById('status-pill');
+const verdictText = document.getElementById('verdict-text');
+const verdictRange = document.getElementById('verdict-range');
+const verdictIcon = document.getElementById('verdict-icon');
 
-const isUiReady = requiredUi.every(Boolean);
+// Summary Texts
+const summaryLine1 = document.getElementById('summary-line-1');
+const summaryLine2 = document.getElementById('summary-line-2');
+const summaryLine3 = document.getElementById('summary-line-3');
+
+// Pipeline elements
+const t1Progress = document.getElementById('t1-progress');
+const t1StatusText = document.getElementById('t1-status-text');
+const t2Progress = document.getElementById('t2-progress');
+const t2StatusText = document.getElementById('t2-status-text');
+const t3Progress = document.getElementById('t3-progress');
+const t3StatusText = document.getElementById('t3-status-text');
+
 let activePollInterval = null;
 let activeRunId = 0;
 
-function toErrorMessage(err, fallback = 'Unknown error.') {
-  if (typeof err === 'string' && err.trim()) return err.trim();
-  const msg = err?.message;
-  if (typeof msg === 'string' && msg.trim()) return msg.trim();
-  return fallback;
-}
+// Configuration for gauge
+const GAUGE_MAX_OFFSET = 220; // Circumference of the gauge semicircle (r=70)
 
-function clampScore(score) {
-  return Math.max(0, Math.min(100, Math.round(Number(score) || 0)));
-}
-
-function normalizeVerdict(verdict, fallback = 'SAFE') {
-  const raw = typeof verdict === 'string' ? verdict.trim().toUpperCase() : '';
-  if (raw === 'CRITICAL' || raw === 'SUSPICIOUS' || raw === 'SAFE') {
-    return raw;
+/**
+ * Updates the SVG gauge needle/progress
+ * @param {number} score 0-100
+ */
+function updateGauge(score) {
+  const value = Math.max(0, Math.min(100, score));
+  const offset = GAUGE_MAX_OFFSET - (value / 100) * GAUGE_MAX_OFFSET;
+  if (gaugeProgress) {
+    gaugeProgress.style.strokeDashoffset = offset;
   }
-  return fallback;
-}
-
-function categoryFromVerdict(verdict) {
-  const normalized = normalizeVerdict(verdict);
-  if (normalized === 'CRITICAL') return 'phishing';
-  if (normalized === 'SUSPICIOUS') return 'spam';
-  return 'safe';
-}
-
-function setStatus(text) {
-  if (!statusTextEl) return;
-  statusTextEl.innerText = text;
-}
-
-function setCategory(category) {
-  if (!threatCategoryEl) return;
-  const c = (category || 'safe').toLowerCase();
-  threatCategoryEl.innerText = c.toUpperCase();
-  threatCategoryEl.classList.remove('pill-safe', 'pill-spam', 'pill-phishing');
-  threatCategoryEl.classList.add(c === 'phishing' ? 'pill-phishing' : c === 'spam' ? 'pill-spam' : 'pill-safe');
-}
-
-function setSummary(text) {
-  if (!summaryTextEl) return;
-  summaryTextEl.innerText = text || '';
-}
-
-function setMlStatus(text) {
-  if (!mlStatusEl) return;
-  mlStatusEl.innerText = text;
-}
-
-function renderEvidence(items) {
-  if (!evidenceListEl) return;
-  evidenceListEl.innerHTML = '';
-  if (!Array.isArray(items) || items.length === 0) {
-    return;
+  if (threatScoreEl) {
+    threatScoreEl.innerText = Math.round(value);
   }
-
-  items.forEach((i) => {
-    const li = document.createElement('li');
-    const points = typeof i?.points === 'number'
-      ? `(${i.points > 0 ? '+' : ''}${i.points}) `
-      : '';
-    const detail = i?.detail ? i.detail : String(i);
-    const check = i?.check ? `[${i.check}] ` : '';
-    li.textContent = `${check}${points}${detail}`;
-    evidenceListEl.appendChild(li);
-  });
 }
 
-function friendlyReasonsFromEvidence(items, category) {
-  const reasons = [];
-  const seen = new Set();
+/**
+ * Updates the verdict pill and text
+ */
+function setVerdict(verdict, score) {
+  const v = (verdict || 'SAFE').toUpperCase();
+  if (!statusPill) return;
 
-  function add(msg) {
-    const m = (msg || '').trim();
-    if (!m || seen.has(m)) return;
-    seen.add(m);
-    reasons.push(m);
+  statusPill.classList.remove('safe', 'suspicious', 'critical');
+  
+  if (v === 'CRITICAL' || score >= 70) {
+    statusPill.classList.add('critical');
+    verdictText.innerText = 'CRITICAL';
+    verdictRange.innerText = '70-100';
+    verdictIcon.innerText = '✕';
+  } else if (v === 'SUSPICIOUS' || score >= 30) {
+    statusPill.classList.add('suspicious');
+    verdictText.innerText = 'SUSPICIOUS';
+    verdictRange.innerText = '30-69';
+    verdictIcon.innerText = '!';
+  } else {
+    statusPill.classList.add('safe');
+    verdictText.innerText = 'SAFE';
+    verdictRange.innerText = '0-29';
+    verdictIcon.innerText = '✓';
   }
+}
 
-  const evidence = Array.isArray(items) ? items : [];
+/**
+ * Sets the multi-line analysis status text
+ */
+function setAnalysisSummary(l1, l2, l3) {
+  if (summaryLine1) summaryLine1.innerText = l1 || '';
+  if (summaryLine2) summaryLine2.innerText = l2 || '';
+  if (summaryLine3) summaryLine3.innerText = l3 || '';
+}
 
-  for (const e of evidence) {
-    const check = e?.check;
-    const kind = e?.kind;
-    const detail = e?.detail || '';
-
-    if (check === 'brand_mismatch') add('A link goes to a different website than it claims (common phishing trick).');
-    if (check === 'shortener') add('A shortened link was used (can hide the real destination).');
-    if (check === 'homograph' || check === 'punycode') add('A link domain looks suspicious (possible look-alike domain).');
-    if (check === 'ip_url') add('A link uses a raw IP address instead of a normal website name.');
-    if (check === 'sender_spoof') add('The sender name looks like a known brand, but the email domain does not match.');
-    if (check === 'tld') add('A link uses an uncommon or risky domain ending (TLD).');
-    if (check === 'fp_mitigation') add('Links look related to the sender organization (reduced false positives).');
-
-    if (check === 'sender_allowlist' && typeof e?.points === 'number' && e.points < 0) {
-      const m = detail.match(/allowlisted:\s*(.+)$/i);
-      const d = m?.[1]?.trim();
-      add(d ? `Sender domain is commonly trusted: ${d}.` : 'Sender domain is commonly trusted.');
-    }
-
-    if (check === 'keyword') {
-      if (kind === 'credential') add('The message asks for sign-in/password/account access (high risk).');
-      else if (kind === 'urgency') add('The message uses urgency/pressure language.');
-      else if (kind === 'financial') add('The message mentions payment/invoice/transfer.');
-    }
-
-    if (check === 'ml') {
-      add('Extra language check: message tone looks suspicious.');
-    }
+/**
+ * Updates the T1/T2/T3 pipeline indicators
+ */
+function updatePipeline(tier, status, progress) {
+  if (tier === 1) {
+    if (t1Progress) t1Progress.style.width = `${progress}%`;
+    if (t1StatusText) t1StatusText.innerText = status;
+  } else if (tier === 2) {
+    if (t2Progress) t2Progress.style.width = `${progress}%`;
+    if (t2StatusText) t2StatusText.innerText = status;
+  } else if (tier === 3) {
+    if (t3Progress) t3Progress.style.width = `${progress}%`;
+    if (t3StatusText) t3StatusText.innerText = status;
   }
+}
 
-  if (reasons.length === 0) {
-    add(category === 'safe' ? 'No strong red flags detected.' : 'Suspicious signals detected.');
+function setScanningState(active) {
+  if (scanIndicator) {
+    if (active) scanIndicator.classList.remove('hidden');
+    else scanIndicator.classList.add('hidden');
   }
-
-  return reasons.slice(0, 4);
+  if (scanButton) {
+    scanButton.disabled = active;
+    scanButton.innerHTML = active 
+      ? `SCANNING...` 
+      : `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4"/></svg> INITIALIZE COMPLETE SCAN <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon-right"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></svg>`;
+  }
 }
 
-function renderReasons(items, category) {
-  if (!reasonsListEl) return;
-  reasonsListEl.innerHTML = '';
-  const reasons = friendlyReasonsFromEvidence(items, category);
-  reasons.forEach((r) => {
-    const li = document.createElement('li');
-    li.textContent = r;
-    reasonsListEl.appendChild(li);
-  });
+function resetUI() {
+  updateGauge(0);
+  setVerdict('SAFE', 0);
+  setAnalysisSummary('Waiting for session...', 'Scanner: Standby', 'Gemini AI: Ready to protect...');
+  updatePipeline(1, 'Waiting...', 0);
+  updatePipeline(2, 'Standby', 0);
+  updatePipeline(3, 'Awaiting Input', 0);
+  setScanningState(false);
 }
 
-function renderOperationalReason(message) {
-  if (!reasonsListEl) return;
-  reasonsListEl.innerHTML = '';
-  const li = document.createElement('li');
-  li.textContent = message;
-  reasonsListEl.appendChild(li);
-}
-
+// Reuse helper functions from original sidepanel.js
 function safeUuid() {
   try {
     return crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -184,84 +143,11 @@ function safeUuid() {
   }
 }
 
-function scoreToVerdict(score) {
-  const s = clampScore(score);
-  if (s >= 70) return 'CRITICAL';
-  if (s >= 30) return 'SUSPICIOUS';
-  return 'SAFE';
-}
-
-function categoryToVerdict(category) {
-  const c = String(category || '').toLowerCase();
-  if (c === 'phishing') return 'CRITICAL';
-  if (c === 'spam') return 'SUSPICIOUS';
-  return 'SAFE';
-}
-
-function normalizeEvidenceForReport(items) {
-  if (!Array.isArray(items)) return [];
-  return items.map((item) => {
-    if (item && typeof item === 'object') {
-      return {
-        check: item.check || 'extension',
-        kind: item.kind || null,
-        points: typeof item.points === 'number' ? item.points : null,
-        detail: item.detail || String(item.check || 'signal'),
-      };
-    }
-    return { check: 'extension', kind: null, points: null, detail: String(item) };
-  });
-}
-
-function normalizeLinksForReport(email) {
-  const links = Array.isArray(email?.links) ? email.links : [];
-  return links
-    .map((l) => (typeof l === 'string' ? { href: l, text: null } : { href: l?.href || '', text: l?.text || null }))
-    .filter((l) => typeof l.href === 'string' && l.href.length > 0);
-}
-
-async function postLiveReport(payload) {
-  try {
-    await fetch(BACKEND_REPORT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-  } catch (e) {
-    // Dashboard sync is non-blocking for sidepanel UX.
-  }
-}
-
-function clearActivePoll() {
-  if (activePollInterval) {
-    clearInterval(activePollInterval);
-    activePollInterval = null;
-  }
-}
-
-function setScanBusy(isBusy) {
-  if (!scanButton) return;
-  scanButton.disabled = isBusy;
-  scanButton.innerText = isBusy ? 'SCANNING...' : 'INITIALIZE SCAN';
-}
-
-function resetUiForNewScan() {
-  if (threatScoreEl) threatScoreEl.innerText = '...';
-  renderEvidence([]);
-  renderReasons([], 'safe');
-  setMlStatus('');
-  setCategory('safe');
-  setSummary('');
-  if (detailsContainerEl) detailsContainerEl.style.display = 'none';
-  if (toggleDetailsBtn) toggleDetailsBtn.innerText = 'Show details';
-}
-
-if (toggleDetailsBtn && detailsContainerEl) {
-  toggleDetailsBtn.addEventListener('click', () => {
-    const open = detailsContainerEl.style.display !== 'none';
-    detailsContainerEl.style.display = open ? 'none' : 'block';
-    toggleDetailsBtn.innerText = open ? 'Show details' : 'Hide details';
-  });
+function toErrorMessage(err, fallback = 'Unknown error.') {
+  if (typeof err === 'string' && err.trim()) return err.trim();
+  const msg = err?.message;
+  if (typeof msg === 'string' && msg.trim()) return msg.trim();
+  return fallback;
 }
 
 async function extractEmailFromGmailActiveTab() {
@@ -305,12 +191,12 @@ async function extractEmailFromGmailActiveTab() {
     response = await sendExtractMessage(tab.id);
   } catch (err) {
     const message = toErrorMessage(err);
-    const missingReceiver = /Receiving end does not exist/i.test(message);
-    if (!missingReceiver) {
+    if (/Receiving end does not exist/i.test(message)) {
+      await injectContentScript(tab.id);
+      response = await sendExtractMessage(tab.id);
+    } else {
       throw err;
     }
-    await injectContentScript(tab.id);
-    response = await sendExtractMessage(tab.id);
   }
 
   if (!response?.body) {
@@ -320,403 +206,198 @@ async function extractEmailFromGmailActiveTab() {
   return response;
 }
 
-if (!isUiReady) {
-  console.error('Sidepanel UI not ready: one or more required elements are missing.');
-} else {
-  scanButton.addEventListener('click', async () => {
-    clearActivePoll();
-    activeRunId += 1;
-    const runId = activeRunId;
-    const liveScanId = safeUuid();
-    resetUiForNewScan();
-    setScanBusy(true);
-
-    try {
-      setStatus('Reading Gmail content...');
-      const email = await extractEmailFromGmailActiveTab();
-      if (runId !== activeRunId) return;
-
-      setStatus('Tier 1: Local analysis...');
-      const heur = analyzeTier1(email);
-      const tier1Score = clampScore(heur?.t1_score ?? 0);
-      const tier1Evidence = Array.isArray(heur?.t1_evidence) ? heur.t1_evidence : [];
-      const tier1Category = typeof heur?.t1_category === 'string' ? heur.t1_category : 'safe';
-      const sender = email.senderEmail || email.sender || 'unknown@unknown.com';
-      const subject = email.subject || 'No Subject';
-      const links = normalizeLinksForReport(email);
-
-      if (threatScoreEl) threatScoreEl.innerText = String(tier1Score);
-      renderEvidence(tier1Evidence);
-      renderReasons(tier1Evidence, tier1Category);
-      setCategory(tier1Category);
-      setSummary(typeof heur?.User_Friendly_Summary === 'string' ? heur.User_Friendly_Summary : 'Analyzing...');
-
-      await postLiveReport({
-        event_id: safeUuid(),
-        scan_id: liveScanId,
-        timestamp: new Date().toISOString(),
-        sender,
-        subject,
-        links,
-        final_score: tier1Score,
-        // Keep verdict aligned with numeric score so dashboard severity matches the gauge value.
-        verdict: scoreToVerdict(tier1Score),
-        evidence: normalizeEvidenceForReport(tier1Evidence),
-        reasons: friendlyReasonsFromEvidence(tier1Evidence, tier1Category),
-        threat_analysis: {
-          category: tier1Category,
-          reasoning: typeof heur?.User_Friendly_Summary === 'string' ? heur.User_Friendly_Summary : 'Tier 1 complete',
-          stage: 'tier1',
-        },
-        tier_details: {
-          tier1: { score: tier1Score, status: tier1Category },
-        },
-      });
-
-      setStatus('Tier 2: Analyzing metadata...');
-      const gatewayPayload = {
-        tier1_score: tier1Score,
-        tier1_evidence: tier1Evidence.map((e) => e.detail || String(e)),
-        sender,
-        body: email.body || '',
-        links: (Array.isArray(email?.links) ? email.links : [])
-          .map((l) => (typeof l === 'string' ? l : l?.href))
-          .filter(Boolean),
-        subject,
-        timestamp: new Date().toISOString()
-      };
-
-      let gatewayData;
-      try {
-        const gatewayResponse = await fetch(GATEWAY_SCAN_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(gatewayPayload)
-        });
-        if (runId !== activeRunId) return;
-
-        if (!gatewayResponse.ok) {
-          setStatus(`Tier 2/3 unavailable (gateway ${gatewayResponse.status}). Using Tier 1 result.`);
-          setMlStatus('AI analysis unavailable.');
-          await postLiveReport({
-            event_id: safeUuid(),
-            scan_id: liveScanId,
-            timestamp: new Date().toISOString(),
-            sender,
-            subject,
-            links,
-            final_score: tier1Score,
-            verdict: scoreToVerdict(tier1Score),
-            evidence: normalizeEvidenceForReport(tier1Evidence),
-            reasons: [
-              ...friendlyReasonsFromEvidence(tier1Evidence, tier1Category),
-              `Tier 2/3 unavailable (gateway ${gatewayResponse.status}).`,
-            ],
-            threat_analysis: { category: tier1Category, reasoning: 'Tier 2/3 unavailable', stage: 'tier1_fallback' },
-            tier_details: { tier1: { score: tier1Score, status: tier1Category } },
-          });
-          return;
-        }
-
-        gatewayData = await gatewayResponse.json();
-      } catch (gatewayErr) {
-        if (runId !== activeRunId) return;
-        setStatus('Tier 2/3 unavailable. Using Tier 1 result.');
-        setMlStatus('AI analysis unavailable.');
-        await postLiveReport({
-          event_id: safeUuid(),
-          scan_id: liveScanId,
-          timestamp: new Date().toISOString(),
-          sender,
-          subject,
-          links,
-          final_score: tier1Score,
-          verdict: scoreToVerdict(tier1Score),
-          evidence: normalizeEvidenceForReport(tier1Evidence),
-          reasons: [
-            ...friendlyReasonsFromEvidence(tier1Evidence, tier1Category),
-            'Tier 2/3 unavailable.',
-          ],
-          threat_analysis: { category: tier1Category, reasoning: 'Tier 2/3 unavailable', stage: 'tier1_fallback' },
-          tier_details: { tier1: { score: tier1Score, status: tier1Category } },
-        });
-        return;
-      }
-
-      const gatewayScanId = gatewayData?.scan_id;
-      if (!gatewayScanId) {
-        setStatus('Gateway returned incomplete response. Using Tier 1 result.');
-        setMlStatus('AI analysis unavailable.');
-        await postLiveReport({
-          event_id: safeUuid(),
-          scan_id: liveScanId,
-          timestamp: new Date().toISOString(),
-          sender,
-          subject,
-          links,
-          final_score: tier1Score,
-          verdict: scoreToVerdict(tier1Score),
-          evidence: normalizeEvidenceForReport(tier1Evidence),
-          reasons: [
-            ...friendlyReasonsFromEvidence(tier1Evidence, tier1Category),
-            'Gateway returned incomplete response.',
-          ],
-          threat_analysis: { category: tier1Category, reasoning: 'Gateway incomplete response', stage: 'tier1_fallback' },
-          tier_details: { tier1: { score: tier1Score, status: tier1Category } },
-        });
-        return;
-      }
-
-      const partialScore = clampScore(gatewayData.partial_score ?? tier1Score);
-      if (threatScoreEl) threatScoreEl.innerText = String(partialScore);
-      const tier2Verdict = normalizeVerdict(gatewayData?.verdict, 'SAFE');
-      const tier2Category = categoryFromVerdict(tier2Verdict);
-
-      const tier2EvidenceRaw = gatewayData?.tier2?.evidence;
-      const tier2Evidence = Array.isArray(tier2EvidenceRaw)
-        ? tier2EvidenceRaw
-        : (tier2EvidenceRaw ? [String(tier2EvidenceRaw)] : []);
-      const combinedEvidence = [...tier1Evidence];
-      tier2Evidence.forEach((e) => {
-        combinedEvidence.push({ detail: e, check: 'tier2' });
-      });
-
-      renderEvidence(combinedEvidence);
-      renderReasons(combinedEvidence, tier2Category);
-      setCategory(tier2Category);
-      setSummary(`Tier 2 complete. Domain: ${gatewayData?.tier2?.domain_analysis?.status || 'analyzed'}`);
-      setStatus('Tier 3: AI analyzing...');
-
-      await postLiveReport({
-        event_id: safeUuid(),
-        scan_id: liveScanId,
-        gateway_scan_id: gatewayScanId,
-        timestamp: new Date().toISOString(),
-        sender,
-        subject,
-        links,
-        final_score: partialScore,
-        verdict: tier2Verdict,
-        evidence: normalizeEvidenceForReport(combinedEvidence),
-        reasons: friendlyReasonsFromEvidence(combinedEvidence, tier2Category),
-        threat_analysis: { category: tier2Category, reasoning: 'Tier 2 complete; Tier 3 running', stage: 'tier2' },
-        tier_details: {
-          tier1: { score: tier1Score, status: tier1Category },
-          tier2: gatewayData?.tier2 || {},
-        },
-      });
-
-      let pollCount = 0;
-      let pollErrorCount = 0;
-      let pollInFlight = false;
-
-      activePollInterval = setInterval(async () => {
-        if (pollInFlight || runId !== activeRunId) return;
-        pollInFlight = true;
-        pollCount++;
-
-        try {
-          const statusRes = await fetch(`${GATEWAY_STATUS_URL}/${gatewayScanId}`);
-          if (runId !== activeRunId) return;
-
-          if (!statusRes.ok) {
-            clearActivePoll();
-            setStatus('Status check failed.');
-            setMlStatus('AI analysis unavailable.');
-            await postLiveReport({
-              event_id: safeUuid(),
-              scan_id: liveScanId,
-              gateway_scan_id: gatewayScanId,
-              timestamp: new Date().toISOString(),
-              sender,
-              subject,
-              links,
-              final_score: partialScore,
-              verdict: tier2Verdict,
-              evidence: normalizeEvidenceForReport(combinedEvidence),
-              reasons: [
-                ...friendlyReasonsFromEvidence(combinedEvidence, tier2Category),
-                'Tier 3 status check failed.',
-              ],
-              threat_analysis: { category: tier2Category, reasoning: 'Tier 3 status check failed', stage: 'tier3_fallback' },
-              tier_details: {
-                tier1: { score: tier1Score, status: tier1Category },
-                tier2: gatewayData?.tier2 || {},
-              },
-            });
-            return;
-          }
-
-          const status = await statusRes.json();
-          pollErrorCount = 0;
-
-          if (!status?.complete && pollCount >= MAX_POLLS) {
-            clearActivePoll();
-            setStatus('AI analysis timeout (using Tier 1+2 results).');
-            setMlStatus('AI analysis unavailable.');
-            await postLiveReport({
-              event_id: safeUuid(),
-              scan_id: liveScanId,
-              gateway_scan_id: gatewayScanId,
-              timestamp: new Date().toISOString(),
-              sender,
-              subject,
-              links,
-              final_score: partialScore,
-              verdict: tier2Verdict,
-              evidence: normalizeEvidenceForReport(combinedEvidence),
-              reasons: [
-                ...friendlyReasonsFromEvidence(combinedEvidence, tier2Category),
-                'Tier 3 timeout. Using Tier 1+2 result.',
-              ],
-              threat_analysis: { category: tier2Category, reasoning: 'Tier 3 timeout; using Tier 1+2', stage: 'tier3_timeout' },
-              tier_details: {
-                tier1: { score: tier1Score, status: tier1Category },
-                tier2: gatewayData?.tier2 || {},
-              },
-            });
-            return;
-          }
-
-          if (status?.complete) {
-            clearActivePoll();
-
-            const resultRes = await fetch(`${GATEWAY_RESULT_URL}/${gatewayScanId}`);
-            if (runId !== activeRunId) return;
-
-            if (!resultRes.ok) {
-              setStatus(`Final AI result unavailable (${resultRes.status}). Using Tier 1+2.`);
-              setMlStatus('AI analysis unavailable.');
-              await postLiveReport({
-                event_id: safeUuid(),
-                scan_id: liveScanId,
-                gateway_scan_id: gatewayScanId,
-                timestamp: new Date().toISOString(),
-                sender,
-                subject,
-                links,
-                final_score: partialScore,
-                verdict: tier2Verdict,
-                evidence: normalizeEvidenceForReport(combinedEvidence),
-                reasons: [
-                  ...friendlyReasonsFromEvidence(combinedEvidence, tier2Category),
-                  `Final AI result unavailable (${resultRes.status}). Using Tier 1+2.`,
-                ],
-                threat_analysis: { category: tier2Category, reasoning: 'Final AI result unavailable', stage: 'tier3_fallback' },
-                tier_details: {
-                  tier1: { score: tier1Score, status: tier1Category },
-                  tier2: gatewayData?.tier2 || {},
-                },
-              });
-              return;
-            }
-
-            const fullResult = await resultRes.json();
-            const finalScore = clampScore(fullResult?.final_score ?? partialScore);
-            if (threatScoreEl) threatScoreEl.innerText = String(finalScore);
-
-            const finalVerdict = normalizeVerdict(fullResult?.verdict, tier2Verdict);
-            const finalCategory = categoryFromVerdict(finalVerdict);
-
-            const allEvidence = [...combinedEvidence];
-            if (Array.isArray(fullResult?.tier3?.flagged_phrases)) {
-              fullResult.tier3.flagged_phrases.forEach((phrase) => {
-                allEvidence.push({ detail: `AI: ${phrase}`, check: 'tier3' });
-              });
-            }
-
-            renderEvidence(allEvidence);
-            renderReasons(allEvidence, finalCategory);
-            setCategory(finalCategory);
-
-            const verdictMessages = {
-              'CRITICAL': 'HIGH RISK: Likely phishing. Do NOT click links. Verify via official channels.',
-              'SUSPICIOUS': 'MEDIUM RISK: Suspicious patterns detected. Exercise caution.',
-              'SAFE': 'LOW RISK: No significant threats detected.'
-            };
-            setSummary(verdictMessages[finalVerdict] || 'Analysis complete.');
-
-            setStatus(`Complete. Verdict: ${finalVerdict} (Score: ${finalScore}/100)`);
-            setMlStatus(`AI Analysis: ${fullResult?.tier3?.category || 'Complete'}`);
-
-            const reportPayload = {
-              event_id: safeUuid(),
-              scan_id: liveScanId,
-              gateway_scan_id: gatewayScanId,
-              timestamp: new Date().toISOString(),
-              sender,
-              subject,
-              links,
-              final_score: finalScore,
-              verdict: finalVerdict,
-              evidence: normalizeEvidenceForReport(allEvidence),
-              reasons: friendlyReasonsFromEvidence(allEvidence, finalCategory),
-              threat_analysis: {
-                ...(fullResult?.tier3 || {}),
-                stage: 'tier3_complete',
-              },
-              tier_details: {
-                tier1: { score: tier1Score, status: tier1Category },
-                tier2: fullResult?.tier2 || {},
-                tier3: fullResult?.tier3 || {}
-              }
-            };
-
-            await postLiveReport(reportPayload);
-          }
-        } catch (pollErr) {
-          pollErrorCount++;
-          if (pollErrorCount >= MAX_POLL_ERRORS || pollCount >= MAX_POLLS) {
-            clearActivePoll();
-            setStatus('AI analysis interrupted (using Tier 1+2 results).');
-            setMlStatus('AI analysis unavailable.');
-            await postLiveReport({
-              event_id: safeUuid(),
-              scan_id: liveScanId,
-              gateway_scan_id: gatewayScanId,
-              timestamp: new Date().toISOString(),
-              sender,
-              subject,
-              links,
-              final_score: partialScore,
-              verdict: tier2Verdict,
-              evidence: normalizeEvidenceForReport(combinedEvidence),
-              reasons: [
-                ...friendlyReasonsFromEvidence(combinedEvidence, tier2Category),
-                'AI analysis interrupted; using Tier 1+2.',
-              ],
-              threat_analysis: { category: tier2Category, reasoning: 'Tier 3 interrupted; using Tier 1+2', stage: 'tier3_interrupted' },
-              tier_details: {
-                tier1: { score: tier1Score, status: tier1Category },
-                tier2: gatewayData?.tier2 || {},
-              },
-            });
-          }
-        } finally {
-          pollInFlight = false;
-        }
-      }, POLL_INTERVAL_MS);
-    } catch (err) {
-      if (runId !== activeRunId) return;
-      const message = toErrorMessage(err);
-      const receivingEndMissing = /Receiving end does not exist/i.test(message);
-      setMlStatus('');
-      setStatus(`Scan failed: ${message}`);
-      setSummary(
-        receivingEndMissing
-          ? 'Gmail page connection failed. Refresh the Gmail tab and run scan again.'
-          : 'Scan did not complete.',
-      );
-      renderOperationalReason(
-        receivingEndMissing
-          ? 'Refresh Gmail (Ctrl+R) and open the email before scanning again.'
-          : 'Scan could not complete. Check Gmail tab and backend availability, then retry.',
-      );
-      if (threatScoreEl) threatScoreEl.innerText = '0';
-    } finally {
-      if (runId === activeRunId) {
-        setScanBusy(false);
-      }
-    }
-  });
+async function postLiveReport(payload) {
+  try {
+    await fetch(BACKEND_REPORT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (e) {
+    // Non-blocking
+  }
 }
+
+function clearPoll() {
+  if (activePollInterval) {
+    clearInterval(activePollInterval);
+    activePollInterval = null;
+  }
+}
+
+// MAIN SCAN LOGIC
+scanButton.addEventListener('click', async () => {
+  clearPoll();
+  activeRunId += 1;
+  const runId = activeRunId;
+  const liveScanId = safeUuid();
+  
+  resetUI();
+  setScanningState(true);
+
+  try {
+    setAnalysisSummary('Initializing connection...', 'Reading Gmail context...', 'Syncing with Gateway...');
+    const email = await extractEmailFromGmailActiveTab();
+    if (runId !== activeRunId) return;
+
+    // TIER 1: Local Heuristics
+    updatePipeline(1, 'Analyzing...', 40);
+    const heur = analyzeTier1(email);
+    const t1Score = Math.max(0, Math.min(100, Math.round(heur?.t1_score || 0)));
+    
+    updateGauge(t1Score);
+    setVerdict(heur?.t1_category, t1Score);
+    updatePipeline(1, 'Complete', 100);
+    setAnalysisSummary('Tier 1: Local Heuristics Complete.', 'Analysis T2 & T3 Pending...', heur?.User_Friendly_Summary || 'Analyzing patterns...');
+
+    const sender = email.senderEmail || email.sender || 'unknown@unknown.com';
+    const subject = email.subject || 'No Subject';
+    const links = Array.isArray(email?.links) ? email.links.map(l => typeof l === 'string' ? l : l.href) : [];
+
+    // TIER 2: Processing via Gateway
+    updatePipeline(2, 'Connecting...', 20);
+    const gatewayPayload = {
+      tier1_score: t1Score,
+      tier1_evidence: (heur?.t1_evidence || []).map(e => e.detail || String(e)),
+      sender,
+      body: email.body || '',
+      links,
+      subject,
+      timestamp: new Date().toISOString()
+    };
+
+    const gResponse = await fetch(GATEWAY_SCAN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(gatewayPayload)
+    });
+
+    if (!gResponse.ok) throw new Error('Gateway Connection Failed');
+    const gData = await gResponse.json();
+    if (runId !== activeRunId) return;
+
+    const gScanId = gData.scan_id;
+    const partialScore = Math.round(gData.partial_score || t1Score);
+    
+    updateGauge(partialScore);
+    setVerdict(gData.verdict, partialScore);
+    updatePipeline(2, 'Analyzing ML...', 60);
+    setAnalysisSummary('Tier 2: ML & Metadata Active.', 'Polling Gemini AI (Tier 3)...', `Domain Status: ${gData.tier2?.domain_analysis?.status || 'Flagged'}`);
+
+    // TIER 3: AI Polling
+    updatePipeline(3, 'Awaiting Data', 20);
+    let pollCount = 0;
+    
+    activePollInterval = setInterval(async () => {
+      pollCount++;
+      if (runId !== activeRunId) { clearPoll(); return; }
+
+      try {
+        const sRes = await fetch(`${GATEWAY_STATUS_URL}/${gScanId}`);
+        const status = await sRes.json();
+
+        if (status.complete) {
+          clearPoll();
+          const rRes = await fetch(`${GATEWAY_RESULT_URL}/${gScanId}`);
+          const result = await rRes.json();
+          
+          const finalScore = Math.round(result.final_score || partialScore);
+          updateGauge(finalScore);
+          setVerdict(result.verdict, finalScore);
+          
+          updatePipeline(2, 'Complete', 100);
+          updatePipeline(3, 'Complete', 100);
+          
+          setScanningState(false);
+          setAnalysisSummary(
+            `Final Result: ${result.verdict}`,
+            `Overall Threat Score: ${finalScore}/100`,
+            result.tier3?.reasoning || '3-Tier Analysis finalized successfully.'
+          );
+
+        } else if (pollCount >= MAX_POLLS) {
+          clearPoll();
+          setScanningState(false);
+          setAnalysisSummary('Tier 3: AI Analysis Timeout', 'Falling back to T1 + T2 results.', 'Heavy traffic or slow AI response.');
+          updatePipeline(3, 'Timeout', 50);
+        } else {
+          // Dynamic polling progress visually synchronized
+          const prog = Math.min(95, (pollCount / MAX_POLLS) * 80 + 20);
+          updatePipeline(3, `Thinking... (${Math.round(prog)}%)`, prog);
+          
+          if (status.layers_completed >= 2) {
+             updatePipeline(2, 'Complete', 100);
+          } else {
+             updatePipeline(2, 'Analyzing...', 80);
+          }
+        }
+      } catch (e) {
+        // Retry polling
+      }
+    }, POLL_INTERVAL_MS);
+
+  } catch (err) {
+    if (runId !== activeRunId) return;
+    setScanningState(false);
+    setAnalysisSummary('Scan Failed', 'System encountered an error.', toErrorMessage(err));
+    updatePipeline(1, 'Error', 0);
+    updatePipeline(2, 'Error', 0);
+    updatePipeline(3, 'Error', 0);
+  }
+});
+
+// VISION CHECK LOGIC
+visualCheckBtn.addEventListener('click', async () => {
+  try {
+    setAnalysisSummary('Visual Check Active...', 'Capturing rendering snapshot...', '');
+    visualCheckBtn.innerHTML = 'ANALYZING...';
+    visualCheckBtn.disabled = true;
+
+    const tabs = await new Promise((resolve) => chrome.tabs.query({ active: true, currentWindow: true }, resolve));
+    const [tab] = tabs || [];
+    if (!tab?.id) throw new Error('No active tab found.');
+
+    // Capture screenshot
+    const screenshotUrl = await new Promise((resolve, reject) => {
+      chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 20 }, (dataUrl) => {
+        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+        else resolve(dataUrl);
+      });
+    });
+
+    const payload = {
+      image_data_b64: screenshotUrl,
+      url: tab.url,
+      title: tab.title
+    };
+
+    const res = await fetch(VISION_ANALYZE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) throw new Error('Vision analysis failed. Check backend.');
+    const data = await res.json();
+
+    if (data.is_phishing) {
+      setVerdict('CRITICAL', data.threat_score);
+      updateGauge(data.threat_score);
+      setAnalysisSummary('🚨 SPOOFED PORTAL DETECTED!', `Brand spoofed: ${data.matched_brand}`, data.reasoning);
+      updatePipeline(3, 'Intercepted', 100);
+    } else {
+      setVerdict('SAFE', data.threat_score);
+      updateGauge(data.threat_score);
+      setAnalysisSummary('Visual checks passed.', 'Domain matches visual structure.', data.reasoning);
+      updatePipeline(3, 'Verified', 100);
+    }
+  } catch (e) {
+    setAnalysisSummary('Visual Check Failed', toErrorMessage(e), '');
+  } finally {
+    visualCheckBtn.innerHTML = 'QUICK VISUAL CHECK';
+    visualCheckBtn.disabled = false;
+  }
+});
+
+// Initialize with a clean slate
+resetUI();

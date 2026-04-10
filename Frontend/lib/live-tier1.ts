@@ -138,11 +138,14 @@ export function tier1ReportToScanResult(report: Tier1Report): ScanResult {
           ? "warning"
           : "pending"
 
+  const layersCompleted = report?.layers_completed ?? 1
+  const phase: ScanResult["phase"] = layersCompleted < 3 ? "scanning" : "complete"
+
   return {
     threatScore: score,
     threatLevel,
-    phase: "complete",
-    layersCompleted: report?.layers_completed ?? 1,
+    phase,
+    layersCompleted,
 
     tier1: {
       regexCheck: tierStatus("Regex Pattern Check", regexStatus),
@@ -159,8 +162,8 @@ export function tier1ReportToScanResult(report: Tier1Report): ScanResult {
     },
 
     tier3: {
-      active: false,
-      markers: [],
+      active: layersCompleted >= 3,
+      markers: report?.tier1?.ml_reasoning ? [report.tier1.ml_reasoning] : [],
       intentProfile: [],
     },
 

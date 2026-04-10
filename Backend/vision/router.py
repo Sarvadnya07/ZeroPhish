@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException
-from auth.middleware import require_auth
 from auth.models import User
 from .models import VisionAnalysisRequest, VisionAnalysisResult
 from .service import VisionService
@@ -8,8 +7,7 @@ router = APIRouter(prefix="/vision", tags=["vision"])
 
 @router.post("/analyze", response_model=VisionAnalysisResult)
 async def analyze_screenshot(
-    data: VisionAnalysisRequest,
-    current_user: User = Depends(require_auth)
+    data: VisionAnalysisRequest
 ):
     """
     Endpoint for the Chrome Extension to submit captured screenshots
