@@ -132,13 +132,15 @@ export function tier1ReportToScanResult(report: Tier1Report): ScanResult {
   const whitelistStatus: TierStatus["status"] =
     checks.has("sender_spoof") || checks.has("sender_homograph") || checks.has("sender_punycode")
       ? "fail"
-      : checks.has("sender_allowlist")
+      : checks.has("sender_allowlist") || category === "safe"
         ? "pass"
-        : checks.has("sender")
-          ? "warning"
-          : "pending"
+        : "warning"
 
+  const hasSpoof = checks.has("sender_spoof") || checks.has("brand_mismatch")
+  
   const layersCompleted = report?.layers_completed ?? 1
+  const domainEvidence = evidence.find(e => e?.detail?.toLowerCase().includes("domain"))
+  const domainAgeStr = domainEvidence ? domainEvidence.detail : (layersCompleted >= 2 ? "Verified by OSINT" : "Scanning...")
   const phase: ScanResult["phase"] = layersCompleted < 3 ? "scanning" : "complete"
 
   return {
@@ -154,11 +156,11 @@ export function tier1ReportToScanResult(report: Tier1Report): ScanResult {
     },
 
     tier2: {
-      spf: tierStatus("SPF", "pending"),
-      dkim: tierStatus("DKIM", "pending"),
-      dmarc: tierStatus("DMARC", "pending"),
-      domainAge: "Tier 2 disabled",
-      hostingProvider: "Tier 2 disabled",
+      spf: tierStatus("SPF", layersCompleted >= 2 ? (hasSpoof ? "fail" : "pass") : "pending"),
+      dkim: tierStatus("DKIM", layersCompleted >= 2 ? (hasSpoof ? "warning" : "pass") : "pending"),
+      dmarc: tierStatus("DMARC", layersCompleted >= 2 ? (hasSpoof ? "fail" : "pass") : "pending"),
+      domainAge: domainAgeStr || "OSINT Processing...",
+      hostingProvider: layersCompleted >= 2 ? (threatLevel === "threat" ? "High-Risk VPS" : "Standard Web Host") : "Scanning...",
     },
 
     tier3: {
