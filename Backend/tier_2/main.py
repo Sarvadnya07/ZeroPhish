@@ -206,6 +206,48 @@ class ThreatAnalyzer:
         r"\.(zip|mov|top|xyz|click|country|stream|gq|tk|ml|ga|cf)(?:/|$)"
     )
 
+    TOP_50_SPOOFED = {
+        "paypal.com", "apple.com", "microsoft.com", "google.com", "amazon.com", "netflix.com", 
+        "facebook.com", "chase.com", "wellsfargo.com", "bankofamerica.com", "github.com",
+        "linkedin.com", "dropbox.com", "docusign.com", "adobe.com", "instagram.com",
+        "yahoo.com", "outlook.com", "office.com", "live.com", "amazonaws.com",
+        "twitter.com", "x.com", "salesforce.com", "slack.com", "zoom.us", "citi.com"
+    }
+
+    URL_SHORTENERS = {
+        "bit.ly", "t.co", "tinyurl.com", "goo.gl", "ow.ly", "is.gd", "buff.ly", "cutt.ly", "rebrand.ly"
+    }
+
+    @staticmethod
+    def levenshtein(s1: str, s2: str) -> int:
+        if len(s1) < len(s2):
+            return ThreatAnalyzer.levenshtein(s2, s1)
+        if len(s2) == 0:
+            return len(s1)
+        previous_row = range(len(s2) + 1)
+        for i, c1 in enumerate(s1):
+            current_row = [i + 1]
+            for j, c2 in enumerate(s2):
+                insertions = previous_row[j + 1] + 1
+                deletions = current_row[j] + 1
+                substitutions = previous_row[j] + (c1 != c2)
+                current_row.append(min(insertions, deletions, substitutions))
+            previous_row = current_row
+        return previous_row[-1]
+
+    @classmethod
+    async def track_redirects(cls, url: str) -> Tuple[str, List[str]]:
+        """Follow redirects for suspicious URLs/shorteners."""
+        if not url.startswith("http"):
+            return url, []
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=2.0, follow_redirects=True, max_redirects=3) as client:
+                response = await client.head(url)
+                return str(response.url), []
+        except Exception as e:
+            return url, [f"redirect_timeout"]
+
     @classmethod
     async def analyze_threat(
         cls, email_body: str, sender: str, links: List[str], use_ml: bool = True
@@ -257,6 +299,9 @@ class ThreatAnalyzer:
         # Check for suspicious URLs
         for link in links:
             lowered_link = (link or "").lower()
+            domain_match = re.search(r"https?://([^/]+)", lowered_link)
+            domain = domain_match.group(1) if domain_match else ""
+
             suspicious_match = cls.SUSPICIOUS_URLS_RE.search(lowered_link)
             if suspicious_match:
                 link_score += 15
@@ -274,12 +319,34 @@ class ThreatAnalyzer:
                 link_score += 10
                 flagged_phrases.append("suspicious_tld")
 
+            # Async Redirect Tracker for URL shorteners
+            if any(shortener in domain for shortener in cls.URL_SHORTENERS):
+                link_score += 5
+                final_url, trace_errs = await cls.track_redirects(link)
+                if final_url != link:
+                    flagged_phrases.append("hidden_redirect")
+                    if cls.SUSPICIOUS_TLD_REGEX.search(final_url.lower()):
+                        link_score += 20
+                        flagged_phrases.append("redirect_to_suspicious_tld")
+
         # Sender context checks
         if "@" not in sender_lower:
             authority_score += 10
             flagged_phrases.append("invalid_sender_format")
-        elif any(term in sender_lower for term in ("security", "support", "admin", "billing")):
-            authority_score += 5
+        else:
+            sender_domain = sender_lower.split("@")[-1]
+            if any(term in sender_lower for term in ("security", "support", "admin", "billing")):
+                authority_score += 5
+            
+            # Typosquatting Check via Levenshtein
+            for target in cls.TOP_50_SPOOFED:
+                if sender_domain == target:
+                    break
+                dist = cls.levenshtein(sender_domain, target)
+                if dist == 1 or dist == 2:
+                    authority_score += 40
+                    flagged_phrases.append(f"typosquatting:{target}")
+                    break
 
         # Calculate threat level (0-100)
         base_threat = min(

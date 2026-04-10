@@ -22,26 +22,30 @@ class T3Result(BaseModel):
     flagged_phrases: list[str] = Field(
         default_factory=list, description="Email snippets that triggered alarm"
     )
+    requires_visual_check: bool = Field(
+        default=False, description="Set to true if the payload warrants pixel-by-pixel visual verification"
+    )
 
 
 class T3Service:
     """Tier 3: Semantic AI Brain using Gemini for Zero-Day Detection."""
 
-    SYSTEM_INSTRUCTION = """You are a Forensic Cybersecurity Analyst specializing in Zero-Day phishing and social engineering detection.
+    SYSTEM_INSTRUCTION = """You are a Forensic Cybersecurity Analyst specializing in Zero-Day phishing, CEO Fraud, and Business Email Compromise (BEC) detection.
 
 Analyze the provided email for malicious intent markers:
-- Urgency/Time Pressure: "Act now", "Urgent", "Immediate action required"
-- Financial/Authority Pressure: "Verify payment", "Confirm identity", "Account locked"
-- Credential Harvesting: "Update password", "Re-authenticate", "Verify credentials"
-- Impersonation: Fake executive/authority sender patterns
-- Psychological Manipulation: Fear tactics, fake urgency, false authority
+- Business Email Compromise (BEC): "Are you at your desk?", "I need a quick favor", or unnatural hierarchical requests.
+- CEO Fraud: Executive tone mismatches, directing wire transfers or payroll diversions.
+- Synthetic Urgency: "Discount ends tonight", "Account suspended", "Immediate action required".
+- Credential Harvesting: "Update password", "Re-authenticate", "Secure your account".
+- Impersonation: Spoofed authority figures or trusted vendors.
 
 CRITICAL: You MUST return ONLY a valid JSON object matching this exact schema:
 {
     "threat_score": <float 0-100>,
-    "category": "<Financial|Urgency|Credential|Impersonation|Safe>",
-    "reasoning": "<1-sentence explanation>",
-    "flagged_phrases": ["<snippet1>", "<snippet2>"]
+    "category": "<BEC|CEO_Fraud|Financial|Urgency|Credential|Impersonation|Safe>",
+    "reasoning": "<1-sentence explanation focusing on the psychological manipulation detected>",
+    "flagged_phrases": ["<snippet1>", "<snippet2>"],
+    "requires_visual_check": <boolean, true ONLY if the email directs to a high-value portal (e.g., Bank, Microsoft, Apple, AWS) requiring clone detection>
 }
 
 Do NOT include markdown, code blocks, explanations, or conversational text. ONLY JSON."""
