@@ -16,6 +16,28 @@ def _calculate_weighted_score(scores: list[float], weights: list[float]) -> floa
     return _clamp_score(weighted_sum / total_weight)
 
 class TestGatewayScoring(unittest.TestCase):
+    def test_clamp_score_bounds(self):
+        # Below bounds
+        self.assertEqual(_clamp_score(-10.5), 0.0)
+        self.assertEqual(_clamp_score(-100), 0.0)
+
+        # Above bounds
+        self.assertEqual(_clamp_score(105.5), 100.0)
+        self.assertEqual(_clamp_score(200), 100.0)
+
+        # Within bounds
+        self.assertEqual(_clamp_score(50.5), 50.5)
+        self.assertEqual(_clamp_score(99.9), 99.9)
+        self.assertEqual(_clamp_score(0.1), 0.1)
+
+        # Exact bounds
+        self.assertEqual(_clamp_score(0.0), 0.0)
+        self.assertEqual(_clamp_score(100.0), 100.0)
+
+        # Integer conversion
+        self.assertEqual(_clamp_score(50), 50.0)
+        self.assertEqual(type(_clamp_score(50)), float)
+
     def test_weighted_score_basic(self):
         # 0.2 * 10 + 0.3 * 20 = 2 + 6 = 8. Total weight 0.5. 8 / 0.5 = 16
         self.assertAlmostEqual(_calculate_weighted_score([10.0, 20.0], [0.2, 0.3]), 16.0)
