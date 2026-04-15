@@ -1,5 +1,6 @@
 
 import unittest
+from gateway import _determine_threat_status
 
 def _clamp_score(score: float) -> float:
     return max(0.0, min(100.0, float(score)))
@@ -38,6 +39,21 @@ class TestGatewayScoring(unittest.TestCase):
 
     def test_weighted_score_empty(self):
         self.assertEqual(_calculate_weighted_score([], []), 0.0)
+
+    def test_threat_status_critical(self):
+        self.assertEqual(_determine_threat_status(70.0), "CRITICAL")
+        self.assertEqual(_determine_threat_status(85.5), "CRITICAL")
+        self.assertEqual(_determine_threat_status(100.0), "CRITICAL")
+
+    def test_threat_status_suspicious(self):
+        self.assertEqual(_determine_threat_status(40.0), "SUSPICIOUS")
+        self.assertEqual(_determine_threat_status(69.9), "SUSPICIOUS")
+        self.assertEqual(_determine_threat_status(55.0), "SUSPICIOUS")
+
+    def test_threat_status_ok(self):
+        self.assertEqual(_determine_threat_status(39.9), "OK")
+        self.assertEqual(_determine_threat_status(0.0), "OK")
+        self.assertEqual(_determine_threat_status(20.0), "OK")
 
 if __name__ == '__main__':
     unittest.main()
