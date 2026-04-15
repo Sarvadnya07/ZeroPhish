@@ -3,7 +3,6 @@
 Test script to verify dashboard data flow
 """
 import requests
-import json
 from datetime import datetime
 
 # Test 1: Check if backend is running

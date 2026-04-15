@@ -10,11 +10,10 @@ import time
 from models.gateway_models import Tier3Result
 from tier_3.main import analyze_email_intent
 
+
 # This will be imported by gateway.py
 async def execute_tier3_with_circuit_breaker(
-    body: str,
-    circuit_breaker,
-    tier3_timeout: int
+    body: str, circuit_breaker, tier3_timeout: int
 ) -> Tier3Result:
     """Execute Tier 3 with circuit breaker protection."""
     start_time = time.time()
@@ -23,17 +22,12 @@ async def execute_tier3_with_circuit_breaker(
     async def _tier3_execution(body: str) -> Tier3Result:
         try:
             # Check if Gemini API key is configured
-            if (
-                not os.getenv("GEMINI_API_KEY")
-                or os.getenv("GEMINI_API_KEY") == "your_actual_gemini_api_key_here"
-            ):
+            if not os.getenv("GEMINI_API_KEY"):
                 # This is not a failure, just unavailable
                 raise ValueError("Gemini API key not configured")
 
             # Execute AI analysis with timeout
-            result = await asyncio.wait_for(
-                analyze_email_intent(body), timeout=tier3_timeout
-            )
+            result = await asyncio.wait_for(analyze_email_intent(body), timeout=tier3_timeout)
 
             execution_time = (time.time() - start_time) * 1000
 
@@ -77,9 +71,7 @@ async def execute_tier3_with_circuit_breaker(
     # Use circuit breaker if provided
     if circuit_breaker:
         try:
-            return await circuit_breaker.call(
-                _tier3_execution, body, fallback=_tier3_fallback
-            )
+            return await circuit_breaker.call(_tier3_execution, body, fallback=_tier3_fallback)
         except Exception as e:
             # If circuit breaker call fails, use fallback
             print(f"Circuit breaker error: {e}")
