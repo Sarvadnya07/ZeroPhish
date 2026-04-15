@@ -23,7 +23,8 @@ class T3Result(BaseModel):
         default_factory=list, description="Email snippets that triggered alarm"
     )
     requires_visual_check: bool = Field(
-        default=False, description="Set to true if the payload warrants pixel-by-pixel visual verification"
+        default=False,
+        description="Set to true if the payload warrants pixel-by-pixel visual verification",
     )
 
 
@@ -52,7 +53,7 @@ Do NOT include markdown, code blocks, explanations, or conversational text. ONLY
 
     def __init__(self):
         api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key or api_key == "your_actual_gemini_api_key_here":
+        if not api_key:
             raise ValueError(
                 "GEMINI_API_KEY not set in .env file. Please add your actual Gemini API key."
             )
