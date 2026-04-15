@@ -7,7 +7,7 @@ from .models import DetectedElement, VisionAnalysisResult
 
 class VisionService:
     @staticmethod
-    async def analyze_screenshot(
+    def analyze_screenshot(
         image_b64: str, url: Optional[str] = None, title: Optional[str] = None
     ) -> dict:
         """
@@ -28,12 +28,13 @@ class VisionService:
         title_lower = (title or "").lower()
 
         # Mock logic based on keywords
-        if "login" in title_lower or "password" in title_lower or "sign in" in title_lower:
+        if any(keyword in title_lower for keyword in ["login", "password", "sign in"]):
             # Looks like a login page. Are we on a Microsoft/Google domain?
             if "microsoft" not in url_lower and "google" not in url_lower:
                 is_suspicious = True
                 score = 85.0
                 brand = "Unknown / Generic Corporate"
+                
                 if "microsoft" in title_lower:
                     brand = "Microsoft"
                 elif "google" in title_lower:
