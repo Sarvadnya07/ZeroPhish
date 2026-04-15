@@ -69,6 +69,14 @@ _EXECUTABLE_EXTS = {
 _ARCHIVE_EXTS = {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".cab"}
 _DOCUMENT_EXTS = {".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".pdf", ".odt"}
 _LINK_RE = re.compile(r'https?://[^\s\'"<>]+', re.IGNORECASE)
+_HTML_LINK_RE = re.compile(r'href=["\']?(https?://[^"\'\s>]+)', re.IGNORECASE)
+_SHORTENERS_RE = re.compile(
+    r"https?://(bit\.ly|tinyurl\.com|t\.co|ow\.ly|goo\.gl|is\.gd|buff\.ly)/",
+    re.IGNORECASE,
+)
+_RCV_SPF_RE = re.compile(r"(\w+)")
+_DKIM_SEL_RE = re.compile(r"header\.s=(\S+)")
+_DMARC_POL_RE = re.compile(r"dmarc=\w+\s+.*?policy\.published=(\w+)")
 
 
 class EmlParser:
@@ -180,7 +188,7 @@ class EmlParser:
                 links.append(u)
 
         # From HTML — also handle href= attributes
-        for m in re.finditer(r'href=["\']?(https?://[^"\'\s>]+)', html, re.IGNORECASE):
+        for m in _HTML_LINK_RE.finditer(html):
             u = m.group(1).rstrip(".,;)>\"'")
             if u not in seen:
                 seen.add(u)
@@ -188,13 +196,9 @@ class EmlParser:
 
         # Recursive redirect detection — un-wrap known URL shorteners
         expanded: List[str] = []
-        shorteners = re.compile(
-            r"https?://(bit\.ly|tinyurl\.com|t\.co|ow\.ly|goo\.gl|is\.gd|buff\.ly)/",
-            re.IGNORECASE,
-        )
         for link in links:
             expanded.append(link)
-            if shorteners.match(link):
+            if _SHORTENERS_RE.match(link):
                 expanded.append(f"[SHORTENER:{link}]")  # Flag for scoring
 
         return expanded[:200]  # cap
@@ -214,18 +218,18 @@ class EmlParser:
 
         spf   = _extract(ar, "spf") if "spf=" in ar else _extract(rcv_spf, "")
         if spf == "unknown" and rcv_spf:
-            m = re.match(r"(\w+)", rcv_spf)
+            m = _RCV_SPF_RE.match(rcv_spf)
             spf = m.group(1) if m else "unknown"
 
         dkim  = _extract(ar, "dkim")
         dmarc = _extract(ar, "dmarc")
 
         # DKIM selector
-        sel_m = re.search(r"header\.s=(\S+)", ar)
+        sel_m = _DKIM_SEL_RE.search(ar)
         dkim_sel = sel_m.group(1) if sel_m else None
 
         # DMARC policy
-        pol_m = re.search(r"dmarc=\w+\s+.*?policy\.published=(\w+)", ar)
+        pol_m = _DMARC_POL_RE.search(ar)
         dmarc_pol = pol_m.group(1) if pol_m else None
 
         # Penalty scoring
