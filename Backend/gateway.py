@@ -28,6 +28,9 @@ sys.path.insert(0, str(BACKEND_DIR))
 
 from circuit_breaker import CircuitBreaker
 from gateway_circuit_wrapper import execute_tier3_with_circuit_breaker
+from scoring_engine import WeightedScoreEngine
+from config import settings
+from logger import logger
 from models.gateway_models import (
     DomainAnalysis,
     GatewayScanRequest,
@@ -81,11 +84,11 @@ async def verify_api_key(api_key: str = Security(api_key_header)):
     return api_key
 
 
-TIER3_TIMEOUT = int(os.getenv("TIER3_TIMEOUT", "5"))
+TIER3_TIMEOUT = settings.tier3_timeout
 WEIGHTS = ScoringWeights()
 SCAN_HISTORY_LIMIT = int(os.getenv("GATEWAY_SCAN_HISTORY_LIMIT", "500"))
 
-CIRCUIT_BREAKER_ENABLED = os.getenv("CIRCUIT_BREAKER_ENABLED", "true").lower() == "true"
+CIRCUIT_BREAKER_ENABLED = settings.circuit_breaker_enabled
 CIRCUIT_FAILURE_THRESHOLD = int(os.getenv("CIRCUIT_BREAKER_FAILURE_THRESHOLD", "5"))
 CIRCUIT_TIMEOUT = float(os.getenv("CIRCUIT_BREAKER_TIMEOUT", "30"))
 CIRCUIT_WINDOW = float(os.getenv("CIRCUIT_BREAKER_WINDOW", "60"))
@@ -142,7 +145,20 @@ allow_headers=["Content-Type", "Authorization"],
 allow_credentials=False,
 )
 
-limiter = Limiter(key_func=get_remote_address)
+import os
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from config import settings
+
+# Setup Redis storage for SlowAPI if redis URL is provided
+redis_url = settings.redis_url
+try:
+    from limits.aio.storage import RedisStorage
+    storage = RedisStorage(redis_url)
+    limiter = Limiter(key_func=get_remote_address, storage_uri=redis_url)
+except ImportError:
+    limiter = Limiter(key_func=get_remote_address)
+
 app.state.limiter = limiter
 
 
@@ -169,87 +185,7 @@ scan_started_at: Dict[str, float] = {}
 scan_results_lock = asyncio.Lock()
 
 
-def _clamp_score(score: float) -> float:
-    return max(0.0, min(100.0, float(score)))
-
-
-def _round_score(score: float) -> float:
-    return round(_clamp_score(score), 2)
-
-
-def _determine_verdict(score: float) -> str:
-    if score < 30:
-        return "SAFE"
-    if score < 70:
-        return "SUSPICIOUS"
-    return "CRITICAL"
-
-
-def _determine_threat_status(score: float) -> str:
-    if score >= 70:
-        return "CRITICAL"
-    if score >= 40:
-        return "SUSPICIOUS"
-    return "OK"
-
-
-def _calculate_weighted_score(scores: list[float], weights: list[float]) -> float:
-    """
-    Unified weighted score calculation with fallback to simple average.
-    Ensures final score is clamped between 0 and 100.
-    """
-    if not scores:
-        return 0.0
-
-    if len(scores) != len(weights):
-        raise ValueError("Scores and weights must have the same length")
-
-    total_weight = sum(weights)
-    if total_weight <= 0:
-        return _clamp_score(sum(scores) / len(scores))
-
-    weighted_sum = sum(s * w for s, w in zip(scores, weights))
-    return _clamp_score(weighted_sum / total_weight)
-
-
-def _calculate_partial_score(tier1_score: float, tier2_score: float) -> float:
-    return _calculate_weighted_score([tier1_score, tier2_score], [WEIGHTS.tier1, WEIGHTS.tier2])
-
-
-def _calculate_final_score(tier1_score: float, tier2_score: float, tier3_score: float) -> float:
-    return _calculate_weighted_score(
-        [tier1_score, tier2_score, tier3_score],
-        [WEIGHTS.tier1, WEIGHTS.tier2, WEIGHTS.tier3],
-    )
-
-
-def _merge_evidence(
-    tier1_evidence: list[str], tier2_evidence: list[str], tier3_flagged_phrases: list[str] | None
-) -> list[str]:
-    merged: list[str] = []
-
-    for item in tier1_evidence:
-        text = str(item).strip()
-        if text:
-            merged.append(text)
-
-    for item in tier2_evidence:
-        text = str(item).strip()
-        if text:
-            merged.append(text)
-
-    for phrase in tier3_flagged_phrases or []:
-        text = str(phrase).strip()
-        if text:
-            merged.append(f"AI: {text}")
-
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for item in merged:
-        if item not in seen:
-            seen.add(item)
-            deduped.append(item)
-    return deduped
+# Removed inline scoring and evidence functions; logic extracted to WeightedScoreEngine
 
 
 async def _notify_live_dashboard(res: GatewayScanResponse, sender: str, subject: str) -> None:
@@ -313,9 +249,9 @@ async def execute_tier2(sender: str, body: str, links: list[str]) -> Tier2Result
             links=links,
         )
 
-        threat_score = _clamp_score(threat_data.threat_level)
-        threat_status = _determine_threat_status(threat_score)
-        tier2_score = _calculate_weighted_score([domain_score, threat_score], [0.3, 0.7])
+        threat_score = WeightedScoreEngine.clamp_score(threat_data.threat_level)
+        threat_status = WeightedScoreEngine.determine_threat_status(threat_score)
+        tier2_score = WeightedScoreEngine.calculate_weighted_score([domain_score, threat_score], [0.3, 0.7])
 
         if threat_data.category != "Safe":
             evidence.append(f"Threat indicators detected: {threat_data.category}.")
@@ -323,7 +259,7 @@ async def execute_tier2(sender: str, body: str, links: list[str]) -> Tier2Result
             evidence.append(f"Flagged phrases: {', '.join(threat_data.flagged_phrases[:3])}")
 
         return Tier2Result(
-            score=_round_score(tier2_score),
+            score=WeightedScoreEngine.round_score(tier2_score),
             domain_analysis=DomainAnalysis(
                 status=domain_status,
                 score=_round_score(domain_score),
@@ -380,10 +316,10 @@ async def _finalize_tier3(scan_id: str, email_body: str) -> None:
         if not existing:
             return
 
-        final_score = _round_score(
-            _calculate_final_score(existing.tier1.score, existing.tier2.score, tier3_result.score)
+        final_score = WeightedScoreEngine.round_score(
+            WeightedScoreEngine.calculate_final_score(existing.tier1.score, existing.tier2.score, tier3_result.score, WEIGHTS)
         )
-        final_verdict = _determine_verdict(final_score)
+        final_verdict = WeightedScoreEngine.determine_verdict(final_score)
         total_ms = None
         if scan_id in scan_started_at:
             total_ms = (time.perf_counter() - scan_started_at[scan_id]) * 1000
@@ -396,7 +332,7 @@ async def _finalize_tier3(scan_id: str, email_body: str) -> None:
                 "layers_completed": 3,
                 "final_score": final_score,
                 "verdict": final_verdict,
-                "combined_evidence": _merge_evidence(
+                "combined_evidence": WeightedScoreEngine.merge_evidence(
                     existing.tier1.evidence,
                     existing.tier2.evidence,
                     tier3_result.flagged_phrases,
@@ -456,7 +392,7 @@ async def gateway_scan(
     scan_id = str(uuid.uuid4())
     scan_started_at[scan_id] = time.perf_counter()
 
-    tier1_score = int(round(_clamp_score(scan_request.tier1_score)))
+    tier1_score = int(round(WeightedScoreEngine.clamp_score(scan_request.tier1_score)))
     tier1 = Tier1Result(
         score=tier1_score,
         evidence=[str(e) for e in scan_request.tier1_evidence][:50],
@@ -469,8 +405,8 @@ async def gateway_scan(
         links=scan_request.links,
     )
 
-    partial_score = _round_score(_calculate_partial_score(tier1.score, tier2.score))
-    verdict = _determine_verdict(partial_score)
+    partial_score = WeightedScoreEngine.round_score(WeightedScoreEngine.calculate_partial_score(tier1.score, tier2.score, WEIGHTS))
+    verdict = WeightedScoreEngine.determine_verdict(partial_score)
     response = GatewayScanResponse(
         scan_id=scan_id,
         timestamp=datetime.now().isoformat(),
@@ -483,7 +419,7 @@ async def gateway_scan(
         tier3_status="processing",
         complete=False,
         layers_completed=2,
-        combined_evidence=_merge_evidence(tier1.evidence, tier2.evidence, None),
+        combined_evidence=WeightedScoreEngine.merge_evidence(tier1.evidence, tier2.evidence, None),
         weights=WEIGHTS,
         total_execution_time_ms=(time.perf_counter() - scan_started_at[scan_id]) * 1000,
     )
@@ -548,6 +484,8 @@ async def gateway_health() -> dict:
         total_scans = len(scan_results)
         pending_scans = sum(1 for v in scan_results.values() if not v.complete)
 
+    cb_status = await tier3_circuit_breaker.get_status() if tier3_circuit_breaker else None
+
     return {
         "status": "healthy",
         "service": "ZeroPhish API Gateway",
@@ -559,7 +497,7 @@ async def gateway_health() -> dict:
             "pending": pending_scans,
             "history_limit": SCAN_HISTORY_LIMIT,
         },
-        "circuit_breaker": tier3_circuit_breaker.get_status() if tier3_circuit_breaker else None,
+        "circuit_breaker": cb_status,
     }
 
 
@@ -567,7 +505,8 @@ async def gateway_health() -> dict:
 async def gateway_circuit_status() -> dict:
     if not tier3_circuit_breaker:
         return {"enabled": False, "status": "disabled"}
-    return {"enabled": True, **tier3_circuit_breaker.get_status()}
+    cb_status = await tier3_circuit_breaker.get_status()
+    return {"enabled": True, **cb_status}
 
 
 @app.get("/gateway/circuit/reset")
@@ -575,8 +514,9 @@ async def gateway_circuit_status() -> dict:
 async def gateway_circuit_reset() -> dict:
     if not tier3_circuit_breaker:
         return {"enabled": False, "status": "disabled"}
-    tier3_circuit_breaker.reset()
-    return {"enabled": True, "status": "reset", **tier3_circuit_breaker.get_status()}
+    await tier3_circuit_breaker.reset()
+    cb_status = await tier3_circuit_breaker.get_status()
+    return {"enabled": True, "status": "reset", **cb_status}
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ transformers==4.47.1
 torch==2.5.1; python_version < "3.13"
 torch==2.6.0; python_version >= "3.13"
 sentencepiece>=0.2.1
+faster-whisper==1.0.3
 
 # ==============================
 # Data Models & Validation

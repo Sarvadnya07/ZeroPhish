@@ -88,6 +88,10 @@ def validate_url(url: str) -> bool:
 
     if re.search(r"[\s\x00-\x1F\x7F]", url):
         return False
+        
+    # Detect zero-width spaces or suspicious characters used in domain spoofing
+    if re.search(r"[\u200b\u200c\u200d\ufeff\u202a-\u202e]", url):
+        return False
 
     try:
         parsed = urllib.parse.urlparse(url)

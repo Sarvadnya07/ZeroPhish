@@ -183,203 +183,31 @@ _THREAT_PATTERNS = _load_threat_patterns()
 
 
 class ThreatAnalyzer:
-    """Local threat analysis engine (no external AI)"""
-
-    # Threat patterns database
-    URGENCY_PATTERNS = _THREAT_PATTERNS.get("URGENCY_PATTERNS", [])
-    FINANCIAL_PATTERNS = _THREAT_PATTERNS.get("FINANCIAL_PATTERNS", [])
-    CREDENTIAL_PATTERNS = _THREAT_PATTERNS.get("CREDENTIAL_PATTERNS", [])
-    AUTHORITY_PATTERNS = _THREAT_PATTERNS.get("AUTHORITY_PATTERNS", [])
-    SCARE_TACTICS = _THREAT_PATTERNS.get("SCARE_TACTICS", [])
-    SUSPICIOUS_URLS = _THREAT_PATTERNS.get("SUSPICIOUS_URLS", [])
-
-    # Pre-compiled regexes for optimized pattern matching
-    URGENCY_RE = re.compile("|".join(map(re.escape, sorted(URGENCY_PATTERNS, key=len, reverse=True))))
-    FINANCIAL_RE = re.compile("|".join(map(re.escape, sorted(FINANCIAL_PATTERNS, key=len, reverse=True))))
-    CREDENTIAL_RE = re.compile("|".join(map(re.escape, sorted(CREDENTIAL_PATTERNS, key=len, reverse=True))))
-    AUTHORITY_RE = re.compile("|".join(map(re.escape, sorted(AUTHORITY_PATTERNS, key=len, reverse=True))))
-    SCARE_RE = re.compile("|".join(map(re.escape, sorted(SCARE_TACTICS, key=len, reverse=True))))
-    SUSPICIOUS_URLS_RE = re.compile("|".join(map(re.escape, sorted(SUSPICIOUS_URLS, key=len, reverse=True))))
-
-    IP_LINK_REGEX = re.compile(r"https?://\d{1,3}(?:\.\d{1,3}){3}(?:[:/]|$)")
-    SUSPICIOUS_TLD_REGEX = re.compile(
-        r"\.(zip|mov|top|xyz|click|country|stream|gq|tk|ml|ga|cf)(?:/|$)"
-    )
-
-    TOP_50_SPOOFED = {
-        "paypal.com", "apple.com", "microsoft.com", "google.com", "amazon.com", "netflix.com", 
-        "facebook.com", "chase.com", "wellsfargo.com", "bankofamerica.com", "github.com",
-        "linkedin.com", "dropbox.com", "docusign.com", "adobe.com", "instagram.com",
-        "yahoo.com", "outlook.com", "office.com", "live.com", "amazonaws.com",
-        "twitter.com", "x.com", "salesforce.com", "slack.com", "zoom.us", "citi.com"
-    }
-
-    URL_SHORTENERS = {
-        "bit.ly", "t.co", "tinyurl.com", "goo.gl", "ow.ly", "is.gd", "buff.ly", "cutt.ly", "rebrand.ly"
-    }
-
-    @staticmethod
-    def levenshtein(s1: str, s2: str) -> int:
-        if len(s1) < len(s2):
-            return ThreatAnalyzer.levenshtein(s2, s1)
-        if len(s2) == 0:
-            return len(s1)
-        previous_row = range(len(s2) + 1)
-        for i, c1 in enumerate(s1):
-            current_row = [i + 1]
-            for j, c2 in enumerate(s2):
-                insertions = previous_row[j + 1] + 1
-                deletions = current_row[j] + 1
-                substitutions = previous_row[j] + (c1 != c2)
-                current_row.append(min(insertions, deletions, substitutions))
-            previous_row = current_row
-        return previous_row[-1]
-
-    @classmethod
-    async def track_redirects(cls, url: str) -> Tuple[str, List[str]]:
-        """Follow redirects for suspicious URLs/shorteners."""
-        if not url.startswith("http"):
-            return url, []
-        try:
-            import httpx
-            async with httpx.AsyncClient(timeout=2.0, follow_redirects=True, max_redirects=3) as client:
-                response = await client.head(url)
-                return str(response.url), []
-        except Exception as e:
-            return url, [f"redirect_timeout"]
-
+    """Coordinator engine that delegates to sub-engines (Pattern, OSINT, ML)."""
+    
     @classmethod
     async def analyze_threat(
         cls, email_body: str, sender: str, links: List[str], use_ml: bool = True
     ) -> ThreatAnalysis:
-        """Analyze email for threat indicators using patterns + ML."""
+        from tier_2.engines import PatternEngine, OSINTEngine, MLEngine
+        
         body_lower = email_body.lower()
         sender_lower = (sender or "").lower()
 
-        # Initialize counters
-        urgency_score = 0
-        financial_score = 0
-        credential_score = 0
-        authority_score = 0
-        scare_score = 0
-        link_score = 0
-
-        flagged_phrases: List[str] = []
-
-        # Check for urgency patterns
-        urgency_matches = set(cls.URGENCY_RE.findall(body_lower))
-        if urgency_matches:
-            urgency_score = len(urgency_matches) * 10
-            flagged_phrases.extend(urgency_matches)
-
-        # Check for financial patterns
-        financial_matches = set(cls.FINANCIAL_RE.findall(body_lower))
-        if financial_matches:
-            financial_score = len(financial_matches) * 8
-            flagged_phrases.extend(financial_matches)
-
-        # Check for credential patterns
-        credential_matches = set(cls.CREDENTIAL_RE.findall(body_lower))
-        if credential_matches:
-            credential_score = len(credential_matches) * 7
-            flagged_phrases.extend(credential_matches)
-
-        # Check for authority impersonation
-        authority_matches = set(cls.AUTHORITY_RE.findall(body_lower))
-        if authority_matches:
-            authority_score = len(authority_matches) * 9
-            flagged_phrases.extend(authority_matches)
-
-        # Check for scare tactics
-        scare_matches = set(cls.SCARE_RE.findall(body_lower))
-        if scare_matches:
-            scare_score = len(scare_matches) * 8
-            flagged_phrases.extend(scare_matches)
-
-        # Check for suspicious URLs
-        for link in links:
-            lowered_link = (link or "").lower()
-            domain_match = re.search(r"https?://([^/]+)", lowered_link)
-            domain = domain_match.group(1) if domain_match else ""
-
-            suspicious_match = cls.SUSPICIOUS_URLS_RE.search(lowered_link)
-            if suspicious_match:
-                link_score += 15
-                flagged_phrases.append(f"suspicious_url:{suspicious_match.group()}")
-
-            if cls.IP_LINK_REGEX.search(lowered_link):
-                link_score += 20
-                flagged_phrases.append("ip_based_link")
-
-            if "xn--" in lowered_link:
-                link_score += 18
-                flagged_phrases.append("punycode_link")
-
-            if cls.SUSPICIOUS_TLD_REGEX.search(lowered_link):
-                link_score += 10
-                flagged_phrases.append("suspicious_tld")
-
-            # Async Redirect Tracker for URL shorteners
-            if any(shortener in domain for shortener in cls.URL_SHORTENERS):
-                link_score += 5
-                final_url, trace_errs = await cls.track_redirects(link)
-                if final_url != link:
-                    flagged_phrases.append("hidden_redirect")
-                    if cls.SUSPICIOUS_TLD_REGEX.search(final_url.lower()):
-                        link_score += 20
-                        flagged_phrases.append("redirect_to_suspicious_tld")
-
-        # Sender context checks
-        if "@" not in sender_lower:
-            authority_score += 10
-            flagged_phrases.append("invalid_sender_format")
-        else:
-            sender_domain = sender_lower.split("@")[-1]
-            if any(term in sender_lower for term in ("security", "support", "admin", "billing")):
-                authority_score += 5
-            
-            # Typosquatting Check via Levenshtein
-            for target in cls.TOP_50_SPOOFED:
-                if sender_domain == target:
-                    break
-                dist = cls.levenshtein(sender_domain, target)
-                if dist == 1 or dist == 2:
-                    authority_score += 40
-                    flagged_phrases.append(f"typosquatting:{target}")
-                    break
-
-        # Calculate threat level (0-100)
-        base_threat = min(
-            100,
-            urgency_score
-            + financial_score
-            + credential_score
-            + authority_score
-            + scare_score
-            + link_score,
-        )
-
-        # Check for combined patterns (higher risk)
-        if urgency_score > 0 and (financial_score > 0 or credential_score > 0):
+        pattern_engine = PatternEngine(_THREAT_PATTERNS)
+        pattern_score, categories, flagged_phrases = pattern_engine.analyze(body_lower, links)
+        
+        osint_score, osint_flagged = await OSINTEngine.analyze(sender_lower, links)
+        flagged_phrases.extend(osint_flagged)
+        
+        # Base threat from pattern and OSINT
+        base_threat = min(100, pattern_score + osint_score)
+        
+        # Check for combined patterns
+        if "Urgency" in categories and ("Financial" in categories or "Credential" in categories):
             base_threat = min(100, base_threat + 20)
-
-        if authority_score > 0 and (financial_score > 0 or scare_score > 0):
+        if "Authority" in categories and ("Financial" in categories or "ScareTactics" in categories):
             base_threat = min(100, base_threat + 25)
-
-        # Determine category
-        categories: List[str] = []
-        if urgency_score > 0:
-            categories.append("Urgency")
-        if financial_score > 0:
-            categories.append("Financial")
-        if credential_score > 0:
-            categories.append("Credential")
-        if authority_score > 0:
-            categories.append("Authority")
-        if scare_score > 0:
-            categories.append("ScareTactics")
-        if link_score > 0:
-            categories.append("SuspiciousLinks")
 
         if not categories and base_threat < 20:
             category = "Safe"
@@ -388,45 +216,22 @@ class ThreatAnalyzer:
             category = "GeneralSuspicion"
             reasoning = "Suspicious signals detected but not enough to classify a specific category"
         else:
-            category = "/".join(categories[:3])  # Max 3 categories
+            category = "/".join(categories[:3])
             reasoning = f"Detected {len(categories)} threat categories: {', '.join(categories)}"
 
-        # Deduplicate flagged phrases while preserving order
-        deduped_phrases: List[str] = []
-        seen_phrases = set()
+        # Deduplicate phrases
+        deduped_phrases = []
+        seen = set()
         for phrase in flagged_phrases:
-            if phrase not in seen_phrases:
-                seen_phrases.add(phrase)
+            if phrase not in seen:
+                seen.add(phrase)
                 deduped_phrases.append(phrase)
-        flagged_phrases = deduped_phrases[:10]  # Limit to 10
+        flagged_phrases = deduped_phrases[:10]
 
-        # ML Enhancement (if available and enabled)
-        ml_score = None
-        ml_confidence = None
-
-        if use_ml and ML_AVAILABLE and os.getenv("ML_ENABLED", "true").lower() == "true":
-            try:
-                ml_model = await get_ml_model()
-                if ml_model.is_loaded():
-                    ml_score, ml_confidence = await ml_model.predict(email_body)
-                    logger.debug(f"ML prediction: score={ml_score:.2f}, confidence={ml_confidence}")
-
-                    # Combine ML score (60%) + pattern score (40%)
-                    combined_threat = (ml_score * 0.6) + (base_threat * 0.4)
-
-                    # Update category if ML provides stronger signal
-                    if ml_confidence == "phishing" and "ML:Phishing" not in category:
-                        category = (
-                            f"{category}/ML:Phishing" if category != "Safe" else "ML:Phishing"
-                        )
-
-                    # Update reasoning
-                    reasoning = f"{reasoning}. ML confidence: {ml_confidence} ({ml_score:.1f}%)"
-
-                    # Use combined score
-                    base_threat = combined_threat
-            except Exception as e:
-                logger.warning(f"ML inference failed: {e}")
+        if use_ml:
+            base_threat, category, reasoning = await MLEngine.analyze(
+                email_body, base_threat, category, reasoning
+            )
 
         return ThreatAnalysis(
             threat_level=int(min(100, max(0, round(base_threat)))),
