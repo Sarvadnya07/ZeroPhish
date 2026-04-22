@@ -1,4 +1,9 @@
+import { h, render } from 'preact';
+import { useState, useEffect, useCallback } from 'preact/hooks';
+import htm from 'htm';
 import { analyzeTier1 } from './tier1.js';
+
+const html = htm.bind(h);
 
 // Gateway endpoints for 3-tier analysis
 const GATEWAY_SCAN_URL = 'http://127.0.0.1:8001/gateway/scan';
@@ -6,398 +11,341 @@ const GATEWAY_STATUS_URL = 'http://127.0.0.1:8001/gateway/status';
 const GATEWAY_RESULT_URL = 'http://127.0.0.1:8001/gateway/result';
 const VISION_ANALYZE_URL = 'http://127.0.0.1:8001/vision/analyze';
 
-// Dashboard endpoint
-const BACKEND_REPORT_URL = 'http://127.0.0.1:8000/tier1/report';
 const POLL_INTERVAL_MS = 500;
-const MAX_POLLS = 40; // Increased for Gemini logic
-const MAX_POLL_ERRORS = 3;
+const MAX_POLLS = 40;
 
-// UI References
-const scanButton = document.getElementById('scan-btn');
-const visualCheckBtn = document.getElementById('visual-check-btn');
-const threatScoreEl = document.getElementById('threat-score');
-const gaugeProgress = document.getElementById('gauge-progress');
-const scanIndicator = document.getElementById('scan-indicator');
+function App() {
+  const [scanning, setScanning] = useState(false);
+  const [score, setScore] = useState(0);
+  const [verdict, setVerdict] = useState('SAFE');
+  const [summary, setSummary] = useState({
+    l1: 'Analysis T2 & T3 Pending.',
+    l2: 'Scanner: Local & Tier 2 Active.',
+    l3: 'Gemini AI (Tier 3) Standby. Ready to protect...'
+  });
+  const [pipeline, setPipeline] = useState({
+    t1: { status: 'Waiting...', progress: 0 },
+    t2: { status: 'Standby', progress: 0 },
+    t3: { status: 'Awaiting Input', progress: 0 }
+  });
 
-// Status Pill
-const statusPill = document.getElementById('status-pill');
-const verdictText = document.getElementById('verdict-text');
-const verdictRange = document.getElementById('verdict-range');
-const verdictIcon = document.getElementById('verdict-icon');
+  const updateGauge = (value) => {
+    setScore(Math.round(value));
+  };
 
-// Summary Texts
-const summaryLine1 = document.getElementById('summary-line-1');
-const summaryLine2 = document.getElementById('summary-line-2');
-const summaryLine3 = document.getElementById('summary-line-3');
+  const updatePipeline = (tier, status, progress) => {
+    setPipeline(prev => ({
+      ...prev,
+      [`t${tier}`]: { status, progress }
+    }));
+  };
 
-// Pipeline elements
-const t1Progress = document.getElementById('t1-progress');
-const t1StatusText = document.getElementById('t1-status-text');
-const t2Progress = document.getElementById('t2-progress');
-const t2StatusText = document.getElementById('t2-status-text');
-const t3Progress = document.getElementById('t3-progress');
-const t3StatusText = document.getElementById('t3-status-text');
+  const resetUI = () => {
+    setScore(0);
+    setVerdict('SAFE');
+    setSummary({
+      l1: 'Waiting for session...',
+      l2: 'Scanner: Standby',
+      l3: 'Gemini AI: Ready to protect...'
+    });
+    setPipeline({
+      t1: { status: 'Waiting...', progress: 0 },
+      t2: { status: 'Standby', progress: 0 },
+      t3: { status: 'Awaiting Input', progress: 0 }
+    });
+    setScanning(false);
+  };
 
-let activePollInterval = null;
-let activeRunId = 0;
+  const runScan = async () => {
+    resetUI();
+    setScanning(true);
 
-// Configuration for gauge
-const GAUGE_MAX_OFFSET = 220; // Circumference of the gauge semicircle (r=70)
-
-/**
- * Updates the SVG gauge needle/progress
- * @param {number} score 0-100
- */
-function updateGauge(score) {
-  const value = Math.max(0, Math.min(100, score));
-  const offset = GAUGE_MAX_OFFSET - (value / 100) * GAUGE_MAX_OFFSET;
-  if (gaugeProgress) {
-    gaugeProgress.style.strokeDashoffset = offset;
-  }
-  if (threatScoreEl) {
-    threatScoreEl.innerText = Math.round(value);
-  }
-}
-
-/**
- * Updates the verdict pill and text
- */
-function setVerdict(verdict, score) {
-  const v = (verdict || 'SAFE').toUpperCase();
-  if (!statusPill) return;
-
-  statusPill.classList.remove('safe', 'suspicious', 'critical');
-  
-  if (v === 'CRITICAL' || score >= 70) {
-    statusPill.classList.add('critical');
-    verdictText.innerText = 'CRITICAL';
-    verdictRange.innerText = '70-100';
-    verdictIcon.innerText = '✕';
-  } else if (v === 'SUSPICIOUS' || score >= 30) {
-    statusPill.classList.add('suspicious');
-    verdictText.innerText = 'SUSPICIOUS';
-    verdictRange.innerText = '30-69';
-    verdictIcon.innerText = '!';
-  } else {
-    statusPill.classList.add('safe');
-    verdictText.innerText = 'SAFE';
-    verdictRange.innerText = '0-29';
-    verdictIcon.innerText = '✓';
-  }
-}
-
-/**
- * Sets the multi-line analysis status text
- */
-function setAnalysisSummary(l1, l2, l3) {
-  if (summaryLine1) summaryLine1.innerText = l1 || '';
-  if (summaryLine2) summaryLine2.innerText = l2 || '';
-  if (summaryLine3) summaryLine3.innerText = l3 || '';
-}
-
-/**
- * Updates the T1/T2/T3 pipeline indicators
- */
-function updatePipeline(tier, status, progress) {
-  if (tier === 1) {
-    if (t1Progress) t1Progress.style.width = `${progress}%`;
-    if (t1StatusText) t1StatusText.innerText = status;
-  } else if (tier === 2) {
-    if (t2Progress) t2Progress.style.width = `${progress}%`;
-    if (t2StatusText) t2StatusText.innerText = status;
-  } else if (tier === 3) {
-    if (t3Progress) t3Progress.style.width = `${progress}%`;
-    if (t3StatusText) t3StatusText.innerText = status;
-  }
-}
-
-function setScanningState(active) {
-  if (scanIndicator) {
-    if (active) scanIndicator.classList.remove('hidden');
-    else scanIndicator.classList.add('hidden');
-  }
-  if (scanButton) {
-    scanButton.disabled = active;
-    scanButton.innerHTML = active 
-      ? `SCANNING...` 
-      : `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4"/></svg> INITIALIZE COMPLETE SCAN <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon-right"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></svg>`;
-  }
-}
-
-function resetUI() {
-  updateGauge(0);
-  setVerdict('SAFE', 0);
-  setAnalysisSummary('Waiting for session...', 'Scanner: Standby', 'Gemini AI: Ready to protect...');
-  updatePipeline(1, 'Waiting...', 0);
-  updatePipeline(2, 'Standby', 0);
-  updatePipeline(3, 'Awaiting Input', 0);
-  setScanningState(false);
-}
-
-// Reuse helper functions from original sidepanel.js
-function safeUuid() {
-  try {
-    return crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  } catch {
-    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  }
-}
-
-function toErrorMessage(err, fallback = 'Unknown error.') {
-  if (typeof err === 'string' && err.trim()) return err.trim();
-  const msg = err?.message;
-  if (typeof msg === 'string' && msg.trim()) return msg.trim();
-  return fallback;
-}
-
-async function extractEmailFromGmailActiveTab() {
-  async function sendExtractMessage(tabId) {
-    return new Promise((resolve, reject) => {
-      chrome.tabs.sendMessage(tabId, { action: 'EXTRACT_EMAIL' }, (res) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        resolve(res);
+    try {
+      setSummary({ l1: 'Initializing...', l2: 'Reading Gmail context...', l3: 'Syncing...' });
+      
+      const email = await extractEmailFromGmailActiveTab();
+      
+      // T1
+      updatePipeline(1, 'Analyzing...', 40);
+      const heur = analyzeTier1(email);
+      const t1Score = Math.max(0, Math.min(100, Math.round(heur?.t1_score || 0)));
+      
+      updateGauge(t1Score);
+      setVerdict(heur?.t1_category || 'SAFE');
+      updatePipeline(1, 'Complete', 100);
+      setSummary({ 
+        l1: 'Tier 1: Local Heuristics Complete.', 
+        l2: 'Analysis T2 & T3 Pending...', 
+        l3: heur?.User_Friendly_Summary || 'Analyzing patterns...' 
       });
-    });
-  }
 
-  async function injectContentScript(tabId) {
-    return new Promise((resolve, reject) => {
-      chrome.scripting.executeScript(
-        { target: { tabId }, files: ['content.js'] },
-        () => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-            return;
-          }
-          resolve();
-        },
-      );
-    });
-  }
+      // T2
+      updatePipeline(2, 'Connecting...', 20);
+      const gatewayPayload = {
+        tier1_score: t1Score,
+        tier1_evidence: (heur?.t1_evidence || []).map(e => e.detail || String(e)),
+        sender: email.senderEmail || email.sender || 'unknown@unknown.com',
+        body: email.body || '',
+        links: Array.isArray(email?.links) ? email.links.map(l => typeof l === 'string' ? l : l.href) : [],
+        subject: email.subject || 'No Subject',
+        timestamp: new Date().toISOString()
+      };
 
-  const tabs = await new Promise((resolve) =>
-    chrome.tabs.query({ active: true, currentWindow: true }, resolve),
-  );
-  const [tab] = tabs || [];
-  if (!tab?.id || !tab?.url?.includes('mail.google.com')) {
-    throw new Error('Please open a Gmail message first.');
-  }
+      const gResponse = await fetch(GATEWAY_SCAN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(gatewayPayload)
+      });
 
-  let response;
-  try {
-    response = await sendExtractMessage(tab.id);
-  } catch (err) {
-    const message = toErrorMessage(err);
-    if (/Receiving end does not exist/i.test(message)) {
-      await injectContentScript(tab.id);
-      response = await sendExtractMessage(tab.id);
-    } else {
-      throw err;
-    }
-  }
+      if (!gResponse.ok) throw new Error('Gateway Connection Failed');
+      const gData = await gResponse.json();
+      
+      const gScanId = gData.scan_id;
+      const partialScore = Math.round(gData.partial_score || t1Score);
+      
+      updateGauge(partialScore);
+      setVerdict(gData.verdict);
+      updatePipeline(2, 'Analyzing ML...', 60);
+      setSummary(prev => ({
+        ...prev,
+        l1: 'Tier 2: ML & Metadata Active.',
+        l2: 'Polling Gemini AI (Tier 3)...',
+        l3: `Domain Status: ${gData.tier2?.domain_analysis?.status || 'Flagged'}`
+      }));
 
-  if (!response?.body) {
-    throw new Error('Could not read the email. Refresh Gmail and try again.');
-  }
+      // T3 Polling
+      updatePipeline(3, 'Awaiting Data', 20);
+      let pollCount = 0;
+      const poll = setInterval(async () => {
+        pollCount++;
+        try {
+          const sRes = await fetch(`${GATEWAY_STATUS_URL}/${gScanId}`);
+          const status = await sRes.json();
 
-  return response;
-}
-
-async function postLiveReport(payload) {
-  try {
-    await fetch(BACKEND_REPORT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-  } catch (e) {
-    // Non-blocking
-  }
-}
-
-function clearPoll() {
-  if (activePollInterval) {
-    clearInterval(activePollInterval);
-    activePollInterval = null;
-  }
-}
-
-// MAIN SCAN LOGIC
-scanButton.addEventListener('click', async () => {
-  clearPoll();
-  activeRunId += 1;
-  const runId = activeRunId;
-  const liveScanId = safeUuid();
-  
-  resetUI();
-  setScanningState(true);
-
-  try {
-    setAnalysisSummary('Initializing connection...', 'Reading Gmail context...', 'Syncing with Gateway...');
-    const email = await extractEmailFromGmailActiveTab();
-    if (runId !== activeRunId) return;
-
-    // TIER 1: Local Heuristics
-    updatePipeline(1, 'Analyzing...', 40);
-    const heur = analyzeTier1(email);
-    const t1Score = Math.max(0, Math.min(100, Math.round(heur?.t1_score || 0)));
-    
-    updateGauge(t1Score);
-    setVerdict(heur?.t1_category, t1Score);
-    updatePipeline(1, 'Complete', 100);
-    setAnalysisSummary('Tier 1: Local Heuristics Complete.', 'Analysis T2 & T3 Pending...', heur?.User_Friendly_Summary || 'Analyzing patterns...');
-
-    const sender = email.senderEmail || email.sender || 'unknown@unknown.com';
-    const subject = email.subject || 'No Subject';
-    const links = Array.isArray(email?.links) ? email.links.map(l => typeof l === 'string' ? l : l.href) : [];
-
-    // TIER 2: Processing via Gateway
-    updatePipeline(2, 'Connecting...', 20);
-    const gatewayPayload = {
-      tier1_score: t1Score,
-      tier1_evidence: (heur?.t1_evidence || []).map(e => e.detail || String(e)),
-      sender,
-      body: email.body || '',
-      links,
-      subject,
-      timestamp: new Date().toISOString()
-    };
-
-    const gResponse = await fetch(GATEWAY_SCAN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(gatewayPayload)
-    });
-
-    if (!gResponse.ok) throw new Error('Gateway Connection Failed');
-    const gData = await gResponse.json();
-    if (runId !== activeRunId) return;
-
-    const gScanId = gData.scan_id;
-    const partialScore = Math.round(gData.partial_score || t1Score);
-    
-    updateGauge(partialScore);
-    setVerdict(gData.verdict, partialScore);
-    updatePipeline(2, 'Analyzing ML...', 60);
-    setAnalysisSummary('Tier 2: ML & Metadata Active.', 'Polling Gemini AI (Tier 3)...', `Domain Status: ${gData.tier2?.domain_analysis?.status || 'Flagged'}`);
-
-    // TIER 3: AI Polling
-    updatePipeline(3, 'Awaiting Data', 20);
-    let pollCount = 0;
-    
-    activePollInterval = setInterval(async () => {
-      pollCount++;
-      if (runId !== activeRunId) { clearPoll(); return; }
-
-      try {
-        const sRes = await fetch(`${GATEWAY_STATUS_URL}/${gScanId}`);
-        const status = await sRes.json();
-
-        if (status.complete) {
-          clearPoll();
-          const rRes = await fetch(`${GATEWAY_RESULT_URL}/${gScanId}`);
-          const result = await rRes.json();
-          
-          const finalScore = Math.round(result.final_score || partialScore);
-          updateGauge(finalScore);
-          setVerdict(result.verdict, finalScore);
-          
-          updatePipeline(2, 'Complete', 100);
-          updatePipeline(3, 'Complete', 100);
-          
-          setScanningState(false);
-          setAnalysisSummary(
-            `Final Result: ${result.verdict}`,
-            `Overall Threat Score: ${finalScore}/100`,
-            result.tier3?.reasoning || '3-Tier Analysis finalized successfully.'
-          );
-
-        } else if (pollCount >= MAX_POLLS) {
-          clearPoll();
-          setScanningState(false);
-          setAnalysisSummary('Tier 3: AI Analysis Timeout', 'Falling back to T1 + T2 results.', 'Heavy traffic or slow AI response.');
-          updatePipeline(3, 'Timeout', 50);
-        } else {
-          // Dynamic polling progress visually synchronized
-          const prog = Math.min(95, (pollCount / MAX_POLLS) * 80 + 20);
-          updatePipeline(3, `Thinking... (${Math.round(prog)}%)`, prog);
-          
-          if (status.layers_completed >= 2) {
-             updatePipeline(2, 'Complete', 100);
+          if (status.complete) {
+            clearInterval(poll);
+            const rRes = await fetch(`${GATEWAY_RESULT_URL}/${gScanId}`);
+            const result = await rRes.json();
+            
+            const finalScore = Math.round(result.final_score || partialScore);
+            updateGauge(finalScore);
+            setVerdict(result.verdict);
+            updatePipeline(2, 'Complete', 100);
+            updatePipeline(3, 'Complete', 100);
+            setScanning(false);
+            setSummary({
+              l1: `Final Result: ${result.verdict}`,
+              l2: `Overall Threat Score: ${finalScore}/100`,
+              l3: result.tier3?.reasoning || '3-Tier Analysis finalized successfully.'
+            });
+          } else if (pollCount >= MAX_POLLS) {
+            clearInterval(poll);
+            setScanning(false);
+            setSummary({
+              l1: 'Tier 3: AI Analysis Timeout',
+              l2: 'Falling back to T1 + T2 results.',
+              l3: 'Heavy traffic or slow AI response.'
+            });
+            updatePipeline(3, 'Timeout', 50);
           } else {
-             updatePipeline(2, 'Analyzing...', 80);
+            const prog = Math.min(95, (pollCount / MAX_POLLS) * 80 + 20);
+            updatePipeline(3, `Thinking... (${Math.round(prog)}%)`, prog);
           }
-        }
-      } catch (e) {
-        // Retry polling
-      }
-    }, POLL_INTERVAL_MS);
+        } catch { /* retry */ }
+      }, POLL_INTERVAL_MS);
 
-  } catch (err) {
-    if (runId !== activeRunId) return;
-    setScanningState(false);
-    setAnalysisSummary('Scan Failed', 'System encountered an error.', toErrorMessage(err));
-    updatePipeline(1, 'Error', 0);
-    updatePipeline(2, 'Error', 0);
-    updatePipeline(3, 'Error', 0);
-  }
-});
-
-// VISION CHECK LOGIC
-visualCheckBtn.addEventListener('click', async () => {
-  try {
-    setAnalysisSummary('Visual Check Active...', 'Capturing rendering snapshot...', '');
-    visualCheckBtn.innerHTML = 'ANALYZING...';
-    visualCheckBtn.disabled = true;
-
-    const tabs = await new Promise((resolve) => chrome.tabs.query({ active: true, currentWindow: true }, resolve));
-    const [tab] = tabs || [];
-    if (!tab?.id) throw new Error('No active tab found.');
-
-    // Capture screenshot
-    const screenshotUrl = await new Promise((resolve, reject) => {
-      chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 20 }, (dataUrl) => {
-        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
-        else resolve(dataUrl);
-      });
-    });
-
-    const payload = {
-      image_data_b64: screenshotUrl,
-      url: tab.url,
-      title: tab.title
-    };
-
-    const res = await fetch(VISION_ANALYZE_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-
-    if (!res.ok) throw new Error('Vision analysis failed. Check backend.');
-    const data = await res.json();
-
-    if (data.is_phishing) {
-      setVerdict('CRITICAL', data.threat_score);
-      updateGauge(data.threat_score);
-      setAnalysisSummary('🚨 SPOOFED PORTAL DETECTED!', `Brand spoofed: ${data.matched_brand}`, data.reasoning);
-      updatePipeline(3, 'Intercepted', 100);
-    } else {
-      setVerdict('SAFE', data.threat_score);
-      updateGauge(data.threat_score);
-      setAnalysisSummary('Visual checks passed.', 'Domain matches visual structure.', data.reasoning);
-      updatePipeline(3, 'Verified', 100);
+    } catch (err) {
+      setScanning(false);
+      setSummary({ l1: 'Scan Failed', l2: 'System error occurred.', l3: err.message });
+      updatePipeline(1, 'Error', 0);
+      updatePipeline(2, 'Error', 0);
+      updatePipeline(3, 'Error', 0);
     }
-  } catch (e) {
-    setAnalysisSummary('Visual Check Failed', toErrorMessage(e), '');
-  } finally {
-    visualCheckBtn.innerHTML = 'QUICK VISUAL CHECK';
-    visualCheckBtn.disabled = false;
-  }
-});
+  };
 
-// Initialize with a clean slate
-resetUI();
+  const runVisualCheck = async () => {
+    try {
+      setSummary({ l1: 'Visual Check Active...', l2: 'Capturing snapshot...', l3: '' });
+      setScanning(true);
+
+      const tabs = await new Promise(resolve => chrome.tabs.query({ active: true, currentWindow: true }, resolve));
+      const [tab] = tabs || [];
+      if (!tab?.id) throw new Error('No active tab.');
+
+      const screenshotUrl = await new Promise((resolve, reject) => {
+        chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 20 }, data => {
+          if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+          else resolve(data);
+        });
+      });
+
+      const res = await fetch(VISION_ANALYZE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_data_b64: screenshotUrl, url: tab.url, title: tab.title })
+      });
+
+      if (!res.ok) throw new Error('Vision analysis failed.');
+      const data = await res.json();
+
+      setVerdict(data.is_phishing ? 'CRITICAL' : 'SAFE');
+      updateGauge(data.threat_score);
+      setSummary({
+        l1: data.is_phishing ? '🚨 SPOOFED PORTAL DETECTED!' : 'Visual checks passed.',
+        l2: data.matched_brand ? `Brand: ${data.matched_brand}` : 'No brand spoofing detected.',
+        l3: data.reasoning
+      });
+      updatePipeline(3, 'Verified', 100);
+    } catch (e) {
+      setSummary({ l1: 'Visual Check Failed', l2: e.message, l3: '' });
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const getVerdictClass = () => {
+    if (verdict === 'CRITICAL' || score >= 70) return 'critical';
+    if (verdict === 'SUSPICIOUS' || score >= 30) return 'suspicious';
+    return 'safe';
+  };
+
+  const GAUGE_MAX_OFFSET = 220;
+  const strokeDashoffset = GAUGE_MAX_OFFSET - (score / 100) * GAUGE_MAX_OFFSET;
+
+  return html`
+    <div class="app-container">
+      <header class="header">
+        <div class="brand">
+          <span class="logo-text">ZeroPhish</span>
+        </div>
+        ${scanning && html`
+          <div class="scan-indicator">
+            <span class="pulse-dot red"></span>
+            <span class="indicator-text">SCAN IN PROGRESS</span>
+          </div>
+        `}
+      </header>
+
+      <main class="dashboard">
+        <section class="gauge-section">
+          <div class="gauge-wrapper">
+            <svg viewBox="0 0 200 120" class="gauge-svg">
+              <defs>
+                <linearGradient id="cyanGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#0ea5e9" />
+                  <stop offset="100%" stop-color="#00f0ff" />
+                </linearGradient>
+              </defs>
+              <path d="M 10 100 A 90 90 0 0 1 190 100" fill="none" class="gauge-track secondary" stroke-width="1.5" stroke-linecap="round" />
+              <path d="M 30 100 A 70 70 0 0 1 170 100" fill="none" class="gauge-track" stroke-width="6" stroke-linecap="round" />
+              <path d="M 50 100 A 50 50 0 0 1 150 100" fill="none" class="gauge-track secondary" stroke-width="1.5" stroke-linecap="round" />
+              <path id="gauge-progress" d="M 30 100 A 70 70 0 0 1 170 100" fill="none" class="gauge-fill" stroke-width="6" stroke-linecap="round" 
+                style=${{ strokeDashoffset }} />
+            </svg>
+            <div class="gauge-content">
+              <div class="score-value">${score}</div>
+              <div class="score-label">THREAT LEVEL</div>
+            </div>
+          </div>
+
+          <div class="status-pill ${getVerdictClass()}">
+            <span class="pill-title">STATUS</span>
+            <div class="pill-body">
+              <span class="pill-text">Status: <strong>${verdict}</strong> (${getVerdictClass() === 'critical' ? '70-100' : getVerdictClass() === 'suspicious' ? '30-69' : '0-29'})</span>
+              <span class="status-icon">${getVerdictClass() === 'critical' ? '✕' : getVerdictClass() === 'suspicious' ? '!' : '✓'}</span>
+            </div>
+          </div>
+
+          <div class="analysis-summary">
+            <p>${summary.l1}</p>
+            <p>${summary.l2}</p>
+            <p>${summary.l3}</p>
+          </div>
+        </section>
+
+        <section class="pipeline-container">
+          <h2 class="section-header">ANALYSIS PIPELINE</h2>
+          <div class="pipeline-grid">
+            <div class="pipeline-item">
+              <div class="icon-box green">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+              </div>
+              <div class="tier-label">T1</div>
+              <div class="tier-desc">LOCAL</div>
+              <div class="progress-bar-bg"><div class="progress-bar-fill green" style=${{ width: `${pipeline.t1.progress}%` }}></div></div>
+              <div class="status-subtext">${pipeline.t1.status}</div>
+            </div>
+
+            <div class="pipeline-item">
+              <div class="icon-box blue">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+              </div>
+              <div class="tier-label">T2</div>
+              <div class="tier-desc">ML & METADATA</div>
+              <div class="progress-bar-bg"><div class="progress-bar-fill blue" style=${{ width: `${pipeline.t2.progress}%` }}></div></div>
+              <div class="status-subtext">${pipeline.t2.status}</div>
+            </div>
+
+            <div class="pipeline-item">
+              <div class="icon-box cyan">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .52 5.886 4.002 4.002 0 0 0 5.137 5.49 4 4 0 0 0 5.732-2.324 4 4 0 0 0 2.131-7.143 4 4 0 0 0-2.001-6.843A3 3 0 0 0 12 5Z"/></svg>
+              </div>
+              <div class="tier-label">T3</div>
+              <div class="tier-desc">SEMANTIC AI</div>
+              <div class="progress-bar-bg"><div class="progress-bar-fill cyan" style=${{ width: `${pipeline.t3.progress}%` }}></div></div>
+              <div class="status-subtext">${pipeline.t3.status}</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="action-section">
+          <button onClick=${runScan} disabled=${scanning} class="btn btn-primary">
+            ${scanning ? 'SCANNING...' : html`
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4"/></svg>
+              INITIALIZE COMPLETE SCAN
+            `}
+          </button>
+          
+          <button onClick=${runVisualCheck} disabled=${scanning} class="btn btn-secondary">
+            QUICK VISUAL CHECK
+          </button>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <div class="system-stats">
+          <span>Rate Limit: 20 scans/min</span>
+          <span class="separator">|</span>
+          <span>System Health: Nominal</span>
+        </div>
+        <div class="system-stats secondary">
+          <span>ML Model v2.1</span>
+          <span class="separator">|</span>
+          <span>Redis Cache Active</span>
+        </div>
+      </footer>
+    </div>
+  `;
+}
+
+// Helper functions (extracted from original script)
+async function extractEmailFromGmailActiveTab() {
+  const tabs = await new Promise(resolve => chrome.tabs.query({ active: true, currentWindow: true }, resolve));
+  const [tab] = tabs || [];
+  if (!tab?.id || !tab?.url?.includes('mail.google.com')) throw new Error('Please open a Gmail message.');
+
+  return new Promise((resolve, reject) => {
+    chrome.tabs.sendMessage(tab.id, { action: 'EXTRACT_EMAIL' }, res => {
+      if (chrome.runtime.lastError) {
+        chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] }, () => {
+          chrome.tabs.sendMessage(tab.id, { action: 'EXTRACT_EMAIL' }, res2 => {
+            if (chrome.runtime.lastError) reject(new Error('Extension context lost. Refresh Gmail.'));
+            else resolve(res2);
+          });
+        });
+      } else resolve(res);
+    });
+  });
+}
+
+render(html`<${App} />`, document.getElementById('app'));

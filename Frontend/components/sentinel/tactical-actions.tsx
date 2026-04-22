@@ -9,15 +9,19 @@ export function TacticalActions({
   data,
   onToggleLogs,
   logsOpen,
+  onResolve,
 }: {
   data: ScanResult
   onToggleLogs: () => void
   logsOpen: boolean
+  onResolve: () => void
 }) {
   const [confirming, setConfirming] = useState(false)
   const [reported, setReported] = useState(false)
+  const [resolved, setResolved] = useState(false)
   const isSafe = data.threatLevel === "safe" && data.phase === "complete"
   const isComplete = data.phase === "complete"
+  const isCritical = data.threatLevel === "critical"
 
   function handleQuarantine() {
     if (!confirming) {
@@ -28,10 +32,15 @@ export function TacticalActions({
     setConfirming(false)
   }
 
+  function handleResolve() {
+    setResolved(true)
+    onResolve()
+  }
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
       {/* Quarantine & Report */}
-      {isComplete && !reported && (
+      {isComplete && !reported && !resolved && (
         <motion.button
           type="button"
           onClick={handleQuarantine}
@@ -59,15 +68,27 @@ export function TacticalActions({
         </motion.div>
       )}
 
-      {/* Safe Passage */}
-      {isComplete && isSafe && !reported && (
+      {resolved && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="flex items-center justify-center gap-2 rounded-lg border border-[#00F0FF]/20 bg-[#00F0FF]/10 py-3 text-sm font-semibold text-[#00F0FF] md:col-span-2"
+        >
+          <CheckCircle2 className="h-4 w-4" />
+          Threat Resolved / Whitelisted
+        </motion.div>
+      )}
+
+      {/* Resolve / Safe Passage */}
+      {isComplete && !reported && !resolved && (
         <motion.button
           type="button"
+          onClick={handleResolve}
           whileTap={{ scale: 0.97 }}
           className="flex items-center justify-center gap-2 rounded-lg border border-[#00F0FF]/20 bg-[#00F0FF]/10 py-3 text-sm font-semibold text-[#00F0FF] hover:bg-[#00F0FF]/20 transition-colors"
         >
           <CheckCircle2 className="h-4 w-4" />
-          Safe Passage
+          {isCritical ? "Resolve Threat" : "Safe Passage"}
         </motion.button>
       )}
 

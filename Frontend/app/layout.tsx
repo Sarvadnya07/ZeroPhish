@@ -11,6 +11,7 @@ export const metadata: Metadata = {
   title: "ZeroPhish — Combat Centre",
   description:
     "AI-powered phishing detection platform — 3-tier analysis, incident management, security training, and admin analytics.",
+  manifest: "/manifest.json",
 };
 
 export const viewport: Viewport = { themeColor: "#050505" };
@@ -23,6 +24,17 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         suppressHydrationWarning
       >
         <AuthProvider>{children}</AuthProvider>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator) {
+                window.addEventListener('load', function() {
+                  navigator.serviceWorker.register('/sw.js');
+                });
+              }
+            `,
+          }}
+        />
       </body>
     </html>
   );

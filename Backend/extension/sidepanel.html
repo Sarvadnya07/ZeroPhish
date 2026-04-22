@@ -10,142 +10,17 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="app-container">
-    <!-- Header -->
-    <header class="header">
-      <div class="brand">
-        <span class="logo-text">ZeroPhish</span>
-      </div>
-      <div id="scan-indicator" class="scan-indicator hidden">
-        <span class="pulse-dot red"></span>
-        <span class="indicator-text">SCAN IN PROGRESS</span>
-      </div>
-    </header>
+  <div id="app"></div>
 
-    <main class="dashboard">
-      <!-- Threat Gauge Section -->
-      <section class="gauge-section">
-        <div class="gauge-wrapper">
-          <svg viewBox="0 0 200 120" class="gauge-svg">
-            <defs>
-              <linearGradient id="cyanGlow" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stop-color="#0ea5e9" />
-                <stop offset="100%" stop-color="#00f0ff" />
-              </linearGradient>
-            </defs>
-            <!-- Background Rings -->
-            <path d="M 10 100 A 90 90 0 0 1 190 100" fill="none" class="gauge-track secondary" stroke-width="1.5" stroke-linecap="round" />
-            <path d="M 30 100 A 70 70 0 0 1 170 100" fill="none" class="gauge-track" stroke-width="6" stroke-linecap="round" />
-            <path d="M 50 100 A 50 50 0 0 1 150 100" fill="none" class="gauge-track secondary" stroke-width="1.5" stroke-linecap="round" />
-            
-            <!-- Active Progress Ring -->
-            <path id="gauge-progress" d="M 30 100 A 70 70 0 0 1 170 100" fill="none" class="gauge-fill" stroke-width="6" stroke-linecap="round" />
-          </svg>
-          
-          <div class="gauge-content">
-            <div id="threat-score" class="score-value">0</div>
-            <div class="score-label">THREAT LEVEL</div>
-          </div>
-        </div>
-
-        <!-- Status Badge -->
-        <div id="status-pill" class="status-pill safe">
-          <span class="pill-title">STATUS</span>
-          <div class="pill-body">
-            <span class="pill-text">Status: <strong id="verdict-text">SAFE</strong> (Score <span id="verdict-range">0-29</span>)</span>
-            <span id="verdict-icon" class="status-icon">✓</span>
-          </div>
-        </div>
-
-        <!-- Detail Explanation -->
-        <div class="analysis-summary">
-          <p id="summary-line-1">Analysis T2 & T3 Pending.</p>
-          <p id="summary-line-2">Scanner: Local & Tier 2 Active.</p>
-          <p id="summary-line-3">Gemini AI (Tier 3) Standby. Ready to protect...</p>
-        </div>
-      </section>
-
-      <!-- Analysis Pipeline Section -->
-      <section class="pipeline-container">
-        <h2 class="section-header">ANALYSIS PIPELINE</h2>
-        
-        <div class="pipeline-grid">
-          <!-- Tier 1 -->
-          <div class="pipeline-item" id="tier1-status">
-            <div class="icon-box green">
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-            </div>
-            <div class="tier-label">T1</div>
-            <div class="tier-desc">LOCAL</div>
-            <div class="progress-bar-bg">
-              <div id="t1-progress" class="progress-bar-fill green" style="width: 0%"></div>
-            </div>
-            <div id="t1-status-text" class="status-subtext">Waiting...</div>
-          </div>
-
-          <!-- Tier 2 -->
-          <div class="pipeline-item" id="tier2-status">
-            <div class="icon-box blue">
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-            </div>
-            <div class="tier-label">T2</div>
-            <div class="tier-desc">ML & METADATA</div>
-            <div class="progress-bar-bg">
-              <div id="t2-progress" class="progress-bar-fill blue" style="width: 0%"></div>
-            </div>
-            <div id="t2-status-text" class="status-subtext">Standby</div>
-          </div>
-
-          <!-- Tier 3 -->
-          <div class="pipeline-item" id="tier3-status">
-            <div class="icon-box cyan">
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .52 5.886 4.002 4.002 0 0 0 5.137 5.49 4 4 0 0 0 5.732-2.324 4 4 0 0 0 2.131-7.143 4 4 0 0 0-2.001-6.843A3 3 0 0 0 12 5Z"/></svg>
-            </div>
-            <div class="tier-label">T3</div>
-            <div class="tier-desc">SEMANTIC AI</div>
-            <div class="progress-bar-bg">
-              <div id="t3-progress" class="progress-bar-fill cyan" style="width: 0%"></div>
-            </div>
-            <div id="t3-status-text" class="status-subtext">Awaiting Input</div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Action Buttons -->
-      <section class="action-section">
-        <button id="scan-btn" class="btn btn-primary">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4"/></svg>
-          INITIALIZE COMPLETE SCAN
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon-right"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></svg>
-        </button>
-        
-        <button id="visual-check-btn" class="btn btn-secondary">
-          QUICK VISUAL CHECK
-        </button>
-      </section>
-
-      <!-- Evidence / Reasons (Optional toggle) -->
-      <section id="reasons-container" class="reasons-container hidden">
-        <ul id="reasons-list" class="reasons-list"></ul>
-      </section>
-    </main>
-
-    <!-- Footer -->
-    <footer class="footer">
-      <div class="system-stats">
-        <span>Rate Limit: 20 scans/min</span>
-        <span class="separator">|</span>
-        <span>System Health: Nominal</span>
-      </div>
-      <div class="system-stats secondary">
-        <span>ML Model v2.1</span>
-        <span class="separator">|</span>
-        <span>Redis Cache Active</span>
-      </div>
-      <div class="footer-sparkle">✦</div>
-    </footer>
-  </div>
-
+  <script type="importmap">
+    {
+      "imports": {
+        "preact": "https://esm.sh/preact@10.19.2",
+        "preact/hooks": "https://esm.sh/preact@10.19.2/hooks",
+        "htm": "https://esm.sh/htm@3.1.1"
+      }
+    }
+  </script>
   <script type="module" src="sidepanel.js"></script>
 </body>
 </html>

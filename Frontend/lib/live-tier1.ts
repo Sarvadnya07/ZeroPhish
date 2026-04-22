@@ -35,6 +35,16 @@ export interface Tier1Report {
     ml_label?: string | null
     ml_model?: string | null
     ml_reasoning?: string | null
+    dom_fingerprint?: {
+      score: number
+      signals: string[]
+      complexity: string
+    } | null
+    eml_forensics?: {
+      score: number
+      findings: string[]
+      dmarc_status: string
+    } | null
   }
   layers_completed?: number
 }
@@ -156,9 +166,9 @@ export function tier1ReportToScanResult(report: Tier1Report): ScanResult {
     },
 
     tier2: {
-      spf: tierStatus("SPF", layersCompleted >= 2 ? (hasSpoof ? "fail" : "pass") : "pending"),
-      dkim: tierStatus("DKIM", layersCompleted >= 2 ? (hasSpoof ? "warning" : "pass") : "pending"),
-      dmarc: tierStatus("DMARC", layersCompleted >= 2 ? (hasSpoof ? "fail" : "pass") : "pending"),
+      spf: tierStatus("SPF", report?.tier1?.eml_forensics?.findings?.includes("spf_fail") ? "fail" : (report?.tier1?.eml_forensics?.findings?.includes("spf_softfail") ? "warning" : "pass")),
+      dkim: tierStatus("DKIM", report?.tier1?.eml_forensics?.findings?.includes("dkim_fail") ? "fail" : "pass"),
+      dmarc: tierStatus("DMARC", report?.tier1?.eml_forensics?.dmarc_status === "quarantine" ? "fail" : "pass"),
       domainAge: domainAgeStr || "OSINT Processing...",
       hostingProvider: layersCompleted >= 2 ? (threatLevel === "threat" ? "High-Risk VPS" : "Standard Web Host") : "Scanning...",
     },

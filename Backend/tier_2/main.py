@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple
 
 import whois
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -230,7 +230,7 @@ class ThreatAnalyzer:
 
         if use_ml:
             base_threat, category, reasoning = await MLEngine.analyze(
-                email_body, base_threat, category, reasoning
+                email_body, sender, links, base_threat, category, reasoning
             )
 
         return ThreatAnalysis(
@@ -371,6 +371,31 @@ class SpeedLayerCache:
 
 # Initialize speed layer
 cache = SpeedLayerCache()
+
+# --- WEBSOCKET CONNECTION MANAGER ---
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        logger.info(f"🔌 New dashboard connection. Total: {len(self.active_connections)}")
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+            logger.info(f"🔌 Dashboard disconnected. Total: {len(self.active_connections)}")
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                logger.error(f"Error broadcasting to dashboard: {e}")
+
+manager = ConnectionManager()
 
 # Store latest scan for /tier1/latest endpoint
 latest_scan_result: Optional[Dict] = None
@@ -566,6 +591,12 @@ async def scan_endpoint(request: ScanRequest):
     # Cache the result (Speed Layer)
     await cache.set_cached_result(request.sender, request.body, result)
 
+    # Broadcast update to connected dashboards via WebSocket
+    await manager.broadcast({
+        "type": "scan_update",
+        "data": latest_scan_result
+    })
+
     return ScanResponse(**result, cached=False)
 
 
@@ -616,50 +647,54 @@ async def get_latest_scan():
         return latest_scan_result
 
 
-@app.get("/tier1/stream")
-async def stream_scans():
-    """Server-Sent Events stream for real-time scan updates."""
-
-    async def event_generator():
-        """Generate SSE events for scan updates."""
-        # Send initial ping
-        yield f"event: ping\ndata: {json.dumps({'status': 'connected'})}\n\n"
-
-        last_event_id = None
-
+@app.websocket("/tier1/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for real-time dashboard updates."""
+    await manager.connect(websocket)
+    try:
+        # Send initial status
+        await websocket.send_json({"type": "connection_status", "status": "connected"})
+        
+        # Send latest scan if available
+        async with latest_scan_lock:
+            if latest_scan_result:
+                await websocket.send_json({
+                    "type": "scan_update",
+                    "data": latest_scan_result
+                })
+                
         while True:
+            # Keep connection alive and wait for client messages
+            data = await websocket.receive_text()
             try:
-                # Check for new scans
-                async with latest_scan_lock:
-                    if latest_scan_result:
-                        current_event_id = latest_scan_result.get(
-                            "event_id"
-                        ) or latest_scan_result.get("scan_id")
-                    else:
-                        current_event_id = None
-
-                    if latest_scan_result and current_event_id != last_event_id:
-                        last_event_id = current_event_id
-                        # Send new scan data
-                        yield f"data: {json.dumps(latest_scan_result)}\n\n"
-
-                # Send periodic ping to keep connection alive
-                await asyncio.sleep(5)
-                yield f"event: ping\ndata: {json.dumps({'status': 'alive'})}\n\n"
-
+                msg = json.loads(data)
+                command = msg.get("command")
+                
+                if command == "resolve_threat":
+                    # Mark as false positive or resolved
+                    sender = msg.get("sender")
+                    body = msg.get("body")
+                    if sender and body:
+                        key = cache._generate_key(sender, body)
+                        # Option 1: Delete from cache to allow re-scan
+                        # Option 2: Overwrite with safe status
+                        await cache.client.delete(key)
+                        logger.info(f"🛡️ Threat resolved by analyst: {sender}")
+                        await websocket.send_json({
+                            "type": "command_receipt",
+                            "status": "success",
+                            "message": "Threat resolved and cache cleared."
+                        })
             except Exception as e:
-                logger.error(f"SSE stream error: {e}")
-                break
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
-        },
-    )
+                logger.error(f"WebSocket command error: {e}")
+                # Simple echo fallback for non-JSON or other errors
+                logger.info(f"Received dashboard data: {data}")
+            
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        manager.disconnect(websocket)
 
 
 @app.post("/tier1/report")
@@ -739,6 +774,13 @@ async def receive_extension_report(report: Dict):
             if not isinstance(reason_list, list):
                 reason_list = [e.get("detail", "") for e in normalized_evidence if e.get("detail")]
 
+            # --- DEEP FORENSICS ENRICHMENT ---
+            from tier_2.engines import EMLEngine
+            from vision.service import VisionService
+            
+            eml_data = await EMLEngine.analyze_eml(report.get("body", ""))
+            dom_data = VisionService.analyze_dom_fingerprint(report.get("dom", ""))
+            
             # Transform to match frontend Tier1Report format
             latest_scan_result = {
                 "version": 1,
@@ -766,11 +808,20 @@ async def receive_extension_report(report: Dict):
                     "ml_label": verdict,
                     "ml_model": "ZeroPhish 3-Tier",
                     "ml_reasoning": report.get("threat_analysis", {}).get("reasoning", ""),
+                    "dom_fingerprint": dom_data,
+                    "eml_forensics": eml_data
                 },
                 "layers_completed": report.get("layers_completed", report.get("layers", 1)),
             }
 
         logger.info(f"✅ Received extension report: {latest_scan_result['scan_id']}")
+        
+        # Broadcast via WebSocket
+        await manager.broadcast({
+            "type": "scan_update",
+            "data": latest_scan_result
+        })
+        
         return {"status": "success", "message": "Report received"}
 
     except Exception as e:

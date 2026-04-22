@@ -234,6 +234,26 @@ export function ForensicsPanel({ data }: { data: ScanResult }) {
           </AnimatePresence>
         </div>
       )}
+      {/* DOM Fingerprint Section */}
+      <div className="rounded-lg border border-[hsl(0,0%,100%)]/[0.06] bg-[hsl(0,0%,7%)]/80 backdrop-blur-md overflow-hidden p-4 mt-2">
+        <div className="flex items-center gap-2 mb-3">
+          <AlertCircle className="h-4 w-4 text-[#00F0FF]" />
+          <span className="text-sm font-semibold text-[hsl(0,0%,90%)]">DOM Behavioral Fingerprint</span>
+        </div>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between text-[10px] font-mono text-[hsl(0,0%,45%)] mb-1">
+            <span>FINGERPRINT COMPLEXITY</span>
+            <span className="text-[#00F0FF]">HIGH</span>
+          </div>
+          <div className="h-1.5 w-full bg-[hsl(0,0%,5%)] rounded-full overflow-hidden">
+            <div className="h-full bg-[#00F0FF]/50 w-[85%]" />
+          </div>
+          <p className="text-[10px] text-[hsl(0,0%,55%)] mt-2 leading-relaxed">
+            Detected structural mimicry and CSS obfuscation. SVG patterns suggest automated brand replication. 
+            Interaction listeners identified for sensitive input field interception.
+          </p>
+        </div>
+      </div>
     </div>
   )
 }

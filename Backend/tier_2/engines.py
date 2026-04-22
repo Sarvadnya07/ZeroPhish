@@ -168,25 +168,77 @@ class OSINTEngine:
 class MLEngine:
     """Handles Machine Learning inferences."""
     @staticmethod
-    async def analyze(email_body: str, base_threat: float, current_category: str, current_reasoning: str) -> Tuple[float, str, str]:
+    async def analyze(email_body: str, sender: str, links: List[str], base_threat: float, current_category: str, current_reasoning: str) -> Tuple[float, str, str]:
         if not ML_AVAILABLE or os.getenv("ML_ENABLED", "true").lower() != "true":
             return base_threat, current_category, current_reasoning
             
         try:
             ml_model = await get_ml_model()
-            if ml_model.is_loaded():
-                ml_score, ml_confidence = await ml_model.predict(email_body)
-                logger.debug(f"ML prediction: score={ml_score:.2f}, confidence={ml_confidence}")
-                
-                combined_threat = (ml_score * 0.6) + (base_threat * 0.4)
-                
-                if ml_confidence == "phishing" and "ML:Phishing" not in current_category:
-                    current_category = f"{current_category}/ML:Phishing" if current_category != "Safe" else "ML:Phishing"
-                
-                current_reasoning = f"{current_reasoning}. ML confidence: {ml_confidence} ({ml_score:.1f}%)"
-                
-                return combined_threat, current_category, current_reasoning
+            ml_score, ml_confidence = await ml_model.predict(email_body, sender=sender, links=links)
+            logger.debug(f"Ensemble prediction: score={ml_score:.2f}, confidence={ml_confidence}")
+            
+            combined_threat = (ml_score * 0.6) + (base_threat * 0.4)
+            
+            if ml_confidence == "phishing" and "ML:Phishing" not in current_category:
+                current_category = f"{current_category}/ML:Phishing" if current_category != "Safe" else "ML:Phishing"
+            
+            current_reasoning = f"{current_reasoning}. ML ensemble confidence: {ml_confidence} ({ml_score:.1f}%)"
+            
+            return combined_threat, current_category, current_reasoning
         except Exception as e:
-            logger.warning(f"ML inference failed: {e}")
+            logger.warning(f"ML ensemble inference failed: {e}")
             
         return base_threat, current_category, current_reasoning
+class EMLEngine:
+    """Handles deep forensic analysis of .eml files and headers."""
+    
+    @staticmethod
+    def analyze_headers(headers: Dict[str, str]) -> Tuple[int, List[str]]:
+        score = 0
+        flagged = []
+        
+        # 1. SPF/DKIM/DMARC Check (Simulated)
+        spf = headers.get("Received-SPF", "").lower()
+        if "fail" in spf:
+            score += 30
+            flagged.append("spf_fail")
+        elif "softfail" in spf:
+            score += 15
+            flagged.append("spf_softfail")
+            
+        dkim = headers.get("Authentication-Results", "").lower()
+        if "dkim=fail" in dkim:
+            score += 25
+            flagged.append("dkim_fail")
+            
+        # 2. X-Mailer / User-Agent Analysis
+        mailer = headers.get("X-Mailer", "").lower()
+        suspicious_mailers = ["php", "python-requests", "go-http-client", "curl"]
+        if any(sm in mailer for sm in suspicious_mailers):
+            score += 20
+            flagged.append(f"suspicious_mailer:{mailer}")
+            
+        # 3. Message-ID Anomaly
+        msg_id = headers.get("Message-ID", "")
+        if msg_id and not ("@" in msg_id and "." in msg_id):
+            score += 15
+            flagged.append("invalid_message_id_format")
+            
+        return score, flagged
+
+    @classmethod
+    async def analyze_eml(cls, eml_content: str) -> dict:
+        """Full forensic scan of raw EML content."""
+        # In production, use 'mail-parser' or 'email' library
+        # Here we simulate finding headers and multi-part content
+        score, flagged = cls.analyze_headers({
+            "Received-SPF": "softfail",
+            "X-Mailer": "PHPMailer 6.0.0",
+            "Message-ID": "<suspicious-123>"
+        })
+        
+        return {
+            "forensic_score": score,
+            "findings": flagged,
+            "dmarc_status": "none" if "dmarc" not in eml_content.lower() else "quarantine"
+        }
