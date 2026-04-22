@@ -119,7 +119,7 @@ export function SentinelPanel() {
     if (report && socketRef.current?.readyState === 1) {
       socketRef.current.send(JSON.stringify({
         command: "resolve_threat",
-        sender: report.email?.senderEmail || report.email?.sender,
+        sender: report.email?.senderEmail || report.email?.senderName,
         // Using subject/timestamp or body snippet for key generation if body isn't fully in report
         // Actually, main.py expects 'sender' and 'body'. 
         // We'll pass what we have.
