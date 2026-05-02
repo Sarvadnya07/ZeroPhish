@@ -158,149 +158,208 @@ describe("evidenceToItems", () => {
 })
 
 describe("tier1ReportToScanResult", () => {
-  it("should handle minimal or undefined report structures", () => {
-    const report = {} as any
-    const result = tier1ReportToScanResult(report)
+  const baseReport: Tier1Report = {
+    version: 1,
+    scan_id: "test-scan-id",
+    created_at: new Date().toISOString(),
+    source: "test",
+    email: {},
+    links: [],
+    tier1: {
+      score: 0,
+      category: "safe",
+      summary: "",
+      evidence: [],
+      reasons: [],
+    },
+  }
+
+  it("should handle a basic safe report correctly", () => {
+    const result = tier1ReportToScanResult(baseReport)
 
     expect(result.threatScore).toBe(0)
     expect(result.threatLevel).toBe("safe")
-    expect(result.phase).toBe("scanning")
-    expect(result.urls).toEqual([])
+    expect(result.phase).toBe("scanning") // default layers_completed is < 3
     expect(result.evidence).toEqual([])
+    expect(result.urls).toEqual([])
+    expect(result.flaggedExcerpts).toEqual([])
   })
 
-  it("should clamp and round the score correctly", () => {
-    let report = { tier1: { score: 105.6 } } as any
-    let result = tier1ReportToScanResult(report)
-    expect(result.threatScore).toBe(100)
+  it("should correctly clamp and round the score", () => {
+    const testCases = [
+      { inputScore: -10, expectedScore: 0, expectedLevel: "safe" },
+      { inputScore: 110, expectedScore: 100, expectedLevel: "threat" }, // > 70 is phishing -> threat
+      { inputScore: 35.5, expectedScore: 36, expectedLevel: "warning" }, // >= 30 is spam -> warning
+      { inputScore: 70, expectedScore: 70, expectedLevel: "threat" },
+    ]
 
-    report = { tier1: { score: -10 } } as any
-    result = tier1ReportToScanResult(report)
+    for (const { inputScore, expectedScore, expectedLevel } of testCases) {
+      const report = { ...baseReport, tier1: { ...baseReport.tier1, score: inputScore } }
+      const result = tier1ReportToScanResult(report)
+      expect(result.threatScore).toBe(expectedScore)
+      expect(result.threatLevel).toBe(expectedLevel)
+    }
+  })
+
+  it("should handle null or undefined fields gracefully", () => {
+    // Pass incomplete report, similar to what might happen if the report is malformed
+    const incompleteReport = {
+      ...baseReport,
+      tier1: undefined as any,
+    }
+
+    const result = tier1ReportToScanResult(incompleteReport)
     expect(result.threatScore).toBe(0)
-
-    report = { tier1: { score: 45.4 } } as any
-    result = tier1ReportToScanResult(report)
-    expect(result.threatScore).toBe(45)
-  })
-
-  it("should assign correct threat level based on score", () => {
-    let result = tier1ReportToScanResult({ tier1: { score: 75 } } as any)
-    expect(result.threatLevel).toBe("threat")
-
-    result = tier1ReportToScanResult({ tier1: { score: 50 } } as any)
-    expect(result.threatLevel).toBe("warning")
-
-    result = tier1ReportToScanResult({ tier1: { score: 10 } } as any)
     expect(result.threatLevel).toBe("safe")
+    expect(result.evidence).toEqual([])
+    expect(result.urls).toEqual([])
   })
 
-  it("should evaluate regexStatus correctly", () => {
-    let result = tier1ReportToScanResult({ tier1: { evidence: [{ kind: "credential" }] } } as any)
-    expect(result.tier1.regexCheck.status).toBe("fail")
+  describe("tier statuses based on evidence", () => {
+    it("should map regexStatus correctly", () => {
+      // Credential -> fail
+      let report = {
+        ...baseReport,
+        tier1: { ...baseReport.tier1, evidence: [{ check: "any", kind: "credential" }] },
+      }
+      expect(tier1ReportToScanResult(report).tier1.regexCheck.status).toBe("fail")
 
-    result = tier1ReportToScanResult({ tier1: { evidence: [{ kind: "urgency" }] } } as any)
-    expect(result.tier1.regexCheck.status).toBe("warning")
+      // Urgency or financial -> warning
+      report.tier1.evidence = [{ check: "any", kind: "urgency" }]
+      expect(tier1ReportToScanResult(report).tier1.regexCheck.status).toBe("warning")
 
-    result = tier1ReportToScanResult({ tier1: { evidence: [{ kind: "financial" }] } } as any)
-    expect(result.tier1.regexCheck.status).toBe("warning")
+      report.tier1.evidence = [{ check: "any", kind: "financial" }]
+      expect(tier1ReportToScanResult(report).tier1.regexCheck.status).toBe("warning")
 
-    result = tier1ReportToScanResult({ tier1: { evidence: [{ kind: "other" }] } } as any)
-    expect(result.tier1.regexCheck.status).toBe("pass")
-  })
-
-  it("should evaluate linkStatus correctly", () => {
-    const failingChecks = ["brand_mismatch", "homograph", "punycode", "ip_url"]
-    for (const check of failingChecks) {
-      const result = tier1ReportToScanResult({ tier1: { evidence: [{ check }] } } as any)
-      expect(result.tier1.linkMismatch.status).toBe("fail")
-    }
-
-    const warningChecks = ["shortener", "tld"]
-    for (const check of warningChecks) {
-      const result = tier1ReportToScanResult({ tier1: { evidence: [{ check }] } } as any)
-      expect(result.tier1.linkMismatch.status).toBe("warning")
-    }
-
-    const result = tier1ReportToScanResult({ tier1: { evidence: [{ check: "other" }] } } as any)
-    expect(result.tier1.linkMismatch.status).toBe("pass")
-  })
-
-  it("should evaluate whitelistStatus correctly", () => {
-    const failingChecks = ["sender_spoof", "sender_homograph", "sender_punycode"]
-    for (const check of failingChecks) {
-      const result = tier1ReportToScanResult({ tier1: { evidence: [{ check }] } } as any)
-      expect(result.tier1.whitelistHit.status).toBe("fail")
-    }
-
-    let result = tier1ReportToScanResult({ tier1: { evidence: [{ check: "sender_allowlist" }] } } as any)
-    expect(result.tier1.whitelistHit.status).toBe("pass")
-
-    result = tier1ReportToScanResult({ tier1: { evidence: [{ check: "sender" }] } } as any)
-    expect(result.tier1.whitelistHit.status).toBe("warning")
-
-    result = tier1ReportToScanResult({ tier1: { evidence: [{ check: "other" }] } } as any)
-    expect(result.tier1.whitelistHit.status).toBe("pending")
-  })
-
-  it("should correctly handle layersCompleted and phase", () => {
-    let result = tier1ReportToScanResult({ layers_completed: 1 } as any)
-    expect(result.phase).toBe("scanning")
-    expect(result.tier3.active).toBe(false)
-
-    result = tier1ReportToScanResult({ layers_completed: 3 } as any)
-    expect(result.phase).toBe("complete")
-    expect(result.tier3.active).toBe(true)
-  })
-
-  it("should process urls from links correctly", () => {
-    const report = {
-      links: [
-        { href: "http://example.com", text: " Example " },
-        { href: "http://malicious.com" },
-        { href: "" },
-        null
-      ],
-      tier1: { score: 75 } // this maps to 'phishing' => suspicious true
-    } as any
-
-    const result = tier1ReportToScanResult(report)
-    expect(result.urls).toHaveLength(2)
-
-    expect(result.urls[0]).toEqual({
-      displayText: "Example",
-      actualUrl: "http://example.com",
-      suspicious: true,
+      // None of the above -> pass
+      report.tier1.evidence = [{ check: "any", kind: "other" }]
+      expect(tier1ReportToScanResult(report).tier1.regexCheck.status).toBe("pass")
     })
 
-    expect(result.urls[1]).toEqual({
-      displayText: "http://malicious.com",
-      actualUrl: "http://malicious.com",
-      suspicious: true,
+    it("should map linkStatus correctly", () => {
+      // Brand mismatch, homograph, punycode, ip_url -> fail
+      const failChecks = ["brand_mismatch", "homograph", "punycode", "ip_url"]
+      for (const check of failChecks) {
+        const report = {
+          ...baseReport,
+          tier1: { ...baseReport.tier1, evidence: [{ check }] },
+        }
+        expect(tier1ReportToScanResult(report).tier1.linkMismatch.status).toBe("fail")
+      }
+
+      // Shortener, tld -> warning
+      const warningChecks = ["shortener", "tld"]
+      for (const check of warningChecks) {
+        const report = {
+          ...baseReport,
+          tier1: { ...baseReport.tier1, evidence: [{ check }] },
+        }
+        expect(tier1ReportToScanResult(report).tier1.linkMismatch.status).toBe("warning")
+      }
+
+      // None of the above -> pass
+      const report = {
+        ...baseReport,
+        tier1: { ...baseReport.tier1, evidence: [{ check: "other" }] },
+      }
+      expect(tier1ReportToScanResult(report).tier1.linkMismatch.status).toBe("pass")
+    })
+
+    it("should map whitelistStatus correctly", () => {
+      // Sender spoof, sender homograph, sender punycode -> fail
+      const failChecks = ["sender_spoof", "sender_homograph", "sender_punycode"]
+      for (const check of failChecks) {
+        const report = {
+          ...baseReport,
+          tier1: { ...baseReport.tier1, evidence: [{ check }] },
+        }
+        expect(tier1ReportToScanResult(report).tier1.whitelistHit.status).toBe("fail")
+      }
+
+      // Sender allowlist -> pass
+      let report = {
+        ...baseReport,
+        tier1: { ...baseReport.tier1, evidence: [{ check: "sender_allowlist" }] },
+      }
+      expect(tier1ReportToScanResult(report).tier1.whitelistHit.status).toBe("pass")
+
+      // Sender -> warning
+      report.tier1.evidence = [{ check: "sender" }]
+      expect(tier1ReportToScanResult(report).tier1.whitelistHit.status).toBe("warning")
+
+      // None -> pending
+      report.tier1.evidence = [{ check: "other" }]
+      expect(tier1ReportToScanResult(report).tier1.whitelistHit.status).toBe("pending")
     })
   })
 
-  it("should populate flaggedExcerpts from reasons", () => {
-    const report = {
-      tier1: {
-        reasons: ["reason1", "reason2"]
-      }
-    } as any
+  describe("phase and layersCompleted", () => {
+    it("should set phase to scanning if layers_completed < 3", () => {
+      const report = { ...baseReport, layers_completed: 2 }
+      const result = tier1ReportToScanResult(report)
+      expect(result.phase).toBe("scanning")
+      expect(result.layersCompleted).toBe(2)
+      expect(result.tier3.active).toBe(false)
+    })
 
-    const result = tier1ReportToScanResult(report)
-    expect(result.flaggedExcerpts).toEqual([
-      "**Reason**: reason1",
-      "**Reason**: reason2",
-    ])
+    it("should set phase to complete if layers_completed >= 3", () => {
+      const report = { ...baseReport, layers_completed: 3 }
+      const result = tier1ReportToScanResult(report)
+      expect(result.phase).toBe("complete")
+      expect(result.layersCompleted).toBe(3)
+      expect(result.tier3.active).toBe(true)
+    })
   })
 
-  it("should populate tier3 markers if ml_reasoning is present", () => {
-    const report = {
-      tier1: {
-        ml_reasoning: "AI detected a threat"
+  describe("urls extraction", () => {
+    it("should extract urls from links and mark them based on category", () => {
+      // Score 0 -> safe
+      let report = {
+        ...baseReport,
+        links: [{ href: "https://example.com", text: "Example" }, { href: "https://test.com" }],
+        tier1: { ...baseReport.tier1, score: 0 },
       }
-    } as any
+      let result = tier1ReportToScanResult(report)
+      expect(result.urls).toHaveLength(2)
+      expect(result.urls[0]).toEqual({
+        displayText: "Example",
+        actualUrl: "https://example.com",
+        suspicious: false,
+      })
+      expect(result.urls[1]).toEqual({
+        displayText: "https://test.com",
+        actualUrl: "https://test.com",
+        suspicious: false,
+      })
 
-    const result = tier1ReportToScanResult(report)
-    expect(result.tier3.markers).toEqual(["AI detected a threat"])
+      // Score 75 -> phishing -> suspicious
+      report.tier1.score = 75
+      result = tier1ReportToScanResult(report)
+      expect(result.urls[0].suspicious).toBe(true)
+      expect(result.urls[1].suspicious).toBe(true)
+    })
+  })
+
+  describe("extracting text fields", () => {
+    it("should populate flaggedExcerpts from reasons", () => {
+      const report = {
+        ...baseReport,
+        tier1: { ...baseReport.tier1, reasons: ["Suspicious sender", "Bad link"] },
+      }
+      const result = tier1ReportToScanResult(report)
+      expect(result.flaggedExcerpts).toEqual([
+        "**Reason**: Suspicious sender",
+        "**Reason**: Bad link",
+      ])
+    })
+
+    it("should populate tier3 markers from ml_reasoning", () => {
+      const report = {
+        ...baseReport,
+        tier1: { ...baseReport.tier1, ml_reasoning: "ML found anomalies" },
+      }
+      const result = tier1ReportToScanResult(report)
+      expect(result.tier3.markers).toEqual(["ML found anomalies"])
+    })
   })
 })
