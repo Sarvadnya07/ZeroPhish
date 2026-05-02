@@ -8,6 +8,25 @@ describe("evidenceToItems", () => {
     expect(evidenceToItems(null as any)).toEqual([])
   })
 
+  it("should handle null or undefined elements within the evidence array", () => {
+    const evidence: any[] = [null, undefined]
+    const result = evidenceToItems(evidence)
+    expect(result).toHaveLength(2)
+    expect(result[0]).toEqual({ category: "Signal", label: "signal", severity: "low" })
+    expect(result[1]).toEqual({ category: "Signal", label: "signal", severity: "low" })
+  })
+
+  it("should handle evidence items with empty string fields", () => {
+    const evidence: any[] = [{ check: "", detail: "", kind: "" }]
+    const result = evidenceToItems(evidence)
+    expect(result).toHaveLength(1)
+    expect(result[0]).toEqual({
+      category: "Signal",
+      label: "signal",
+      severity: "low",
+    })
+  })
+
   it("should handle evidence items with missing fields, defaulting appropriately", () => {
     const evidence: any[] = [{}]
     const result = evidenceToItems(evidence)
