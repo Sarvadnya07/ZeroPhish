@@ -1,0 +1,63 @@
+[
+  {
+    "title": "Recognising Phishing Emails",
+    "description": "Learn the hallmarks of a phishing email and how to spot them.",
+    "difficulty": "beginner",
+    "category": "phishing",
+    "content_md": "## What is Phishing?\nPhishing is a cyberattack using deceptive emails to steal credentials or install malware.\n\n## Red Flags\n- **Urgency** — \"Act now or your account will be closed\"\n- **Mismatched sender** — display name says PayPal but the real address is paypal@suspicious-xyz.com\n- **Suspicious links** — hover over links before clicking; watch for typosquatting (paypa1.com)\n- **Grammar errors** — professional organisations proofread their emails\n\n## What to do\n1. Don't click links — go directly to the website\n2. Verify the sender domain\n3. Report it via the ZeroPhish side panel\n",
+    "quiz": [
+      {
+        "id": "q1",
+        "question": "Which is the clearest sign of phishing?",
+        "options": ["Colourful images", "Urgent language demanding immediate action", "A personalized greeting", "An unsubscribe link"],
+        "correct_index": 1,
+        "explanation": "Urgency is the #1 phishing tactic."
+      },
+      {
+        "id": "q2",
+        "question": "What should you do before clicking a link in an email?",
+        "options": ["Click it quickly", "Hover over it to reveal the real URL", "Forward to a friend", "Print the email"],
+        "correct_index": 1,
+        "explanation": "Always inspect the actual URL before clicking."
+      }
+    ],
+    "xp_reward": 100,
+    "estimated_minutes": 8
+  },
+  {
+    "title": "Spear Phishing & BEC",
+    "description": "Advanced targeted attacks — Business Email Compromise and personalised spear phishing.",
+    "difficulty": "intermediate",
+    "category": "spear_phishing",
+    "content_md": "## Spear Phishing\nUnlike bulk phishing, spear phishing is targeted at a specific person using personalised information\ngathered from LinkedIn, social media, or data breaches.\n\n## Business Email Compromise (BEC)\nAttackers impersonate executives or vendors to authorise fraudulent wire transfers.\n\n### Example\n> From: ceo@company-secure.net  \n> To: accounting@company.com  \n> Subject: Urgent wire transfer needed\n\n## Defences\n- Verify financial requests via a secondary channel (phone call)\n- Enable DMARC / SPF / DKIM on your domain\n- Use ZeroPhish — our ML model flags impersonation patterns\n",
+    "quiz": [
+      {
+        "id": "q3",
+        "question": "BEC attacks primarily target which department?",
+        "options": ["IT Support", "Accounting/Finance", "HR", "Marketing"],
+        "correct_index": 1,
+        "explanation": "Attackers target finance teams to authorise payments."
+      }
+    ],
+    "xp_reward": 150,
+    "estimated_minutes": 12
+  },
+  {
+    "title": "URL & Link Safety",
+    "description": "Identify malicious URLs: IP addresses, punycode, URL shorteners, and more.",
+    "difficulty": "beginner",
+    "category": "phishing",
+    "content_md": "## Safe URL Practices\n\n### IP-based URLs\n`http://192.168.1.1/verify` — legitimate sites use domain names, not raw IPs.\n\n### Punycode / Homograph Attacks\n`http://xn--pypl-poad.com` = `pȧypal.com` — looks like PayPal but isn't.\n\n### URL Shorteners\n`bit.ly/3xAbc` — always expand before clicking (use a preview service).\n\n### Suspicious TLDs\n`.zip`, `.tk`, `.xyz`, `.top` — phishing domains often use cheap or free TLDs.\n",
+    "quiz": [
+      {
+        "id": "q4",
+        "question": "Which URL is most suspicious?",
+        "options": ["https://paypal.com/login", "http://192.168.0.1/secure", "https://bank.gov/login", "https://amazon.com/orders"],
+        "correct_index": 1,
+        "explanation": "IP-based URLs are a classic phishing indicator."
+      }
+    ],
+    "xp_reward": 100,
+    "estimated_minutes": 7
+  }
+]
