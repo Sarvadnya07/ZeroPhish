@@ -125,7 +125,7 @@ app.add_middleware(RequestSizeLimitMiddleware, max_size=1_000_000)
 
 ALLOWED_ORIGINS = [
     o.strip()
-    for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+    for o in os.getenv("ALLOWED_ORIGINS", "").split(",")
     if o.strip() and o.strip() != "chrome-extension://*"
 ]
 

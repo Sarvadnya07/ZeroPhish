@@ -24,7 +24,7 @@ app = FastAPI(title="ZeroPhish Tier 1 (Local)", version="0.1.0")
 # CORS Configuration - Environment-based for security
 ALLOWED_ORIGINS = [
     origin.strip()
-    for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(
+    for origin in os.getenv("ALLOWED_ORIGINS", "").split(
         ","
     )
     if origin.strip() and origin.strip() != "chrome-extension://*"
