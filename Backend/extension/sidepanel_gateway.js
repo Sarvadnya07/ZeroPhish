@@ -143,6 +143,24 @@ function safeUuid() {
     }
 }
 
+function normalizeSenderEmail(email) {
+    const raw = (email || '').toString().trim();
+    const match = raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    return match ? match[0] : 'unknown@unknown.com';
+}
+
+function formatGatewayError(status, data) {
+    const detail = data?.detail;
+    const errors = detail?.errors;
+    if (Array.isArray(errors) && errors.length) {
+        return `Gateway rejected scan (${status}): ${errors.join(', ')}`;
+    }
+    if (typeof detail === 'string' && detail.trim()) {
+        return `Gateway rejected scan (${status}): ${detail}`;
+    }
+    return `Gateway rejected scan (${status})`;
+}
+
 async function postLiveReport(payload) {
     try {
         await fetch(BACKEND_REPORT_URL, {
@@ -216,7 +234,7 @@ scanButton.addEventListener('click', async () => {
         await postLiveReport({
             scan_id: scanId,
             timestamp: new Date().toISOString(),
-            sender: email.senderEmail || email.sender || 'unknown@unknown.com',
+            sender: normalizeSenderEmail(email.senderEmail || email.sender),
             subject: email.subject || 'No Subject',
             final_score: heur.t1_score,
             verdict: heur.t1_category.toUpperCase(),
@@ -231,7 +249,7 @@ scanButton.addEventListener('click', async () => {
         const gatewayPayload = {
             tier1_score: heur.t1_score,
             tier1_evidence: heur.t1_evidence.map(e => e.detail || String(e)),
-            sender: email.senderEmail || email.sender || 'unknown@unknown.com',
+            sender: normalizeSenderEmail(email.senderEmail || email.sender),
             body: email.body || '',
             links: (email.links || []).map(l => typeof l === 'string' ? l : l.href),
             subject: email.subject || 'No Subject',
@@ -245,7 +263,8 @@ scanButton.addEventListener('click', async () => {
         });
 
         if (!gatewayResponse.ok) {
-            throw new Error(`Gateway error: ${gatewayResponse.status}`);
+            const errorData = await gatewayResponse.json().catch(() => null);
+            throw new Error(formatGatewayError(gatewayResponse.status, errorData));
         }
 
         const gatewayData = await gatewayResponse.json();

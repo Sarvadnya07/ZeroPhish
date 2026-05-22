@@ -150,6 +150,24 @@ function toErrorMessage(err, fallback = 'Unknown error.') {
   return fallback;
 }
 
+function normalizeSenderEmail(email) {
+  const raw = (email || '').toString().trim();
+  const match = raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return match ? match[0] : 'unknown@unknown.com';
+}
+
+function formatGatewayError(status, data) {
+  const detail = data?.detail;
+  const errors = detail?.errors;
+  if (Array.isArray(errors) && errors.length) {
+    return `Gateway rejected scan (${status}): ${errors.join(', ')}`;
+  }
+  if (typeof detail === 'string' && detail.trim()) {
+    return `Gateway rejected scan (${status}): ${detail}`;
+  }
+  return `Gateway rejected scan (${status})`;
+}
+
 async function extractEmailFromGmailActiveTab() {
   async function sendExtractMessage(tabId) {
     return new Promise((resolve, reject) => {
@@ -250,7 +268,7 @@ scanButton.addEventListener('click', async () => {
     updatePipeline(1, 'Complete', 100);
     setAnalysisSummary('Tier 1: Local Heuristics Complete.', 'Analysis T2 & T3 Pending...', heur?.User_Friendly_Summary || 'Analyzing patterns...');
 
-    const sender = email.senderEmail || email.sender || 'unknown@unknown.com';
+    const sender = normalizeSenderEmail(email.senderEmail || email.sender);
     const subject = email.subject || 'No Subject';
     const links = Array.isArray(email?.links) ? email.links.map(l => typeof l === 'string' ? l : l.href) : [];
 
@@ -272,7 +290,10 @@ scanButton.addEventListener('click', async () => {
       body: JSON.stringify(gatewayPayload)
     });
 
-    if (!gResponse.ok) throw new Error('Gateway Connection Failed');
+    if (!gResponse.ok) {
+      const errorData = await gResponse.json().catch(() => null);
+      throw new Error(formatGatewayError(gResponse.status, errorData));
+    }
     const gData = await gResponse.json();
     if (runId !== activeRunId) return;
 

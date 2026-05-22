@@ -4,7 +4,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // Targeted selectors for Gmail's 2026 DOM structure
         const bodyText = document.querySelector('.a3s.aiL')?.innerText || document.body.innerText;
         const senderEl = document.querySelector('.gD');
-        const senderEmail = senderEl?.getAttribute('email') || "Unknown";
+        const senderEmail = senderEl?.getAttribute('email') || "";
         const senderName =
             senderEl?.getAttribute('name') ||
             senderEl?.innerText?.trim() ||
