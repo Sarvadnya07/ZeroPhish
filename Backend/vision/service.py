@@ -7,7 +7,7 @@ from .models import DetectedElement, VisionAnalysisResult
 
 class VisionService:
     @staticmethod
-    def analyze_screenshot(
+    async def analyze_screenshot(
         image_b64: str, url: Optional[str] = None, title: Optional[str] = None
     ) -> dict:
         """
