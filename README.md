@@ -94,6 +94,10 @@ The final threat score uses a **weighted 3-tier formula**:
 
 ## 🏗️ Architecture
 
+ZeroPhish utilizes a high-throughput, **3-Tier Orchestration Architecture** with robust security guardrails, async execution patterns, a circuit breaker for semantic AI queries, and a high-performance **Redis Speed Layer** caching tier. 
+
+### 📂 File Structure Directory Tree
+
 ```
 ZeroPhish/
 ├── Backend/
@@ -150,6 +154,127 @@ ZeroPhish/
     ├── lib/                    # Utility functions
     └── package.json
 ```
+
+### 🔄 End-to-End System Architecture & Data Flow
+
+Below is the complete visual blueprint of the ZeroPhish architecture. It details how data is ingested, validated, checked against a Redis caching layer, analyzed in parallel across three specialized evaluation tiers, fused into a single weighted threat index, and streamed via Server-Sent Events (SSE) to real-time dashboards and third-party alert channels.
+
+```mermaid
+graph TD
+    %% Styling and colors
+    classDef client fill:#3b82f6,stroke:#1d4ed8,stroke-width:2px,color:#fff;
+    classDef gateway fill:#8b5cf6,stroke:#6d28d9,stroke-width:2px,color:#fff;
+    classDef t2 fill:#10b981,stroke:#047857,stroke-width:2px,color:#fff;
+    classDef t3 fill:#ec4899,stroke:#be185d,stroke-width:2px,color:#fff;
+    classDef cache fill:#f59e0b,stroke:#b45309,stroke-width:2px,color:#fff;
+    classDef ui fill:#06b6d4,stroke:#0891b2,stroke-width:2px,color:#fff;
+
+    subgraph ClientLayer ["🛡️ Client & Ingest Layer"]
+        A["Gmail Web UI (Gmail DOM)"] -->|Extracts metadata & links| B["Chrome Extension (Manifest V3)"]:::client
+        B -->|Instant scan| C["Tier 1: Heuristic Engine (In-Browser)"]:::client
+        C -->|Link Punycode, TLDs & Urgent keywords| D["Calculate T1 Score (Weight: 20%)"]:::client
+        E["Next.js Forensic Dashboard"] -->|EML Forensic Upload| F["Deep EML Scanner"]:::ui
+    end
+
+    subgraph SecurityShield ["🔒 Security & Gatekeeper Layer"]
+        B & F -->|POST /gateway/scan| G["API Gateway (Port 8001)"]:::gateway
+        G --> H["Rate Limiter (slowapi - 20 req/min)"]:::gateway
+        H --> I["Request Size Guard (Max 1MB Check)"]:::gateway
+        I --> J["Input Validator (XSS Scrub & Regex checks)"]:::gateway
+        J --> K["CORS Security Middleware"]:::gateway
+    end
+
+    subgraph SpeedLayer ["⚡ Speed Layer Caching"]
+        K -->|Query Cache| L["Redis Cache Manager"]:::cache
+        L -->|SHA-256 Key Match| M{"Cache Hit?"}:::cache
+        M -->|Yes <10ms| N["Return Cached Report & Skip Pipeline"]:::cache
+    end
+
+    subgraph BackendPipeline ["🔄 Parallel 3-Tier Multi-Analysis Pipeline"]
+        M -->|No / Miss| O["Orchestration Router (Async Execution)"]:::gateway
+        
+        %% Tier 2 Flow
+        O -->|Trigger Tier 2 Scan| P["Tier 2 Analysis Service (Port 8000)"]:::t2
+        P --> P1["WHOIS Domain Age Checker"]:::t2
+        P --> P2["Typosquatting Engine (Levenshtein Top 50)"]:::t2
+        P --> P3["Async Redirect Tracker (httpx shorteners tracer)"]:::t2
+        P --> P4["Threat Pattern Engine (Regex patterns database)"]:::t2
+        P --> P5["ML Engine (Fine-tuned DistilBERT v2.1)"]:::t2
+        
+        P1 & P2 & P3 & P4 & P5 --> P_Calc["Fuse Scores: ML (60%) + Patterns/OSINT (40%)"]:::t2
+        P_Calc --> Q["Calculate T2 Score (Weight: 30%)"]:::t2
+
+        %% Tier 3 Flow
+        O -->|Trigger Tier 3 Scan| R["T3 Service (Google Gemini 1.5 Flash)"]:::t3
+        R --> S{"Circuit Breaker Status?"}:::t3
+        S -->|CLOSED / HALF-OPEN| T["Gemini 1.5 Flash AI Engine"]:::t3
+        T --> T1["Semantic BEC & CEO Fraud Profiler"]:::t3
+        T --> T2["Zero-Day Impersonation Flagging"]:::t3
+        T --> T3["JSON Schema Enforcement Mode"]:::t3
+        S -->|OPEN / Failed| U["Graceful Fallback Score (Neutral 50.0)"]:::t3
+        T1 & T2 & T3 --> V["Calculate T3 Score (Weight: 50%)"]:::t3
+        U --> V
+    end
+
+    subgraph AggregationLayer ["📊 Score Fusion & Actions"]
+        Q & V --> W["Weighted Score Aggregator"]:::gateway
+        D --> W
+        W -->|Formula: T1*0.2 + T2*0.3 + T3*0.5| X["Compute Final Score & Verdict (SAFE / SUSPICIOUS / CRITICAL)"]:::gateway
+        X --> Y["SHA-256 Caching & Cache Push"]:::cache
+        Y --> L
+        X --> Z["Server-Sent Events (SSE) live streaming"]:::gateway
+        X --> AA["Enterprise Webhooks Dispatcher (Slack Alerts on Critical)"]:::gateway
+        X --> AB["Telemetry Records (AnalyticsService logs)"]:::gateway
+    end
+
+    subgraph ViewLayer ["👁️ Visualization & Insights"]
+        Z --> AC["Chrome Side Panel UI"]:::ui
+        Z --> AD["Next.js Frontend Dashboard UI"]:::ui
+        AD --> AD1["Animated Threat Score Gauge"]:::ui
+        AD --> AD2["SOC Incident Tickets UI"]:::ui
+        AD --> AD3["Interactive Security Awareness Training (XP)"]:::ui
+        AD --> AD4["CNN Heuristic Vision Endpoint (/vision/analyze)"]:::ui
+    end
+
+    %% Apply classes
+    class A,B,C,D client;
+    class G,H,I,J,K,O,W,X,Z,AA,AB gateway;
+    class P,P1,P2,P3,P4,P5,P_Calc,Q t2;
+    class R,S,T,T1,T2,T3,U,V t3;
+    class L,M,N,Y cache;
+    class E,F,AC,AD,AD1,AD2,AD3,AD4 ui;
+```
+
+#### 🛡️ 1. Client & Ingest Layer
+- **Gmail Scraper:** Manifest V3 background scripts and content scripts monitor the browser workspace securely. Upon activation, they compile email structural elements (sender address, text body, extracted URLs) dynamically.
+- **In-Browser Heuristics (Tier 1):** A light-weight client-side engine executes pattern checks for immediate responsiveness. It flags brand domains mismatches, urgent titles, and Punycode URL spoofing instantly.
+
+#### 🔒 2. Security Shield & API Gateway
+All scans transit through the central API Gateway (Port 8001) which maintains a strict zero-trust posture:
+- **Rate-Limiting:** Leverages `slowapi` to enforce strict rate limits (`20 scans/min` for main endpoint, `120 scans/min` for statuses).
+- **Request Constraints:** Implements a strict `1MB` payload size limit to reject malformed buffer overflows.
+- **Payload Scrubbing:** Rejects scripts and invalid inputs using recursive XSS sanitization filters.
+- **CORS Allowlist:** Matches requester origins strictly with allowed Next.js server addresses and designated Chrome Extension ID hashes.
+
+#### ⚡ 3. Redis Speed Layer (Caching)
+- **SHA-256 Key Hashing:** The Gateway converts the sender and partial body elements into a unique hash key.
+- **Ultra-Low Latency:** Queries Redis for matching records. Upon a cache hit, the gateway skips all processing pipelines and returns the full verdict report in **< 10ms**.
+- **Failsafe Storage:** Completed scans are automatically pushed to the cache with configurable time-to-live records (5 minutes to 24 hours), avoiding redundant ML or API consumption.
+
+#### 🔄 4. 3-Tier Multi-Analysis Pipeline
+If the request is a cache miss, the gateway fires asynchronous threads to evaluate the threat:
+- **Tier 2 Engine (Port 8000):** Focuses on linguistic patterns, OSINT, and machine learning:
+  - **Typosquatting Engine:** Computes Levenshtein edit distance values against the top 50 highly spoofed domains (e.g. `paypa1.com`, `bankofarnica.com`).
+  - **WHOIS Client:** Connects to active WHOIS lookup libraries. New domains (under 30 days) receive critical penalties.
+  - **Redirect Tracker:** Uses `httpx` asynchronous loops to expand shortened links (e.g. `bit.ly`) and catch hidden malicious TLDs.
+  - **ML Text Classifier:** Runs a fine-tuned HuggingFace DistilBERT model returning high-accuracy threat classifications.
+- **Tier 3 Semantic AI Engine (Google Gemini 1.5 Flash):** Profiles complex Business Email Compromise (BEC) and CEO impersonation patterns.
+  - **FSM Circuit Breaker Guard:** Controlled by a robust circuit breaker state machine (`CLOSED ↔ OPEN ↔ HALF_OPEN`). If Gemini experiences rate limits, timeouts, or network problems, the breaker opens, protecting downstream services and returning a safe fallback neutral score.
+
+#### 📊 5. Score Fusion, Telemetry & Real-Time SSE
+- **Fusion Engine:** Evaluates scores against standard weights: `(T1 × 0.20) + (T2 × 0.30) + (T3 × 0.50)` to output final threat scores and verdicts (`SAFE`, `SUSPICIOUS`, `CRITICAL`).
+- **Live SSE Streaming:** Streams progress status logs and partial scores immediately to the Sentinel Panel dashboard, so security operations analysts never wait for long-running AI queries to complete.
+- **Automation & Telemetry:** Fuses analytics telemetry database records, schedules background webhooks, and dispatches critical Slack notifications.
 
 ---
 
@@ -419,29 +544,61 @@ curl -X POST http://localhost:8001/gateway/scan `
 
 ## 🔒 Security Architecture
 
-```
-Request → [Rate Limiter] → [Size Check] → [Input Validator] → [CORS Guard]
-                                                                      ↓
-                                                           [API Handler]
-                                                                      ↓
-                     ┌────────────────────────────────────────────────┘
-                     ▼
-        [Tier 1 Score] ──────────┐
-        [Tier 2: WHOIS + ML] ────┼──► [Weighted Score Engine] ──► [Response]
-        [Tier 3: Gemini AI] ─────┘          ↑
-              ↑                     [Circuit Breaker]
-         [Circuit Breaker]          (protects T2 from T3 failures)
+ZeroPhish adheres to strict secure coding principles. The security subsystem intercepts all scan executions through modular filters before they can consume deep learning inference servers or cloud AI endpoints.
+
+### 🛡️ Request Validation & Parallel Processing Sequence
+
+The sequence diagram below displays the step-by-step security interception, caching bypass logic, and parallel execution pipeline:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client as Chrome Extension
+    participant GW as API Gateway (Port 8001)
+    participant Cache as Redis Speed Layer
+    participant T2 as Tier 2 Service (Port 8000)
+    participant T3 as Gemini Tier 3
+
+    Client->>GW: POST /gateway/scan (Payload < 1MB)
+    Note over GW: Security Pipeline:<br/>1. Rate Limiter Checks IP<br/>2. Size Guard Check<br/>3. XSS Input Scrubbing<br/>4. CORS Validation
+    
+    GW->>Cache: SHA-256 Cache Key Lookup
+    alt Cache Hit (⚡ Speed Layer)
+        Cache-->>GW: Return cached threat score (<10ms)
+        GW-->>Client: Final Scan Report (Fast Path)
+    else Cache Miss
+        GW-->>Client: Stream SSE: Scan Initialized (Partial Score)
+        
+        par Parallel Analysis
+            GW->>T2: Execute Domain Heuristics + DistilBERT ML
+            T2-->>GW: Tier 2 Result (Score + Evidence)
+        and Parallel Analysis (Circuit Breaker Guarded)
+            GW->>T3: Semantic Scan (Gemini 1.5 Flash)
+            T3-->>GW: Tier 3 Result (BEC & CEO Fraud Details)
+        end
+        
+        Note over GW: Weighted Scoring Engine:<br/>(T1 * 0.2) + (T2 * 0.3) + (T3 * 0.5)
+        GW->>Cache: Cache completed report (SHA-256)
+        GW->>Client: Stream SSE: Final Threat Score & Verdict
+        Note over GW: Dispatch Enterprise Webhooks<br/>& Telemetry Logs
+    end
 ```
 
-**Security controls implemented:**
-- ✅ Security header middleware (HSTS, CSP, X-Frame-Options)
-- ✅ CORS restricted to known origins only
-- ✅ Rate limiting (20 req/min gateway, 120 req/min status)
-- ✅ Input validation with XSS sanitization
-- ✅ 1MB request body size cap
-- ✅ Secrets excluded from version control
-- ✅ Circuit breaker preventing AI cascading failures
-- ✅ SHA-256 cache key hashing
+### ⚙️ Production Hardening Security Controls
+
+ZeroPhish implements a robust, multi-layer security posture:
+
+- **🛡️ Rate Limiting:** Enforced via `slowapi` at the gateway level. Rates are capped at `20 requests/minute` per IP address for scans, and `120 requests/minute` for status queries to prevent Denial of Service (DoS) and API abuse.
+- **📏 Strict Size Constraints:** Integrates a custom FastAPI request size limiting middleware, rejecting any request bodies larger than `1MB` at the network level.
+- **🧼 XSS & Linguistic Sanitization:** An active `InputValidator` scrubs all text elements, blocking cross-site scripting attempts and validating email addresses and URLs against pre-compiled regex limits.
+- **🔒 Security Header Middleware:** Injects modern security-hardening response headers:
+  - `Strict-Transport-Security (HSTS)` to force HTTPS connections
+  - `Content-Security-Policy (CSP)` defining strict trusted script origins
+  - `X-Frame-Options: DENY` to block clickjacking attacks
+  - `X-Content-Type-Options: nosniff` to prevent MIME-type sniffing
+- **🌍 Dynamic CORS Protection:** REST API endpoints only respond to origins mapped in the `ALLOWED_ORIGINS` environment setup or specific Chrome Extension ID regex configurations (`ALLOW_ORIGIN_REGEX`).
+- **⚡ SHA-256 Caching Hashing:** Scan payloads are hashed securely. Only hashes are stored as keys in Redis, protecting user data from exposed scanning records.
+- **🔌 Fault-Tolerant Circuit Breakers:** Tier 3 AI integrations are protected by a state-machine based circuit breaker. If Google Gemini experiences high latencies or API failures, the gateway isolates the endpoint automatically, protecting local ML and scanning features.
 
 ---
 
