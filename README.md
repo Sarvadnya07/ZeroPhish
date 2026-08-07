@@ -160,7 +160,7 @@ ZeroPhish/
 Below is the complete visual blueprint of the ZeroPhish architecture. It details how data is ingested, validated, checked against a Redis caching layer, analyzed in parallel across three specialized evaluation tiers, fused into a single weighted threat index, and streamed via Server-Sent Events (SSE) to real-time dashboards and third-party alert channels.
 
 ```mermaid
-graph TD
+flowchart TD
     %% Styling and colors
     classDef client fill:#3b82f6,stroke:#1d4ed8,stroke-width:2px,color:#fff;
     classDef gateway fill:#8b5cf6,stroke:#6d28d9,stroke-width:2px,color:#fff;
@@ -169,80 +169,53 @@ graph TD
     classDef cache fill:#f59e0b,stroke:#b45309,stroke-width:2px,color:#fff;
     classDef ui fill:#06b6d4,stroke:#0891b2,stroke-width:2px,color:#fff;
 
-    subgraph ClientLayer ["🛡️ Client & Ingest Layer"]
-        A["Gmail Web UI (Gmail DOM)"] -->|Extracts metadata & links| B["Chrome Extension (Manifest V3)"]:::client
-        B -->|Instant scan| C["Tier 1: Heuristic Engine (In-Browser)"]:::client
-        C -->|Link Punycode, TLDs & Urgent keywords| D["Calculate T1 Score (Weight: 20%)"]:::client
-        E["Next.js Forensic Dashboard"] -->|EML Forensic Upload| F["Deep EML Scanner"]:::ui
+    %% 1. Ingestion Layer
+    A["Gmail UI / EML Upload"] --> B["Chrome Ext / Web Gateway"]:::client
+    B --> C["Tier 1: Heuristics (20%)"]:::client
+
+    %% 2. Gateway & Security
+    B --> D["API Gateway (Port 8001)"]:::gateway
+    D --> E["Security: Rate Limit, Size Guard, XSS, CORS"]:::gateway
+    E --> F{"Redis Cache Hit?"}:::cache
+    
+    F -->|Yes (<10ms)| G["Skip Pipeline & Return Report"]:::cache
+    F -->|No (Miss)| H["Orchestration Router (Async)"]:::gateway
+
+    %% 3. Parallel Processing Pipeline
+    H -->|Trigger| T2_Box
+    H -->|Trigger| T3_Box
+
+    subgraph T2_Box ["Tier 2: Metadata & ML (30%)"]
+        direction TB
+        T2_1["DistilBERT ML Engine"]:::t2
+        T2_2["WHOIS Domain Age"]:::t2
+        T2_3["Typosquatting (Levenshtein)"]:::t2
+        T2_4["Async Redirect Tracker"]:::t2
+        T2_5["Threat Pattern Regex"]:::t2
+        T2_1 & T2_2 & T2_3 & T2_4 & T2_5 --> T2_Calc["Calculate T2 Score"]:::t2
     end
 
-    subgraph SecurityShield ["🔒 Security & Gatekeeper Layer"]
-        B & F -->|POST /gateway/scan| G["API Gateway (Port 8001)"]:::gateway
-        G --> H["Rate Limiter (slowapi - 20 req/min)"]:::gateway
-        H --> I["Request Size Guard (Max 1MB Check)"]:::gateway
-        I --> J["Input Validator (XSS Scrub & Regex checks)"]:::gateway
-        J --> K["CORS Security Middleware"]:::gateway
+    subgraph T3_Box ["Tier 3: Semantic AI (50%)"]
+        direction TB
+        CB{"Circuit Breaker"}:::t3
+        CB -->|CLOSED| T3_1["Gemini 1.5 Flash (BEC/Fraud)"]:::t3
+        CB -->|OPEN| T3_2["Graceful Fallback (Neutral)"]:::t3
+        T3_1 & T3_2 --> T3_Calc["Calculate T3 Score"]:::t3
     end
 
-    subgraph SpeedLayer ["⚡ Speed Layer Caching"]
-        K -->|Query Cache| L["Redis Cache Manager"]:::cache
-        L -->|SHA-256 Key Match| M{"Cache Hit?"}:::cache
-        M -->|Yes <10ms| N["Return Cached Report & Skip Pipeline"]:::cache
-    end
+    %% 4. Score Fusion & Output
+    C --> Agg["Weighted Score Aggregator"]:::gateway
+    T2_Calc --> Agg
+    T3_Calc --> Agg
 
-    subgraph BackendPipeline ["🔄 Parallel 3-Tier Multi-Analysis Pipeline"]
-        M -->|No / Miss| O["Orchestration Router (Async Execution)"]:::gateway
-        
-        %% Tier 2 Flow
-        O -->|Trigger Tier 2 Scan| P["Tier 2 Analysis Service (Port 8000)"]:::t2
-        P --> P1["WHOIS Domain Age Checker"]:::t2
-        P --> P2["Typosquatting Engine (Levenshtein Top 50)"]:::t2
-        P --> P3["Async Redirect Tracker (httpx shorteners tracer)"]:::t2
-        P --> P4["Threat Pattern Engine (Regex patterns database)"]:::t2
-        P --> P5["ML Engine (Fine-tuned DistilBERT v2.1)"]:::t2
-        
-        P1 & P2 & P3 & P4 & P5 --> P_Calc["Fuse Scores: ML (60%) + Patterns/OSINT (40%)"]:::t2
-        P_Calc --> Q["Calculate T2 Score (Weight: 30%)"]:::t2
-
-        %% Tier 3 Flow
-        O -->|Trigger Tier 3 Scan| R["T3 Service (Google Gemini 1.5 Flash)"]:::t3
-        R --> S{"Circuit Breaker Status?"}:::t3
-        S -->|CLOSED / HALF-OPEN| T["Gemini 1.5 Flash AI Engine"]:::t3
-        T --> T1["Semantic BEC & CEO Fraud Profiler"]:::t3
-        T --> T2["Zero-Day Impersonation Flagging"]:::t3
-        T --> T3["JSON Schema Enforcement Mode"]:::t3
-        S -->|OPEN / Failed| U["Graceful Fallback Score (Neutral 50.0)"]:::t3
-        T1 & T2 & T3 --> V["Calculate T3 Score (Weight: 50%)"]:::t3
-        U --> V
-    end
-
-    subgraph AggregationLayer ["📊 Score Fusion & Actions"]
-        Q & V --> W["Weighted Score Aggregator"]:::gateway
-        D --> W
-        W -->|Formula: T1*0.2 + T2*0.3 + T3*0.5| X["Compute Final Score & Verdict (SAFE / SUSPICIOUS / CRITICAL)"]:::gateway
-        X --> Y["SHA-256 Caching & Cache Push"]:::cache
-        Y --> L
-        X --> Z["Server-Sent Events (SSE) live streaming"]:::gateway
-        X --> AA["Enterprise Webhooks Dispatcher (Slack Alerts on Critical)"]:::gateway
-        X --> AB["Telemetry Records (AnalyticsService logs)"]:::gateway
-    end
-
-    subgraph ViewLayer ["👁️ Visualization & Insights"]
-        Z --> AC["Chrome Side Panel UI"]:::ui
-        Z --> AD["Next.js Frontend Dashboard UI"]:::ui
-        AD --> AD1["Animated Threat Score Gauge"]:::ui
-        AD --> AD2["SOC Incident Tickets UI"]:::ui
-        AD --> AD3["Interactive Security Awareness Training (XP)"]:::ui
-        AD --> AD4["CNN Heuristic Vision Endpoint (/vision/analyze)"]:::ui
-    end
-
-    %% Apply classes
-    class A,B,C,D client;
-    class G,H,I,J,K,O,W,X,Z,AA,AB gateway;
-    class P,P1,P2,P3,P4,P5,P_Calc,Q t2;
-    class R,S,T,T1,T2,T3,U,V t3;
-    class L,M,N,Y cache;
-    class E,F,AC,AD,AD1,AD2,AD3,AD4 ui;
+    Agg --> Res["Final Verdict & Threat Score"]:::gateway
+    Res --> Push["Push to Redis Cache"]:::cache
+    Res --> SSE["SSE Live Stream"]:::gateway
+    
+    %% 5. View Layer
+    SSE --> UI_1["Chrome Side Panel UI"]:::ui
+    SSE --> UI_2["Next.js Forensic Dashboard"]:::ui
+    SSE --> UI_3["Enterprise Webhooks (Slack)"]:::ui
 ```
 
 #### 🛡️ 1. Client & Ingest Layer
