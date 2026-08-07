@@ -41,6 +41,12 @@ class WebhookService:
 
     @staticmethod
     def subscribe(data: WebhookSubscriptionCreate, owner_id: Optional[str] = None) -> WebhookSubscription:
+        from security.middleware import is_safe_webhook_url
+        import os
+        allow_http = os.getenv("ENV", "development").lower() != "production"
+        if not is_safe_webhook_url(data.url, allow_http=allow_http):
+            raise ValueError("Invalid or unsafe webhook URL (SSRF protection)")
+
         sub_id = str(uuid.uuid4())
         secret = secrets.token_hex(32)
         sub = WebhookSubscription(
@@ -125,6 +131,15 @@ class WebhookService:
             attempted_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             retries=attempt,
         )
+
+        from security.middleware import is_safe_webhook_url
+        import os
+        allow_http = os.getenv("ENV", "development").lower() != "production"
+        if not is_safe_webhook_url(sub.url, allow_http=allow_http):
+            delivery.status = "failed"
+            delivery.response_body = "Unsafe or blocked destination URL (SSRF defense)"
+            _delivery_log.append(delivery)
+            return
 
         if not HTTPX_AVAILABLE:
             delivery.status = "failed"

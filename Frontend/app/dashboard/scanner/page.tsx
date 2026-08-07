@@ -28,7 +28,8 @@ export default function ScannerPage() {
     formData.append("file", file);
 
     try {
-      const res = await fetch("http://localhost:8001/email/scan-eml", {
+      const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8001";
+      const res = await fetch(`${gatewayUrl}/email/scan-eml`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${token}`

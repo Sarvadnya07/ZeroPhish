@@ -6,7 +6,7 @@ POST /email/attachment  — sandbox a single attachment
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
 from auth.middleware import require_auth
 from auth.models import User
@@ -17,9 +17,28 @@ from .parser import EmlParser
 
 router = APIRouter(prefix="/email", tags=["email-scanner"])
 
+async def _read_file_with_limit(file: UploadFile, request: Request, max_bytes: int) -> bytes:
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"File too large (max {max_bytes // 1_000_000} MB)")
+    
+    chunks = []
+    size = 0
+    chunk_size = 1024 * 1024  # 1MB chunks
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > max_bytes:
+            raise HTTPException(status_code=413, detail=f"File too large (max {max_bytes // 1_000_000} MB)")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
 
 @router.post("/scan-eml")
 async def scan_eml(
+    request: Request,
     file: UploadFile = File(..., description="Raw .eml file"),
     current_user: User = Depends(require_auth),
 ):
@@ -30,12 +49,7 @@ async def scan_eml(
     - Attachment triage results
     - SPF/DKIM/DMARC header analysis
     """
-    if file.content_type and file.content_type not in ("message/rfc822", "application/octet-stream", "text/plain"):
-        # Accept anyway — browsers often send wrong MIME for .eml
-        pass
-    data = await file.read()
-    if len(data) > 10_000_000:  # 10 MB cap
-        raise HTTPException(status_code=413, detail="File too large (max 10 MB)")
+    data = await _read_file_with_limit(file, request, max_bytes=10_000_000)
     try:
         result = EmlParser.parse(data)
     except Exception as exc:
@@ -58,11 +72,10 @@ async def validate_domain(
 
 @router.post("/attachment")
 async def sandbox_attachment(
+    request: Request,
     file: UploadFile = File(...),
     current_user: User = Depends(require_auth),
 ):
     """Static sandbox analysis for a single uploaded attachment."""
-    data = await file.read()
-    if len(data) > 50_000_000:  # 50 MB cap
-        raise HTTPException(status_code=413, detail="Attachment too large (max 50 MB)")
+    data = await _read_file_with_limit(file, request, max_bytes=50_000_000)
     return AttachmentSandbox.analyse(file.filename or "unknown", data)

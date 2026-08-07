@@ -28,7 +28,9 @@ def require_auth(token: Optional[str] = Depends(_get_token)) -> User:
     if not user_db:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired or invalid")
     from .models import UserInDB
-    return User(**user_db.model_dump(exclude={"password_hash", "mfa_secret"}))
+    user = User(**user_db.model_dump(exclude={"password_hash", "mfa_secret"}))
+    setattr(user, "_token", token)
+    return user
 
 
 def require_role(*roles: UserRole):

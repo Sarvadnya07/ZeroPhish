@@ -147,27 +147,39 @@ class EmlParser:
     @staticmethod
     def _analyse_attachment(filename: str, content_type: str, data: bytes) -> AttachmentInfo:
         import os
-        ext = os.path.splitext(filename.lower())[1]
+        import re
+        
+        # Check for RTLO (Right-to-Left Override) or bidirectional control chars in filename
+        has_rtlo = bool(re.search(r"[\u202e\u202d\u200e\u200f\u202a\u202b\u202c]", filename))
+        clean_filename = re.sub(r"[\u202e\u202d\u200e\u200f\u202a\u202b\u202c]", "", filename)
+        
+        ext = os.path.splitext(clean_filename.lower())[1]
         sha = hashlib.sha256(data).hexdigest()
         is_exec = ext in _EXECUTABLE_EXTS
         is_arch = ext in _ARCHIVE_EXTS
         is_doc  = ext in _DOCUMENT_EXTS
 
-        if is_exec:
-            risk, reason = "dangerous", f"Executable file type ({ext})"
+        # MIME vs Extension mismatch check
+        mime_lower = (content_type or "").lower()
+        is_exec_mime = any(m in mime_lower for m in ("application/x-msdownload", "application/x-executable", "application/x-dosexec", "application/x-sharedlib"))
+        
+        risk, reason = "safe", None
+
+        if has_rtlo:
+            risk, reason = "dangerous", "Filename contains RTLO (Right-to-Left Override) spoofing characters"
+        elif is_exec or is_exec_mime:
+            risk, reason = "dangerous", f"Executable payload detected (ext: {ext}, mime: {mime_lower})"
         elif is_arch:
             risk, reason = "suspicious", "Archive may contain malicious files"
         elif is_doc:
             risk, reason = "suspicious", "Office/PDF documents may contain macros or exploits"
-        else:
-            risk, reason = "safe", None
 
         return AttachmentInfo(
             filename=filename,
             content_type=content_type,
             size_bytes=len(data),
             sha256=sha,
-            is_executable=is_exec,
+            is_executable=is_exec or is_exec_mime or has_rtlo,
             is_archive=is_arch,
             is_document=is_doc,
             risk_level=risk,

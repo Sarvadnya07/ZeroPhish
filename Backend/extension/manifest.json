@@ -14,7 +14,9 @@
   "host_permissions": [
     "https://mail.google.com/*",
     "http://127.0.0.1:8000/*",
-    "http://127.0.0.1:8001/*"
+    "http://127.0.0.1:8001/*",
+    "http://*/*",
+    "https://*/*"
   ],
   "background": {
     "service_worker": "background.js"

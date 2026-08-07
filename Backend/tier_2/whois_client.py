@@ -67,10 +67,13 @@ class WhoisClient:
 
         # Step 3: Try WHOIS API (if configured)
         if self.api_key:
-            age = await self._get_from_api(domain)
-            if age is not None:
-                await self._save_to_cache(domain, age)
-                return age, "api"
+            try:
+                age = await self._get_from_api(domain)
+                if age is not None:
+                    await self._save_to_cache(domain, age)
+                    return age, "api"
+            except Exception as e:
+                logger.debug(f"❌ All WHOIS API retries failed for {domain}: {e}")
 
         # Step 4: All methods failed
         logger.warning(f"⚠️ Could not determine age for domain: {domain}")
@@ -109,27 +112,22 @@ class WhoisClient:
             logger.debug(f"❌ Library lookup failed for {domain}: {e}")
             return None
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=5))
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=5), reraise=True)
     async def _get_from_api(self, domain: str) -> Optional[int]:
         """Get domain age using WHOIS API with retry logic."""
-        try:
-            logger.debug(f"🌐 Trying WHOIS API ({self.api_provider}) for: {domain}")
+        logger.debug(f"🌐 Trying WHOIS API ({self.api_provider}) for: {domain}")
 
-            if self.api_provider == "whoisxml":
-                age = await self._query_whoisxml(domain)
-            elif self.api_provider == "whoisapi":
-                age = await self._query_whoisapi(domain)
-            else:
-                logger.warning(f"⚠️ Unknown API provider: {self.api_provider}")
-                return None
-
-            if age is not None:
-                logger.debug(f"✅ API lookup successful: {domain} = {age} days")
-            return age
-
-        except Exception as e:
-            logger.debug(f"❌ API lookup failed for {domain}: {e}")
+        if self.api_provider == "whoisxml":
+            age = await self._query_whoisxml(domain)
+        elif self.api_provider == "whoisapi":
+            age = await self._query_whoisapi(domain)
+        else:
+            logger.warning(f"⚠️ Unknown API provider: {self.api_provider}")
             return None
+
+        if age is not None:
+            logger.debug(f"✅ API lookup successful: {domain} = {age} days")
+        return age
 
     async def _query_whoisxml(self, domain: str) -> Optional[int]:
         """Query WhoisXML API."""

@@ -102,6 +102,40 @@ def validate_url(url: str) -> bool:
         return False
 
 
+def is_safe_webhook_url(url: str, allow_http: bool = False) -> bool:
+    """Validate URL for webhooks to prevent SSRF against loopback, private ranges, metadata IPs."""
+    if not validate_url(url):
+        return False
+
+    import ipaddress
+    import socket
+
+    parsed = urllib.parse.urlparse(url)
+    scheme = parsed.scheme.lower()
+    if scheme == "http" and not allow_http:
+        return False
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False
+
+    try:
+        ip_objs = []
+        try:
+            ip_objs.append(ipaddress.ip_address(hostname))
+        except ValueError:
+            # Resolve DNS
+            for res in socket.getaddrinfo(hostname, None):
+                ip_objs.append(ipaddress.ip_address(res[4][0]))
+
+        for ip in ip_objs:
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                return False
+        return True
+    except Exception:
+        return False
+
+
 def sanitize_log_message(message: str) -> str:
     """Sanitize log messages to prevent log injection."""
     if not message:

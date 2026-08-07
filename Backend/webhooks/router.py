@@ -19,7 +19,10 @@ async def create_subscription(
     data: WebhookSubscriptionCreate,
     current_user: User = Depends(require_auth),
 ):
-    return WebhookService.subscribe(data, owner_id=current_user.id)
+    try:
+        return WebhookService.subscribe(data, owner_id=current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("", response_model=list[WebhookSubscription])

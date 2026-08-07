@@ -236,17 +236,54 @@ class ThreatAnalyzer:
         return previous_row[-1]
 
     @classmethod
+    def _is_ip_private(cls, hostname: str) -> bool:
+        """Check if hostname resolves to private/internal IP space (SSRF defense)."""
+        import ipaddress
+        import socket
+        try:
+            # Parse direct IP string or resolve DNS
+            ip_objs = []
+            try:
+                ip_objs.append(ipaddress.ip_address(hostname))
+            except ValueError:
+                # DNS lookup
+                for res in socket.getaddrinfo(hostname, None):
+                    ip_objs.append(ipaddress.ip_address(res[4][0]))
+            
+            for ip in ip_objs:
+                if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                    return True
+            return False
+        except Exception:
+            return True  # Fail safe if DNS resolution fails
+
+    @classmethod
     async def track_redirects(cls, url: str) -> Tuple[str, List[str]]:
-        """Follow redirects for suspicious URLs/shorteners."""
+        """Follow redirects safely without automatic redirect following (prevents SSRF)."""
         if not url.startswith("http"):
             return url, []
         try:
             import httpx
-            async with httpx.AsyncClient(timeout=2.0, follow_redirects=True, max_redirects=3) as client:
-                response = await client.head(url)
-                return str(response.url), []
+            import urllib.parse
+            current_url = url
+            for _ in range(3):  # max 3 hops
+                parsed = urllib.parse.urlparse(current_url)
+                hostname = parsed.hostname
+                if not hostname or cls._is_ip_private(hostname):
+                    return current_url, ["ssrf_blocked"]
+
+                async with httpx.AsyncClient(timeout=2.0, follow_redirects=False) as client:
+                    response = await client.head(current_url)
+                    if response.status_code in (301, 302, 303, 307, 308):
+                        location = response.headers.get("Location")
+                        if not location:
+                            break
+                        current_url = urllib.parse.urljoin(current_url, location)
+                    else:
+                        break
+            return current_url, []
         except Exception as e:
-            return url, [f"redirect_timeout"]
+            return url, ["redirect_timeout"]
 
     @classmethod
     async def analyze_threat(
@@ -297,6 +334,7 @@ class ThreatAnalyzer:
             flagged_phrases.extend(scare_matches)
 
         # Check for suspicious URLs
+        shortener_links = []
         for link in links:
             lowered_link = (link or "").lower()
             domain_match = re.search(r"https?://([^/]+)", lowered_link)
@@ -319,15 +357,28 @@ class ThreatAnalyzer:
                 link_score += 10
                 flagged_phrases.append("suspicious_tld")
 
-            # Async Redirect Tracker for URL shorteners
             if any(shortener in domain for shortener in cls.URL_SHORTENERS):
-                link_score += 5
-                final_url, trace_errs = await cls.track_redirects(link)
-                if final_url != link:
-                    flagged_phrases.append("hidden_redirect")
-                    if cls.SUSPICIOUS_TLD_REGEX.search(final_url.lower()):
-                        link_score += 20
-                        flagged_phrases.append("redirect_to_suspicious_tld")
+                shortener_links.append(link)
+
+        # Concurrently expand up to 5 shortener links max (prevents DoS)
+        if shortener_links:
+            target_shorteners = shortener_links[:5]
+            link_score += 5 * len(target_shorteners)
+            redirect_results = await asyncio.gather(
+                *[cls.track_redirects(link) for link in target_shorteners],
+                return_exceptions=True
+            )
+            for orig_link, res in zip(target_shorteners, redirect_results):
+                if isinstance(res, tuple):
+                    final_url, trace_errs = res
+                    if "ssrf_blocked" in trace_errs:
+                        flagged_phrases.append("ssrf_redirect_attempt")
+                        link_score += 25
+                    elif final_url != orig_link:
+                        flagged_phrases.append("hidden_redirect")
+                        if cls.SUSPICIOUS_TLD_REGEX.search(final_url.lower()):
+                            link_score += 20
+                            flagged_phrases.append("redirect_to_suspicious_tld")
 
         # Sender context checks
         if "@" not in sender_lower:

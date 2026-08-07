@@ -39,7 +39,14 @@ def _seed_admin() -> None:
     if _users_by_email:
         return
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
-    admin_pass  = os.getenv("ADMIN_PASSWORD", "ZeroPhish@Admin1")
+    admin_pass = os.getenv("ADMIN_PASSWORD")
+    env = os.getenv("ENV", "development").lower()
+    
+    if not admin_pass:
+        if env == "production":
+            raise ValueError("FATAL: ADMIN_PASSWORD must be set in environment for production deployments.")
+        admin_pass = "ZeroPhish@Admin1"
+        
     _create_user_internal(
         UserCreate(
             email=admin_email,
@@ -180,9 +187,7 @@ class AuthService:
     @staticmethod
     def verify_mfa(user_id: str, code: str) -> bool:
         """
-        Real TOTP verification requires pyotp.  This stub accepts any 6-digit code
-        when MFA secret is set, and enables MFA on the account.
-        Install pyotp and replace this stub for production.
+        Verify MFA code using TOTP. Requires pyotp.
         """
         user = _users_by_id.get(user_id)
         if not user or not user.mfa_secret:
@@ -192,7 +197,9 @@ class AuthService:
             totp = pyotp.TOTP(user.mfa_secret)
             valid = totp.verify(code)
         except ImportError:
-            valid = len(code) == 6 and code.isdigit()  # permissive stub
+            import logging
+            logging.getLogger(__name__).warning("pyotp module missing; refusing MFA verification for security.")
+            valid = False
         if valid:
             user.mfa_enabled = True
         return valid
@@ -202,13 +209,19 @@ class AuthService:
     @classmethod
     def oauth_callback(cls, provider: str, code: str) -> Token:
         """
-        Mock OAuth callback handler. In production, exchanges `code` for an
+        OAuth callback handler. In production, exchanges `code` for an
         access token via Google/Microsoft APIs and fetches user information.
         """
+        env = os.getenv("ENV", "development").lower()
+        if env == "production" or os.getenv("ENABLE_MOCK_OAUTH", "false").lower() != "true":
+            raise NotImplementedError(
+                f"OAuth login for provider '{provider}' is not configured for this environment."
+            )
+            
         if provider not in ("google", "microsoft"):
             raise NotImplementedError(f"OAuth provider '{provider}' is not supported")
             
-        # Mock API exchange
+        # Mock API exchange (development only)
         mock_email = f"oauth_user+{code[:6]}@{provider}.com"
         
         # Check if user already exists

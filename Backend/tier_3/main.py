@@ -91,10 +91,9 @@ Do NOT include markdown, code blocks, explanations, or conversational text. ONLY
 ---END---"""
 
         try:
-            # Use JSON mode to guarantee valid schema output
+            # Use JSON mode and native async call to guarantee valid schema output and support cancellation
             response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    self.model.generate_content,
+                self.model.generate_content_async(
                     prompt,
                     generation_config=genai.types.GenerationConfig(
                         response_mime_type="application/json"

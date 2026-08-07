@@ -24,3 +24,4 @@ class VisionAnalysisResult(BaseModel):
     matched_brand: Optional[str] = None
     reasoning: str
     processing_time_ms: float
+    engine_status: str = "heuristic_stub"

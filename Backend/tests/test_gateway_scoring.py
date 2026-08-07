@@ -41,7 +41,8 @@ def test_calculate_partial_score():
     tier1_score = 10.0
     tier2_score = 20.0
 
-    expected_score = _calculate_weighted_score([tier1_score, tier2_score], [WEIGHTS.tier1, WEIGHTS.tier2])
+    # 10.0 * 0.2 + 20.0 * 0.3 = 2.0 + 6.0 = 8.0 (unnormalized contribution out of 50 max)
+    expected_score = (tier1_score * WEIGHTS.tier1) + (tier2_score * WEIGHTS.tier2)
     assert _calculate_partial_score(tier1_score, tier2_score) == expected_score
 
 def test_calculate_final_score():

@@ -14,7 +14,7 @@ Auth router — /auth/* endpoints:
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from .middleware import require_auth, require_admin
 from .models import (
@@ -34,10 +34,13 @@ from .service import AuthService, _users_by_id
 router = APIRouter(tags=["auth"])
 
 
+from security.dependencies import limiter
+
 # ── Public ────────────────────────────────────────────────────────────────────
 
 @router.post("/auth/register", response_model=User, status_code=201)
-def register(data: UserCreate):
+@limiter.limit("5/minute")
+def register(request: Request, data: UserCreate):
     try:
         return AuthService.register(data)
     except ValueError as e:
@@ -45,7 +48,8 @@ def register(data: UserCreate):
 
 
 @router.post("/auth/login", response_model=Token)
-def login(data: UserLogin):
+@limiter.limit("5/minute")
+def login(request: Request, data: UserLogin):
     try:
         return AuthService.login(data)
     except PermissionError as e:
@@ -54,8 +58,9 @@ def login(data: UserLogin):
 
 @router.post("/auth/logout", status_code=204)
 def logout(current_user: User = Depends(require_auth)):
-    # Token extracted in require_auth; re-extract for revocation
-    # In production pass token directly; here we just acknowledge
+    token = getattr(current_user, "_token", None)
+    if token:
+        AuthService.logout(token)
     return None
 
 

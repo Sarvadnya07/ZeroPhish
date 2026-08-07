@@ -21,7 +21,7 @@ from fastapi.responses import Response
 from fastapi.security import APIKeyHeader
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
+from security.dependencies import limiter
 
 BACKEND_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BACKEND_DIR))
@@ -142,7 +142,6 @@ allow_headers=["Content-Type", "Authorization"],
 allow_credentials=False,
 )
 
-limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 
 
@@ -213,7 +212,13 @@ def _calculate_weighted_score(scores: list[float], weights: list[float]) -> floa
 
 
 def _calculate_partial_score(tier1_score: float, tier2_score: float) -> float:
-    return _calculate_weighted_score([tier1_score, tier2_score], [WEIGHTS.tier1, WEIGHTS.tier2])
+    """
+    Partial score calculation on the absolute 0-100 scale.
+    Unnormalized contribution of Tier 1 (20%) and Tier 2 (30%), max possible = 50.0.
+    """
+    t1_contrib = _clamp_score(tier1_score) * WEIGHTS.tier1
+    t2_contrib = _clamp_score(tier2_score) * WEIGHTS.tier2
+    return _clamp_score(t1_contrib + t2_contrib)
 
 
 def _calculate_final_score(tier1_score: float, tier2_score: float, tier3_score: float) -> float:

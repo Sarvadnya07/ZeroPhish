@@ -107,9 +107,13 @@ class PhishingMLModel:
 
                 return probabilities.cpu().numpy()[0]
 
-            # Run with timeout
+            # Run with timeout on dedicated executor to prevent exhausting global loop thread pool
+            loop = asyncio.get_running_loop()
+            if not hasattr(self, "_executor"):
+                from concurrent.futures import ThreadPoolExecutor
+                self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ml_infer_worker")
             probs = await asyncio.wait_for(
-                asyncio.to_thread(_inference), timeout=self.inference_timeout
+                loop.run_in_executor(self._executor, _inference), timeout=self.inference_timeout
             )
 
             # Assuming binary classification: [safe, phishing]
