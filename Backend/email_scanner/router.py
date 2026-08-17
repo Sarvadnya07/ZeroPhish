@@ -6,7 +6,7 @@ POST /email/attachment  — sandbox a single attachment
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
 from auth.middleware import require_auth
 from auth.models import User
@@ -18,8 +18,35 @@ from .parser import EmlParser
 router = APIRouter(prefix="/email", tags=["email-scanner"])
 
 
+async def _read_file_with_limit(file: UploadFile, request: Request, max_bytes: int = 10_000_000) -> bytes:
+    """Read an uploaded file in chunks, enforcing max_bytes limit."""
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > max_bytes:
+                raise HTTPException(status_code=413, detail=f"File exceeds maximum allowed size ({max_bytes} bytes)")
+        except ValueError:
+            pass
+
+    chunks = []
+    total = 0
+    chunk_size = 64 * 1024  # 64 KB
+
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=413, detail=f"File exceeds maximum allowed size ({max_bytes} bytes)")
+        chunks.append(chunk)
+
+    return b"".join(chunks)
+
+
 @router.post("/scan-eml")
 async def scan_eml(
+    request: Request,
     file: UploadFile = File(..., description="Raw .eml file"),
     current_user: User = Depends(require_auth),
 ):
@@ -30,17 +57,13 @@ async def scan_eml(
     - Attachment triage results
     - SPF/DKIM/DMARC header analysis
     """
-    if file.content_type and file.content_type not in ("message/rfc822", "application/octet-stream", "text/plain"):
-        # Accept anyway — browsers often send wrong MIME for .eml
-        pass
-    data = await file.read()
-    if len(data) > 10_000_000:  # 10 MB cap
-        raise HTTPException(status_code=413, detail="File too large (max 10 MB)")
+    data = await _read_file_with_limit(file, request, max_bytes=10_000_000)  # 10 MB cap
     try:
         result = EmlParser.parse(data)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not parse .eml: {exc}")
     return result
+
 
 
 @router.post("/validate")

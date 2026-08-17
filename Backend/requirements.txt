@@ -57,10 +57,11 @@ loguru==0.7.3
 # New Feature Modules
 # ==============================
 # File upload support (for .eml scanner)
-python-multipart>=0.0.9
+python-multipart==0.0.20
 
 # DNS lookups for SPF/DMARC validation (optional, graceful fallback without it)
-dnspython>=2.6.1
+dnspython==2.7.0
 
 # TOTP MFA support (optional, graceful stub without it)
-pyotp>=2.9.0
+pyotp==2.9.0
+

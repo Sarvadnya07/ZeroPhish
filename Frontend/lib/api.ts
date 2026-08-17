@@ -10,9 +10,14 @@ async function request<T>(
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
   };
+  // Chrome extension passes token via Authorization header; Web dashboard uses httpOnly cookie.
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${BASE}${path}`, { ...options, headers });
+  const res = await fetch(`${BASE}${path}`, {
+    ...options,
+    headers,
+    credentials: "include",
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? `HTTP ${res.status}`);
@@ -20,6 +25,7 @@ async function request<T>(
   if (res.status === 204) return undefined as T;
   return res.json();
 }
+
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 export const api = {

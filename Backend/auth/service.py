@@ -207,6 +207,9 @@ class AuthService:
         """
         if provider not in ("google", "microsoft"):
             raise NotImplementedError(f"OAuth provider '{provider}' is not supported")
+
+        if os.getenv("ENV", "development") == "production" or os.getenv("ENABLE_MOCK_OAUTH", "false").lower() != "true":
+            raise NotImplementedError("OAuth provider integration requires production API credentials")
             
         # Mock API exchange
         mock_email = f"oauth_user+{code[:6]}@{provider}.com"

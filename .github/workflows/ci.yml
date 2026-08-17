@@ -1,0 +1,119 @@
+name: ZeroPhish CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Backend: pytest + coverage ─────────────────────────────────────────────
+  backend-test:
+    name: Backend Tests & Coverage
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          # Exclude heavy GPU packages (torch/transformers) on standard CI runner if needed
+          pip install $(grep -v '^#\|^torch\|^transformers\|^sentencepiece' requirements.txt | grep -v '^$')
+          pip install pytest pytest-asyncio pytest-cov httpx
+
+      - name: Run test suite
+        env:
+          ENV: testing
+          ADMIN_PASSWORD: TestAdmin@CI123
+          GEMINI_API_KEY: placeholder_key_for_ci
+        run: |
+          python -m pytest tests/ -v --cov=. --cov-report=xml --cov-report=term-missing
+
+      - name: Enforce coverage threshold
+        run: |
+          python -m coverage report --fail-under=60
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage
+          path: Backend/coverage.xml
+
+  # ── Backend: security audit ────────────────────────────────────────────────
+  backend-audit:
+    name: Backend Dependency Audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit dependencies for known CVEs
+        run: |
+          pip-audit -r requirements.txt --ignore-vuln PYSEC-2022-43059
+
+  # ── Frontend: TypeScript type check + build ────────────────────────────────
+  frontend-build:
+    name: Frontend Typecheck & Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
+      - name: Build production bundle
+        env:
+          NEXT_PUBLIC_GATEWAY_URL: http://localhost:8001
+        run: pnpm build
+
+  # ── Extension: lint check ──────────────────────────────────────────────────
+  extension-lint:
+    name: Chrome Extension Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate manifest JSON
+        run: |
+          python3 -c "import json; d=json.load(open('Backend/extension/manifest.json')); assert d.get('manifest_version') == 3; print('Manifest v3 valid:', d.get('name'))"

@@ -153,7 +153,21 @@ class EmlParser:
         is_arch = ext in _ARCHIVE_EXTS
         is_doc  = ext in _DOCUMENT_EXTS
 
-        if is_exec:
+        # Check for RTLO (Right-to-Left Override) Unicode characters (e.g. U+202E)
+        rtlo_chars = {"\u202e", "\u202b", "\u202d", "\u2066", "\u2067", "\u2068", "\u2069"}
+        has_rtlo = any(c in filename for c in rtlo_chars)
+
+        # Check for MIME executable mismatch
+        exec_mimes = {"application/x-msdownload", "application/x-executable", "application/x-dosexec", "application/x-msdos-program"}
+        is_mime_exec = content_type.lower() in exec_mimes
+
+        if has_rtlo:
+            risk, reason = "dangerous", f"RTLO (Right-to-Left Override) character detected in filename: {filename!r}"
+            is_exec = True
+        elif is_mime_exec:
+            risk, reason = "dangerous", f"Executable MIME type ({content_type}) detected"
+            is_exec = True
+        elif is_exec:
             risk, reason = "dangerous", f"Executable file type ({ext})"
         elif is_arch:
             risk, reason = "suspicious", "Archive may contain malicious files"
@@ -173,6 +187,7 @@ class EmlParser:
             risk_level=risk,
             risk_reason=reason,
         )
+
 
     @staticmethod
     def _extract_links(text: str, html: str) -> List[str]:

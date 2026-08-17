@@ -6,11 +6,13 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import time
 import uuid
 from collections import deque
 from typing import Any, Dict, List, Optional
+
 
 try:
     import httpx
@@ -41,6 +43,11 @@ class WebhookService:
 
     @staticmethod
     def subscribe(data: WebhookSubscriptionCreate, owner_id: Optional[str] = None) -> WebhookSubscription:
+        from security.middleware import is_safe_webhook_url
+        is_dev = os.getenv("ENV", "development") == "development"
+        if not is_safe_webhook_url(data.url, allow_http=is_dev):
+            raise ValueError(f"Provided webhook URL is unsafe or invalid: {data.url}")
+
         sub_id = str(uuid.uuid4())
         secret = secrets.token_hex(32)
         sub = WebhookSubscription(
@@ -98,11 +105,15 @@ class WebhookService:
         attempt: int = 0,
     ) -> None:
         import asyncio
+        from security.middleware import is_safe_webhook_url
+
+        delivery_id = str(uuid.uuid4())
+        timestamp_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
         envelope = {
-            "id": str(uuid.uuid4()),
+            "id": delivery_id,
             "event": event_type.value,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "timestamp": timestamp_str,
             "data": payload,
         }
         body = json.dumps(envelope).encode()
@@ -111,8 +122,11 @@ class WebhookService:
             "Content-Type": "application/json",
             "X-ZeroPhish-Signature": sig,
             "X-ZeroPhish-Event": event_type.value,
+            "X-ZeroPhish-Timestamp": timestamp_str,
+            "X-ZeroPhish-Delivery-ID": delivery_id,
             **sub.headers,
         }
+
 
         delivery_id = str(uuid.uuid4())
         start = time.perf_counter()

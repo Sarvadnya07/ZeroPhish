@@ -53,9 +53,10 @@ The final threat score uses a **weighted 3-tier formula**:
 - **Async Redirect Chain Tracker**: Embedded `httpx.AsyncClient` traces suspected URL shorteners (`bit.ly`, `tinyurl`) to their final destination, flagging hidden malicious TLDs dynamically.
 - **WHOIS domain age check**: New domains (`< 30 days`) scored critically.
 - **Threat pattern engine**: Pre-compiled regex matching for advanced linguistic analysis.
-- **ML model integration**: Fine-tuned DistilBERT (`cybersectony/phishing-email-detection-distilbert_v2.1`) — **97%+ accuracy**.
-- **Redis Speed Layer**: 5-minute response caching via SHA-256 key hashing to ensure < 2.0s analysis overhead.
-- **Combined scoring**: `ML (60%) + Pattern/OSINT (40%)` fusion for maximal precision.
+- **ML model integration**: Fine-tuned DistilBERT transformer (`cybersectony/phishing-email-detection-distilbert_v2.1`) with local inference fallback.
+- **Redis Speed Layer**: 5-minute response caching via SHA-256 key hashing to optimize repeated scans.
+- **Combined scoring**: `ML (60%) + Pattern/OSINT (40%)` fusion for Tier 2 evaluation.
+
 
 ### 🤖 Tier 3 — Semantic AI Brain (Gemini 1.5 Flash)
 - Powered by **Google Gemini 1.5 Flash** with JSON-mode enforcement.

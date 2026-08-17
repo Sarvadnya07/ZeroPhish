@@ -128,12 +128,18 @@ class AttachmentSandbox:
             sigs.append("MACRO")
             reasons.append("Macro code detected — may execute on open")
 
+        rtlo_chars = {"\u202e", "\u202b", "\u202d", "\u2066", "\u2067", "\u2068", "\u2069"}
+        if any(c in filename for c in rtlo_chars):
+            sigs.append("RTLO")
+            reasons.append(f"Right-to-Left Override (RTLO) character detected in filename")
+
         if ext in {".exe", ".bat", ".cmd", ".ps1", ".vbs", ".scr", ".hta"}:
             reasons.append(f"Dangerous file extension: {ext}")
 
         if reasons:
-            risk = "dangerous" if (magic in ("Windows PE (EXE/DLL)", "Linux ELF") or has_macros) else "suspicious"
+            risk = "dangerous" if (magic in ("Windows PE (EXE/DLL)", "Linux ELF") or has_macros or "RTLO" in sigs) else "suspicious"
         else:
             risk = "safe"
+
 
         return sigs, risk, reasons

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from auth.middleware import require_auth, require_admin
+from auth.middleware import require_auth, require_admin, require_analyst
 from auth.models import User
 
 from .models import WebhookSubscription, WebhookSubscriptionCreate
@@ -17,9 +17,13 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 @router.post("", response_model=WebhookSubscription, status_code=201)
 async def create_subscription(
     data: WebhookSubscriptionCreate,
-    current_user: User = Depends(require_auth),
+    current_user: User = Depends(require_analyst),
 ):
-    return WebhookService.subscribe(data, owner_id=current_user.id)
+    try:
+        return WebhookService.subscribe(data, owner_id=current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 
 @router.get("", response_model=list[WebhookSubscription])

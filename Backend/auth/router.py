@@ -14,9 +14,10 @@ Auth router — /auth/* endpoints:
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import os
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
-from .middleware import require_auth, require_admin
+from .middleware import _get_token, require_auth, require_admin
 from .models import (
     MFAVerify,
     OAuthCallback,
@@ -45,18 +46,43 @@ def register(data: UserCreate):
 
 
 @router.post("/auth/login", response_model=Token)
-def login(data: UserLogin):
+def login(data: UserLogin, response: Response):
     try:
-        return AuthService.login(data)
+        token = AuthService.login(data)
+        is_prod = os.getenv("ENV", "development") == "production"
+        response.set_cookie(
+            key="zp_session",
+            value=token.access_token,
+            httponly=True,
+            samesite="lax",
+            secure=is_prod,
+            max_age=token.expires_in,
+            path="/",
+        )
+        return token
     except PermissionError as e:
         raise HTTPException(status_code=401, detail=str(e))
 
 
 @router.post("/auth/logout", status_code=204)
-def logout(current_user: User = Depends(require_auth)):
-    # Token extracted in require_auth; re-extract for revocation
-    # In production pass token directly; here we just acknowledge
+def logout(
+    response: Response,
+    auth_info: tuple[Optional[str], bool] = Depends(_get_token),
+    current_user: User = Depends(require_auth),
+):
+    token, _ = auth_info
+    if token:
+        AuthService.logout(token)
+    is_prod = os.getenv("ENV", "development") == "production"
+    response.delete_cookie(
+        key="zp_session",
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=is_prod,
+    )
     return None
+
 
 
 # ── Authenticated user self-service ──────────────────────────────────────────

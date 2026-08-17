@@ -82,7 +82,7 @@ def validate_email_address(email: str) -> bool:
 
 
 def validate_url(url: str) -> bool:
-    """Validate URL format and prevent CRLF/Injection."""
+    """Validate URL format and prevent CRLF/Injection and dangerous schemes."""
     if not url or len(url) > 2048:
         return False
 
@@ -100,6 +100,85 @@ def validate_url(url: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+def is_safe_webhook_url(url: str, allow_http: bool = False) -> bool:
+    """
+    Validate destination URL to prevent SSRF attacks against:
+    - Loopback addresses (127.0.0.0/8, ::1)
+    - Private RFC1918 networks (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7)
+    - Link-local & cloud metadata (169.254.0.0/16, fe80::/10, 169.254.169.254)
+    - Carrier-grade NAT (100.64.0.0/10)
+    - Multicast, reserved, unspecified addresses
+    - IPv4-mapped IPv6 representations
+    - Embedded user credentials
+    """
+    if not validate_url(url):
+        return False
+
+    import ipaddress
+    import socket
+
+    parsed = urllib.parse.urlparse(url)
+    if parsed.username or parsed.password:
+        return False
+
+    scheme = parsed.scheme.lower()
+    if scheme == "http" and not allow_http:
+        return False
+
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False
+
+    # Block well-known localhost aliases early
+    lower_host = hostname.lower()
+    if lower_host in ("localhost", "localhost.localdomain", "127.0.0.1", "0.0.0.0", "::1"):
+        return False
+
+    try:
+        ip_objs = []
+        try:
+            ip_objs.append(ipaddress.ip_address(hostname))
+        except ValueError:
+            # Resolve DNS records for hostname
+            for res in socket.getaddrinfo(hostname, None):
+                sockaddr = res[4]
+                ip_objs.append(ipaddress.ip_address(sockaddr[0]))
+
+        if not ip_objs:
+            return False
+
+        # Additional reserved subnets (e.g., Carrier-Grade NAT, Cloud Metadata)
+        cgnat = ipaddress.ip_network("100.64.0.0/10")
+        cloud_meta = ipaddress.ip_network("169.254.0.0/16")
+
+        for ip in ip_objs:
+            # Handle IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1)
+            if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+                ip = ip.ipv4_mapped
+
+            if (
+                ip.is_loopback
+                or ip.is_private
+                or ip.is_link_local
+                or ip.is_reserved
+                or ip.is_multicast
+                or ip.is_unspecified
+                or (isinstance(ip, ipaddress.IPv4Address) and (ip in cgnat or ip in cloud_meta))
+            ):
+                return False
+
+        return True
+    except Exception:
+        return False
+
+
+def is_safe_url(url: str, allow_http: bool = False) -> bool:
+    """Alias for is_safe_webhook_url for general SSRF checks."""
+    return is_safe_webhook_url(url, allow_http=allow_http)
+
 
 
 def sanitize_log_message(message: str) -> str:
