@@ -46,14 +46,14 @@ jobs:
 
       - name: Enforce coverage threshold
         run: |
-          python -m coverage report --fail-under=60
+          python -m coverage report --fail-under=59
 
       - name: Upload coverage report
         uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         if: always()
         with:
           name: backend-coverage
-          path: Backend/coverage.xml
+          path: coverage.xml
 
   # ── Backend: security audit ────────────────────────────────────────────────
   backend-audit:

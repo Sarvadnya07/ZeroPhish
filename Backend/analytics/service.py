@@ -58,10 +58,10 @@ class AnalyticsService:
     ) -> None:
         ts = time.time()
         import datetime as _dt
-        dt = _dt.datetime.utcnow()
+        dt = _dt.datetime.now(_dt.timezone.utc)
         _scan_events.append({
             "scan_id": scan_id,
-            "timestamp": dt.isoformat() + "Z",
+            "timestamp": dt.isoformat(),
             "ts": ts,
             "hour": dt.hour,
             "day": dt.weekday(),

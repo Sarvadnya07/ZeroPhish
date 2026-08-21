@@ -1,16 +1,16 @@
 # ==============================
 # Core Framework
 # ==============================
-fastapi==0.115.6
+fastapi==0.141.1
 uvicorn[standard]==0.32.1
 
 # ==============================
 # AI / ML Components
 # ==============================
 google-generativeai==0.8.3
-transformers==4.47.1
-torch==2.5.1; python_version < "3.13"
-torch==2.6.0; python_version >= "3.13"
+transformers==4.57.6
+torch==2.13.0; python_version < "3.13"
+torch==2.13.0; python_version >= "3.13"
 sentencepiece>=0.2.1
 
 # ==============================
@@ -38,7 +38,7 @@ redis[hiredis]==5.2.1
 # ==============================
 # Environment Management
 # ==============================
-python-dotenv==1.0.1
+python-dotenv==1.2.2
 
 # ==============================
 # Async Utilities & Reliability
@@ -57,7 +57,7 @@ loguru==0.7.3
 # New Feature Modules
 # ==============================
 # File upload support (for .eml scanner)
-python-multipart==0.0.20
+python-multipart==0.0.32
 
 # DNS lookups for SPF/DMARC validation (optional, graceful fallback without it)
 dnspython==2.7.0

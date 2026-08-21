@@ -89,6 +89,12 @@ async def add_comment(
     body: IncidentCommentCreate,
     current_user: User = Depends(require_auth),
 ):
+    inc = IncidentService.get(incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    if current_user.role == UserRole.USER and inc.reporter_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     inc = IncidentService.add_comment(
         incident_id, body,
         author_id=current_user.id,

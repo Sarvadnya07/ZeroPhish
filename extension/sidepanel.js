@@ -1,13 +1,29 @@
 import { analyzeTier1 } from './tier1.js';
 
 // Gateway endpoints for 3-tier analysis
-const GATEWAY_SCAN_URL = 'http://127.0.0.1:8001/gateway/scan';
-const GATEWAY_STATUS_URL = 'http://127.0.0.1:8001/gateway/status';
-const GATEWAY_RESULT_URL = 'http://127.0.0.1:8001/gateway/result';
-const VISION_ANALYZE_URL = 'http://127.0.0.1:8001/vision/analyze';
+// Default base URL — user can override via extension options
+const DEFAULT_GATEWAY_BASE = 'http://127.0.0.1:8001';
+const DEFAULT_BACKEND_BASE = 'http://127.0.0.1:8000';
 
-// Dashboard endpoint
-const BACKEND_REPORT_URL = 'http://127.0.0.1:8000/tier1/report';
+let GATEWAY_BASE = DEFAULT_GATEWAY_BASE;
+let urls().report = `${DEFAULT_BACKEND_BASE}/tier1/report`;
+
+// Lazy-resolved URLs (recalculated from GATEWAY_BASE)
+function urls() {
+  return {
+    scan: `${GATEWAY_BASE}/gateway/scan`,
+    status: `${GATEWAY_BASE}/gateway/status`,
+    result: `${GATEWAY_BASE}/gateway/result`,
+    vision: `${GATEWAY_BASE}/vision/analyze`,
+    report: urls().report,
+  };
+}
+
+// Load user-configured base URL from storage on startup
+chrome.storage.sync.get(['gatewayBase', 'backendBase'], (cfg) => {
+  if (cfg.gatewayBase) GATEWAY_BASE = cfg.gatewayBase;
+  if (cfg.backendBase) urls().report = `${cfg.backendBase}/tier1/report`;
+});
 const POLL_INTERVAL_MS = 500;
 const MAX_POLLS = 40; // Increased for Gemini logic
 const MAX_POLL_ERRORS = 3;
@@ -208,7 +224,7 @@ async function extractEmailFromGmailActiveTab() {
 
 async function postLiveReport(payload) {
   try {
-    await fetch(BACKEND_REPORT_URL, {
+    await fetch(urls().report, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -266,7 +282,7 @@ scanButton.addEventListener('click', async () => {
       timestamp: new Date().toISOString()
     };
 
-    const gResponse = await fetch(GATEWAY_SCAN_URL, {
+    const gResponse = await fetch(urls().scan, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(gatewayPayload)
@@ -293,12 +309,12 @@ scanButton.addEventListener('click', async () => {
       if (runId !== activeRunId) { clearPoll(); return; }
 
       try {
-        const sRes = await fetch(`${GATEWAY_STATUS_URL}/${gScanId}`);
+        const sRes = await fetch(`${urls().status}/${gScanId}`);
         const status = await sRes.json();
 
         if (status.complete) {
           clearPoll();
-          const rRes = await fetch(`${GATEWAY_RESULT_URL}/${gScanId}`);
+          const rRes = await fetch(`${urls().result}/${gScanId}`);
           const result = await rRes.json();
           
           const finalScore = Math.round(result.final_score || partialScore);
@@ -371,7 +387,7 @@ visualCheckBtn.addEventListener('click', async () => {
       title: tab.title
     };
 
-    const res = await fetch(VISION_ANALYZE_URL, {
+    const res = await fetch(urls().vision, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)

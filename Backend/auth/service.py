@@ -5,6 +5,7 @@ Handles registration, login, JWT-style token management, MFA, OAuth stubs.
 from __future__ import annotations
 
 import base64
+import logging
 import os
 import secrets
 import time
@@ -34,12 +35,24 @@ _tokens: Dict[str, dict] = {}                  # token → {user_id, expires_at}
 TOKEN_TTL = int(os.getenv("AUTH_TOKEN_TTL", "86400"))  # 24 h default
 
 
+def _is_weak_password(p: str) -> bool:
+    return p in {"ZeroPhish@Admin1", "admin", "password", "123456", "changeme"}
+
+
 def _seed_admin() -> None:
     """Seed a default admin account if none exist."""
     if _users_by_email:
         return
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     admin_pass  = os.getenv("ADMIN_PASSWORD", "ZeroPhish@Admin1")
+    
+    if _is_weak_password(admin_pass):
+        if os.getenv("ENV", "development") == "production":
+            logging.critical("ADMIN_PASSWORD must be set to a non-default value in production")
+            raise RuntimeError("ADMIN_PASSWORD must be set to a non-default value in production")
+        else:
+            logging.warning("Using default or weak admin password in development/test environment.")
+            
     _create_user_internal(
         UserCreate(
             email=admin_email,
@@ -79,21 +92,32 @@ class AuthService:
         if data.email in _users_by_email:
             raise ValueError("Email already registered")
         user = _create_user_internal(data)
+        logging.getLogger("security.auth").info(
+            "AUTH_REGISTER_SUCCESS user_id=%s role=%s", user.id, user.role
+        )
         return User(**user.model_dump(exclude={"password_hash", "mfa_secret"}))
 
     @staticmethod
     def login(data: UserLogin) -> Token:
+        _log = logging.getLogger("security.auth")
         uid = _users_by_email.get(data.email)
         if not uid:
+            # Log only email domain, not full address — avoids user enumeration in logs
+            domain = data.email.split("@")[-1] if "@" in data.email else "[unknown]"
+            _log.warning("AUTH_LOGIN_FAILED reason=user_not_found domain=%s", domain)
             raise PermissionError("Invalid credentials")
         user = _users_by_id[uid]
         if user.status != UserStatus.ACTIVE:
+            _log.warning("AUTH_LOGIN_FAILED reason=account_suspended user_id=%s", user.id)
             raise PermissionError("Account suspended")
         if not verify_password(data.password, user.password_hash):
+            _log.warning("AUTH_LOGIN_FAILED reason=invalid_password user_id=%s", user.id)
             raise PermissionError("Invalid credentials")
         # Update last login
         user.last_login = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        return AuthService._issue_token(user)
+        token = AuthService._issue_token(user)
+        _log.info("AUTH_LOGIN_SUCCESS user_id=%s role=%s", user.id, user.role)
+        return token
 
     @staticmethod
     def _issue_token(user: UserInDB) -> Token:
@@ -180,9 +204,7 @@ class AuthService:
     @staticmethod
     def verify_mfa(user_id: str, code: str) -> bool:
         """
-        Real TOTP verification requires pyotp.  This stub accepts any 6-digit code
-        when MFA secret is set, and enables MFA on the account.
-        Install pyotp and replace this stub for production.
+        Real TOTP verification requires pyotp. Fails closed if pyotp is unavailable — install pyotp for production MFA.
         """
         user = _users_by_id.get(user_id)
         if not user or not user.mfa_secret:
@@ -192,7 +214,8 @@ class AuthService:
             totp = pyotp.TOTP(user.mfa_secret)
             valid = totp.verify(code)
         except ImportError:
-            valid = len(code) == 6 and code.isdigit()  # permissive stub
+            logging.critical("MFA verification failed: pyotp is not installed.")
+            raise RuntimeError("MFA verification failed: pyotp is not installed.")
         if valid:
             user.mfa_enabled = True
         return valid

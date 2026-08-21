@@ -129,17 +129,19 @@ ALLOWED_ORIGINS = [
     if o.strip() and o.strip() != "chrome-extension://*"
 ]
 
+# SECURITY: allow_credentials=True requires explicit origins (not wildcard).
+# Browsers will refuse cookies on cross-origin requests if allow_credentials is False.
+# Extension clients use Bearer tokens (not cookies) and are handled separately.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-# For security, do not default to allowing all Chrome extensions.
-# To allow a specific extension, set ALLOW_ORIGIN_REGEX to match your
-# extension's origin (e.g., r"chrome-extension://abcdefg...") or add
-# the specific origin to ALLOWED_ORIGINS.
-allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX"),
-allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-allow_headers=["Content-Type", "Authorization"],
-allow_credentials=False,
+    # To allow a specific Chrome extension ID, set ALLOW_ORIGIN_REGEX env var,
+    # e.g. r"chrome-extension://your-extension-id-here"
+    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX"),
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "Cookie", "X-API-Key", "X-Request-ID"],
+    allow_credentials=True,
+    expose_headers=["X-Request-ID"],
 )
 
 limiter = Limiter(key_func=get_remote_address)

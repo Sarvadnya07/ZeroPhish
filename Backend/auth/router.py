@@ -15,7 +15,9 @@ Auth router — /auth/* endpoints:
 from __future__ import annotations
 
 import os
-from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
+from typing import Optional, Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, Path
 
 from .middleware import _get_token, require_auth, require_admin
 from .models import (
@@ -31,6 +33,7 @@ from .models import (
     verify_password,
 )
 from .service import AuthService, _users_by_id
+from security.dependencies import limiter
 
 router = APIRouter(tags=["auth"])
 
@@ -38,7 +41,8 @@ router = APIRouter(tags=["auth"])
 # ── Public ────────────────────────────────────────────────────────────────────
 
 @router.post("/auth/register", response_model=User, status_code=201)
-def register(data: UserCreate):
+@limiter.limit("3/minute")
+def register(request: Request, data: UserCreate):
     try:
         return AuthService.register(data)
     except ValueError as e:
@@ -46,7 +50,8 @@ def register(data: UserCreate):
 
 
 @router.post("/auth/login", response_model=Token)
-def login(data: UserLogin, response: Response):
+@limiter.limit("5/minute")
+def login(request: Request, data: UserLogin, response: Response):
     try:
         token = AuthService.login(data)
         is_prod = os.getenv("ENV", "development") == "production"
@@ -125,10 +130,10 @@ def mfa_verify(body: MFAVerify, current_user: User = Depends(require_auth)):
 
 # ── OAuth ─────────────────────────────────────────────────────────────────────
 
-@router.post("/auth/oauth/{provider}/callback", response_model=Token)
-def oauth_callback(provider: str, body: OAuthCallback):
+@router.post("/auth/oauth/callback", response_model=Token)
+def oauth_callback(body: OAuthCallback):
     try:
-        return AuthService.oauth_callback(provider, body.code)
+        return AuthService.oauth_callback(body.provider, body.code)
     except NotImplementedError as e:
         raise HTTPException(status_code=501, detail=str(e))
 
@@ -136,8 +141,9 @@ def oauth_callback(provider: str, body: OAuthCallback):
 # ── Admin user management ─────────────────────────────────────────────────────
 
 @router.get("/admin/users", response_model=list[User])
-def list_users(role: UserRole | None = None, _: User = Depends(require_admin)):
-    return AuthService.list_users(role=role)
+def list_users(role: Optional[str] = None, _: User = Depends(require_admin)):
+    r = UserRole(role) if role else None
+    return AuthService.list_users(role=r)
 
 
 @router.get("/admin/users/{user_id}", response_model=User)

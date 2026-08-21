@@ -1,13 +1,4 @@
-import sys
-from unittest.mock import MagicMock
 
-# Mock dependencies required by security.middleware
-sys.modules['fastapi'] = MagicMock()
-sys.modules['fastapi.responses'] = MagicMock()
-sys.modules['starlette'] = MagicMock()
-sys.modules['starlette.middleware'] = MagicMock()
-sys.modules['starlette.middleware.base'] = MagicMock()
-sys.modules['email_validator'] = MagicMock()
 
 from security.middleware import sanitize_log_message
 
