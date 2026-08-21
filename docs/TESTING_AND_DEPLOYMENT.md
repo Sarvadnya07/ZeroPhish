@@ -5,23 +5,23 @@
 ### 1. Start All Services
 
 ```powershell
-# Terminal 1: Start Tier 2 Backend
-cd c:\Users\ASUS\Desktop\ZeroPhish\ZeroPhish1.0\Backend\tier_2
+# Terminal 1: Start Tier 2 Backend (Port 8000)
+cd Backend\tier_2
 python main.py
 
-# Terminal 2: Start Gateway
-cd c:\Users\ASUS\Desktop\ZeroPhish\ZeroPhish1.0\Backend
+# Terminal 2: Start Gateway (Port 8001)
+cd Backend
 python gateway.py
 
-# Terminal 3: Start Frontend
-cd c:\Users\ASUS\Desktop\ZeroPhish\ZeroPhish1.0\Frontend
+# Terminal 3: Start Frontend (Port 3000)
+cd Frontend
 npm run dev
 
 # Terminal 4: Load Chrome Extension
 # 1. Open chrome://extensions/
 # 2. Enable "Developer mode"
 # 3. Click "Load unpacked"
-# 4. Select: c:\Users\ASUS\Desktop\ZeroPhish\ZeroPhish1.0\Backend\extension
+# 4. Select: Backend\extension
 ```
 
 ---
@@ -35,7 +35,7 @@ npm run dev
 curl http://localhost:8000/health
 
 # Test Gateway Health  
-curl http://localhost:8001/health
+curl http://localhost:8001/gateway/health
 
 # Test Circuit Breaker Status
 curl http://localhost:8001/gateway/circuit/status
@@ -45,13 +45,13 @@ curl http://localhost:8001/gateway/circuit/status
 
 #### 1. Rate Limiting Test
 ```powershell
-# Send 15 requests (limit is 10/min)
-for ($i=1; $i -le 15; $i++) {
+# Send 25 requests (limit is 20/min on /gateway/scan)
+for ($i=1; $i -le 25; $i++) {
     curl -X POST http://localhost:8001/gateway/scan `
       -H "Content-Type: application/json" `
       -d '{"sender":"test@test.com","body":"test","links":[],"tier1_score":0,"tier1_evidence":[]}'
 }
-# Expected: 429 error after 10th request
+# Expected: 429 error after 20th request
 ```
 
 #### 2. XSS Prevention Test

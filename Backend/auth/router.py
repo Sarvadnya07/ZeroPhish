@@ -15,7 +15,7 @@ Auth router — /auth/* endpoints:
 from __future__ import annotations
 
 import os
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
 
 from .middleware import _get_token, require_auth, require_admin
 from .models import (

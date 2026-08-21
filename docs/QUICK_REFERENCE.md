@@ -21,12 +21,15 @@ python test_install.py
 
 ## 🔗 Important URLs
 
-| Service | URL |
-|---------|-----|
-| API Documentation | http://localhost:8000/docs |
-| Health Check | http://localhost:8000/health |
-| Cache Statistics | http://localhost:8000/cache/stats |
-| Threat Patterns | http://localhost:8000/threat/patterns |
+| Service | Port | URL |
+|---------|------|-----|
+| API Gateway Docs (Orchestrator) | 8001 | http://localhost:8001/docs |
+| API Gateway Health | 8001 | http://localhost:8001/gateway/health |
+| Circuit Breaker Status | 8001 | http://localhost:8001/gateway/circuit/status |
+| Tier 2 Backend Docs (ML/OSINT) | 8000 | http://localhost:8000/docs |
+| Tier 2 Backend Health | 8000 | http://localhost:8000/health |
+| Cache Statistics | 8000 | http://localhost:8000/cache/stats |
+| Frontend Dashboard | 3000 | http://localhost:3000 |
 
 ---
 

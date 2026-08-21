@@ -53,5 +53,8 @@ Write-Host ""
 Write-Host "Press Ctrl+C to stop the gateway" -ForegroundColor Yellow
 Write-Host ""
 
-# Start the gateway
+# Navigate to Backend directory and start the gateway
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$BackendDir = Join-Path (Split-Path -Parent $ScriptDir) "Backend"
+Set-Location $BackendDir
 python gateway.py

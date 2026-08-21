@@ -49,6 +49,8 @@ Write-Host ""
 Write-Host "Press Ctrl+C to stop the server" -ForegroundColor Yellow
 Write-Host ""
 
-# Change to tier_2 directory and start the server
-Set-Location tier_2
+# Navigate to Backend directory and start the server
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$BackendDir = Join-Path (Split-Path -Parent $ScriptDir) "Backend"
+Set-Location (Join-Path $BackendDir "tier_2")
 python main.py

@@ -101,58 +101,59 @@ ZeroPhish utilizes a high-throughput, **3-Tier Orchestration Architecture** with
 
 ```
 ZeroPhish/
-├── Backend/
-│   ├── main.py                 # Local BERT + T3-aggregation FastAPI server (port 8000)
+├── extension/                  # Chrome Extension (Manifest V3 - Client Engine)
+│   ├── manifest.json           # Extension config & permissions
+│   ├── tier1.js                # Heuristic scoring engine (client-side)
+│   ├── sidepanel.js            # Main side panel logic
+│   ├── sidepanel.html          # Side panel UI
+│   ├── content.js              # Gmail page content script
+│   ├── background.js           # Service worker
+│   ├── worker.js               # Background worker
+│   └── style.css               # Extension styles
+│
+├── docs/                       # Centralized Documentation & Architecture Guides
+│   ├── EXTENSION_FIX_GUIDE.md
+│   ├── RELOAD_EXTENSION_INSTRUCTIONS.md
+│   ├── TESTING_AND_DEPLOYMENT.md
+│   ├── ENHANCEMENTS_CONFIG.md
+│   ├── GEMINI_INTEGRATION_STATUS.md
+│   └── QUICK_REFERENCE.md
+│
+├── scripts/                    # Operational & Verification Tooling
+│   ├── start_backend.ps1       # Backend initialization
+│   ├── start_gateway.ps1       # API Gateway initialization
+│   ├── benchmark_vision.py     # Vision performance testing
+│   └── verify_dashboard_flow.py # Live dashboard stream verification
+│
+├── Backend/                    # FastAPI Microservices & AI Pipeline
+│   ├── main.py                 # Multi-domain router & API aggregator
 │   ├── gateway.py              # API Gateway orchestrator (port 8001)
 │   ├── gateway_circuit_wrapper.py  # Circuit-breaker wrapper for Tier 3 calls
 │   ├── circuit_breaker.py      # Circuit breaker: CLOSED/OPEN/HALF_OPEN FSM
 │   ├── requirements.txt        # Python dependencies
 │   ├── .env.example            # Environment configuration template
-│   ├── pyproject.toml          # Project build config
+│   ├── pyproject.toml          # Project build & test configuration
 │   │
-│   ├── extension/              # Chrome Extension (Manifest V3)
-│   │   ├── manifest.json       # Extension config & permissions
-│   │   ├── tier1.js            # Heuristic scoring engine (client-side)
-│   │   ├── sidepanel.js        # Main side panel logic
-│   │   ├── sidepanel_gateway.js # Gateway integration mode
-│   │   ├── sidepanel.html      # Side panel UI
-│   │   ├── content.js          # Gmail page content script
-│   │   ├── background.js       # Service worker
-│   │   ├── worker.js           # Background worker
-│   │   └── style.css           # Extension styles
-│   │
-│   ├── tier_2/                 # Tier 2: Metadata & ML Analysis
-│   │   ├── main.py             # FastAPI service + ThreatAnalyzer engine + SpeedLayerCache
-│   │   ├── ml_model.py         # HuggingFace DistilBERT integration
-│   │   ├── whois_client.py     # Enhanced WHOIS lookup with caching
-│   │   ├── threat_patterns.json # Regex threat database (urgency/financial/credential)
-│   │   └── benchmark*.py       # Performance benchmarking scripts
-│   │
-│   ├── tier_3/                 # Tier 3: Semantic AI (Gemini)
-│   │   ├── main.py             # T3Service: Gemini 1.5 Flash integration
-│   │   └── __init__.py
-│   │
-│   ├── models/                 # Pydantic API models for the gateway
-│   ├── security/               # Security middleware (input validation, headers)
-│   └── tests/                  # Test suite
+│   ├── auth/                   # Authentication & API Key Management
+│   ├── analytics/              # Telemetry & Phishing Analytics
+│   ├── awareness/              # Security Training Simulations
+│   ├── email_scanner/          # EML Parser & DNS SPF/DKIM Verifier
+│   ├── incidents/              # SOC Incident Management
+│   ├── tier_2/                 # Metadata, WHOIS & BERT ML Analysis
+│   ├── tier_3/                 # Semantic AI (Gemini 1.5 Flash)
+│   ├── vision/                 # Visual Brand Impersonation Detector
+│   ├── webhooks/               # SIEM / SOAR Dispatcher
+│   ├── models/                 # Pydantic Schemas & DTOs
+│   ├── security/               # Security Middleware & Sanitizers
+│   └── tests/                  # Automated Pytest Suite
 │
-└── Frontend/                   # Next.js 16 Dashboard
-    ├── app/
-    │   ├── layout.tsx          # App shell
-    │   ├── page.tsx            # Main page
-    │   └── globals.css
-    ├── components/
-    │   ├── sentinel/           # Core dashboard components
-    │   │   ├── sentinel-panel.tsx      # Main scan display panel
-    │   │   ├── forensics-panel.tsx     # Detailed evidence viewer
-    │   │   ├── analysis-pipeline.tsx   # 3-tier pipeline visualization
-    │   │   ├── threat-gauge.tsx        # Animated threat score gauge
-    │   │   ├── tactical-actions.tsx    # Action buttons
-    │   │   ├── status-ticker.tsx       # Live status ticker
-    │   │   └── tech-logs.tsx           # Technical log viewer
-    │   └── ui/                 # Radix UI / shadcn components
+└── Frontend/                   # Next.js 16 SOC Analyst Dashboard
+    ├── app/                    # Next.js App Router
+    ├── components/             # Radix / Tailwind / Sentinel UI Components
     ├── hooks/                  # Custom React hooks
-    ├── lib/                    # Utility functions
+    ├── lib/                    # API clients & utilities
+    ├── styles/                 # Tailwind & CSS globals
+    ├── public/                 # Static brand assets
     └── package.json
 ```
 

@@ -54,8 +54,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = "-ra -q --strict-markers --cov=. --cov-report=html --cov-report=term-missing"
+pythonpath = ["."]
 testpaths = [
-    ".",
+    "tests",
 ]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
