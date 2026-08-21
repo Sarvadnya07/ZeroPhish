@@ -1,4 +1,4 @@
-﻿"""
+"""
 Security Audit Logger for ZeroPhish.
 
 Provides structured security event logging across all security domains.
@@ -17,12 +17,12 @@ from typing import Any, Optional
 _LOG = logging.getLogger("security")
 
 
-def _evt(logger_name: str, level: int, event: str, **fields: Any) -> None:
+def _evt(logger_name: str, level: int, event_type: str, **fields: Any) -> None:
     """Emit a structured security event log line."""
     log = logging.getLogger(f"security.{logger_name}")
     if not log.isEnabledFor(level):
         return
-    parts = [event]
+    parts = [event_type]
     for k, v in fields.items():
         parts.append(f"{k}={v}")
     log.log(level, " ".join(parts))

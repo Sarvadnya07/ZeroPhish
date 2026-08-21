@@ -124,4 +124,4 @@ jobs:
 
       - name: Validate manifest JSON
         run: |
-          python3 -c "import json; d=json.load(open('Backend/extension/manifest.json')); assert d.get('manifest_version') == 3; print('Manifest v3 valid:', d.get('name'))"
+          python3 -c "import json; d=json.load(open('extension/manifest.json')); assert d.get('manifest_version') == 3; print('Manifest v3 valid:', d.get('name'))"

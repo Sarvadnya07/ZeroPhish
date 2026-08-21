@@ -9,7 +9,6 @@
     "lint": "eslint .",
     "test": "vitest run"
   },
-
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
     "@radix-ui/react-accordion": "1.2.2",
@@ -48,7 +47,7 @@
     "framer-motion": "^11.15.0",
     "input-otp": "1.4.1",
     "lucide-react": "^0.544.0",
-    "next": "16.2.11",
+    "next": "16.3.1",
     "next-themes": "^0.4.6",
     "react": "19.2.3",
     "react-day-picker": "9.0.0",
