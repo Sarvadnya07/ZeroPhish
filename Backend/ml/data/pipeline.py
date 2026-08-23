@@ -225,9 +225,7 @@ class ThreatFeedIngestionOrchestrator:
         ]
         self.storage = SnapshotStorageManager()
 
-    def ingest_approved_sources(
-        self, benchmark_id: str = "url_benchmark_v3"
-    ) -> Tuple[
+    def ingest_approved_sources(self, benchmark_id: str = "url_benchmark_v3") -> Tuple[
         List[DatasetRecordV3],
         DataQualityReportV3,
         Dict[str, SourceGovernance],
@@ -471,16 +469,36 @@ def main():
     parser = argparse.ArgumentParser(description="ZeroPhish Threat Feed & Benchmark CLI")
     parser.add_argument(
         "action",
-        choices=["ingest", "sync", "build-benchmark", "growth-report"],
+        choices=["ingest", "sync", "build-benchmark", "growth-report", "verify-sources"],
         help="Action to execute",
     )
     parser.add_argument("--source", default=None, help="Specific source to sync")
     parser.add_argument("--all-approved", action="store_true", help="Sync all approved sources")
     parser.add_argument("--version", default="v4", help="Target benchmark version (e.g. v3, v4)")
+    parser.add_argument(
+        "--allow-sample", action="store_true", help="Allow sample fallback for offline testing"
+    )
 
     args = parser.parse_args()
 
-    if args.action == "sync":
+    if args.action == "verify-sources":
+        from ml.data.verifier import ThreatFeedAccessVerifier
+
+        verifier = ThreatFeedAccessVerifier(allow_sample=args.allow_sample)
+        print("Executing Threat Feed Forensic Access Verification...")
+        report = verifier.run_full_verification()
+        print(f"\n--- Forensic Verification Complete ---")
+        print(f"Overall Decision: {report['overall_decision']}")
+        for s in report["sources"]:
+            print(
+                f"  [{s['status']}] {s['source_name']}: {s['raw_records_count']} records, mode: {s['mode']}"
+            )
+        if report["blockers"]:
+            print("\nBlockers Identified:")
+            for b in report["blockers"]:
+                print(f"  - {b['source']}: {b['blocker']} -> Action: {b['required_action']}")
+
+    elif args.action == "sync":
         from ml.data.sync import ThreatFeedSyncEngine
 
         engine = ThreatFeedSyncEngine()
