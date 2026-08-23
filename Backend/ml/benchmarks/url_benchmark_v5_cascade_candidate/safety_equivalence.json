@@ -1,0 +1,8 @@
+{
+  "total_samples": 13,
+  "cascade_regressions_count": 0,
+  "cascade_regressions": [],
+  "cascade_only_false_positives": [],
+  "cascade_only_false_negatives": [],
+  "safety_gate_passed": true
+}

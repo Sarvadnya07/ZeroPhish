@@ -1,0 +1,26 @@
+{
+  "invocation_rates": {
+    "hard_rule_resolution_rate_pct": 0.0,
+    "heuristics_resolution_rate_pct": 100.0,
+    "onnx_invocation_rate_pct": 0.0,
+    "urlbert_invocation_rate_pct": 0.0
+  },
+  "latency": {
+    "t_heuristics_ms": 0.2,
+    "t_onnx_ms": 1.25,
+    "t_urlbert_ms": 14.85,
+    "theoretical_cascade_ms": 0.2,
+    "measured_full_hybrid_ms": 15.05,
+    "latency_reduction_pct": 98.7,
+    "urlbert_invocation_rate_pct": 0.0
+  },
+  "safety": {
+    "total_samples": 13,
+    "cascade_regressions_count": 0,
+    "cascade_regressions": [],
+    "cascade_only_false_positives": [],
+    "cascade_only_false_negatives": [],
+    "safety_gate_passed": true
+  },
+  "overall_decision": "A. CASCADE VALID \u2014 READY FOR CONTROLLED SHADOW MODE"
+}

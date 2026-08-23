@@ -478,6 +478,7 @@ def main():
             "evaluate-v5",
             "audit-v5",
             "evaluate-cascade",
+            "audit-cascade",
         ],
         help="Action to execute",
     )
@@ -490,7 +491,20 @@ def main():
 
     args = parser.parse_args()
 
-    if args.action == "evaluate-cascade":
+    if args.action == "audit-cascade":
+        from ml.benchmark.cascade_audit import CascadeIntegrityAuditor
+
+        print("Executing Forensic Cascade Integrity, Invocation & Latency Audit...")
+        res = asyncio.run(CascadeIntegrityAuditor.audit_cascade_integrity())
+        print(f"\n--- Cascade Integrity Audit Complete ---")
+        print(f"Overall Decision: {res['overall_decision']}")
+        print(f"URLBERT Invocation Rate: {res['invocation_rates']['urlbert_invocation_rate_pct']}%")
+        print(f"Safety Violations: {res['safety']['cascade_regressions_count']}")
+        print(
+            f"Theoretical Latency: {res['latency']['theoretical_cascade_ms']}ms (Savings: {res['latency']['latency_reduction_pct']}%)"
+        )
+
+    elif args.action == "evaluate-cascade":
         from ml.benchmark.cascade_evaluator import CascadeEvaluator
 
         print("Executing URL Detection Cascade Comparative Benchmark...")
