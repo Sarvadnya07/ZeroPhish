@@ -19,7 +19,6 @@ from .url_preprocessor import URLPreprocessor
 
 logger = logging.getLogger(__name__)
 
-# Safe imports for optional ML frameworks
 try:
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
@@ -39,6 +38,24 @@ except ImportError:
     ort = None
     ONNX_AVAILABLE = False
 
+from enum import Enum
+from typing import Optional, Protocol, runtime_checkable
+
+import numpy as np
+from pydantic import BaseModel, Field
+
+from .url_preprocessor import URLPreprocessor
+
+logger = logging.getLogger(__name__)
+
+
+class ModelHealthState(str, Enum):
+    MODEL_READY = "MODEL_READY"
+    MODEL_LOADING = "MODEL_LOADING"
+    MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"
+    MODEL_FALLBACK = "MODEL_FALLBACK"
+    MODEL_ERROR = "MODEL_ERROR"
+
 
 class URLPredictionResult(BaseModel):
     """Structured result of a URL ML model inference."""
@@ -57,6 +74,18 @@ class URLPredictionResult(BaseModel):
 @runtime_checkable
 class URLPredictor(Protocol):
     """Protocol for URL ML Predictors."""
+
+    async def predict(self, url: str) -> URLPredictionResult:
+        """Run ML prediction on a URL string."""
+        ...
+
+    def is_loaded(self) -> bool:
+        """Check if model is currently loaded in memory."""
+        ...
+
+    def get_health_state(self) -> ModelHealthState:
+        """Return explicit health state."""
+        ...
 
     async def predict(self, url: str) -> URLPredictionResult:
         """Run ML prediction on a URL string."""
@@ -242,6 +271,13 @@ class URLBERTPredictor:
     def is_loaded(self) -> bool:
         return self._loaded
 
+    def get_health_state(self) -> ModelHealthState:
+        if self._loaded:
+            return ModelHealthState.MODEL_READY
+        if not TRANSFORMERS_AVAILABLE:
+            return ModelHealthState.MODEL_UNAVAILABLE
+        return ModelHealthState.MODEL_FALLBACK
+
 
 class ONNXURLPredictor:
     """
@@ -369,6 +405,13 @@ class ONNXURLPredictor:
     def is_loaded(self) -> bool:
         return self._loaded
 
+    def get_health_state(self) -> ModelHealthState:
+        if self._loaded:
+            return ModelHealthState.MODEL_READY
+        if not ONNX_AVAILABLE or not os.path.exists(self.model_path):
+            return ModelHealthState.MODEL_UNAVAILABLE
+        return ModelHealthState.MODEL_FALLBACK
+
 
 class MockURLPredictor:
     """Deterministic Mock URL Predictor for testing."""
@@ -379,6 +422,9 @@ class MockURLPredictor:
 
     def is_loaded(self) -> bool:
         return self._loaded
+
+    def get_health_state(self) -> ModelHealthState:
+        return ModelHealthState.MODEL_READY if self._loaded else ModelHealthState.MODEL_UNAVAILABLE
 
     async def predict(self, url: str) -> URLPredictionResult:
         if not url:

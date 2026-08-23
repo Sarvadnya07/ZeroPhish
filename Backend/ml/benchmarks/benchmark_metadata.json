@@ -1,0 +1,7 @@
+{
+  "timestamp": "2026-08-24T00:00:00Z",
+  "dataset_version": "v1.2-domain-disjoint",
+  "samples_count": 70,
+  "unique_domains": 70,
+  "split_strategy": "Domain-Disjoint Holdout"
+}
