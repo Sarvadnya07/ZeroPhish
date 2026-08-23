@@ -128,7 +128,12 @@ async def test_phishing_ml_model_predict_timeout():
     model = PhishingMLModel(model_name="test-model", inference_timeout=0.01)
     model._loaded = True
 
-    with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()):
+    async def mock_wait_for(fut, timeout):
+        if asyncio.iscoroutine(fut):
+            fut.close()
+        raise asyncio.TimeoutError()
+
+    with patch("asyncio.wait_for", side_effect=mock_wait_for):
         score, label = await model.predict("Long running text")
         assert score == 50.0
         assert label == "timeout"
