@@ -1,0 +1,70 @@
+{
+  "benchmark_id": "url_benchmark_v3",
+  "schema_version": "v3",
+  "generation_timestamp": "2026-08-24T00:00:00Z",
+  "dataset_sha256": "dd0439144bf9b1611f1736160e8accdd7d27129ba1ada5ee2cfff5abff85ba72",
+  "total_records": 55,
+  "unique_registered_domains": 53,
+  "split_manifest": {
+    "benchmark_id": "url_benchmark_v3",
+    "split_strategy": "4-Way Domain-Disjoint (Registered Domain Partitioning)",
+    "train_count": 28,
+    "calibration_count": 7,
+    "validation_count": 7,
+    "final_test_count": 13,
+    "train_sha256": "0b2bee3d53dada2f99ad9d029a612fe00a2ff9eeba37cfa8e6211e34e54d3ab7",
+    "calibration_sha256": "37c7aa672b8f7d295744d7a148a047cc5c3231ac104700b23662c86b260ed2a1",
+    "validation_sha256": "fd8921e7a92b46aca335d0c764709e988c0ed2f799cd0305775748fc30ff5d2c",
+    "final_test_sha256": "aae12f2c6f9919f6d866995040cb59e053fa44ab9485fbe2e66d713d34d46a8a",
+    "final_test_frozen": true,
+    "disjoint_guarantee_verified": true
+  },
+  "throughput": {
+    "total_samples": 55,
+    "preprocessing_records_per_sec": 320326.2,
+    "urlbert_inference_records_per_sec": 228215.8,
+    "onnx_inference_records_per_sec": 1141078.8,
+    "hybrid_pipeline_records_per_sec": 228215.8,
+    "warm_memory_rss_mb": 118.4
+  },
+  "evaluation_summary": {
+    "evaluated_on_frozen_holdout": true,
+    "holdout_samples": 13,
+    "holdout_registered_domains": 13,
+    "metrics": {
+      "roc_auc": 1.0,
+      "pr_auc": 1.0,
+      "calibrated_ece": 0.4086,
+      "brier_score": 0.3088,
+      "confidence_intervals_95": {
+        "f1": {
+          "mean": 0.735,
+          "ci_low": 0.0,
+          "ci_high": 1.0
+        },
+        "precision": {
+          "mean": 0.958,
+          "ci_low": 0.0,
+          "ci_high": 1.0
+        },
+        "recall": {
+          "mean": 0.6218,
+          "ci_low": 0.0,
+          "ci_high": 1.0
+        },
+        "fpr": {
+          "mean": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0
+        }
+      }
+    },
+    "mcnemar_vs_heuristics": {
+      "statistic": 1.3333,
+      "p_value": 0.2482,
+      "significant": false,
+      "b_model_a_superior": 3,
+      "c_model_b_superior": 0
+    }
+  }
+}

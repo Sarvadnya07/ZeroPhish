@@ -1,0 +1,28 @@
+{
+  "benchmark_id": "url_benchmark_v3",
+  "schema_version": "v3",
+  "total_raw_ingested": 55,
+  "valid_records_accepted": 55,
+  "malformed_rejected": 0,
+  "level1_exact_duplicates_removed": 0,
+  "level2_normalized_duplicates_removed": 0,
+  "level3_tracking_duplicates_removed": 0,
+  "conflicting_labels_detected": 0,
+  "unique_hostnames": 55,
+  "unique_registered_domains": 53,
+  "unique_tlds": 14,
+  "unique_brands": 0,
+  "benign_count": 25,
+  "phishing_count": 30,
+  "adversarial_count": 20,
+  "cloud_cdn_count": 10,
+  "source_status_summary": {
+    "Tranco Research Top 1M": "SUCCESS",
+    "OpenPhish Community Feed": "SUCCESS",
+    "PhishTank Community Submissions": "SUCCESS",
+    "Cloud & CDN Infrastructure Assets": "SUCCESS",
+    "ZeroPhish Adversarial Red Team Corpus": "SUCCESS"
+  },
+  "dataset_sha256": "dd0439144bf9b1611f1736160e8accdd7d27129ba1ada5ee2cfff5abff85ba72",
+  "generation_timestamp": "2026-08-24T00:00:00Z"
+}

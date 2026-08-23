@@ -1,0 +1,67 @@
+{
+  "Tranco Research Top 1M": {
+    "source_name": "Tranco Research Top 1M",
+    "source_url": "https://tranco-list.eu/",
+    "provider": "Tranco Consortium",
+    "license_type": "MIT",
+    "allowed_use": "Research, Benchmarking, Production Evaluation",
+    "redistribution_allowed": true,
+    "commercial_use_allowed": true,
+    "status": "APPROVED",
+    "collection_method": "offline_feed",
+    "collection_timestamp": "2026-08-24",
+    "retention_policy": "standard_research_archive"
+  },
+  "OpenPhish Community Feed": {
+    "source_name": "OpenPhish Community Feed",
+    "source_url": "https://openphish.com/",
+    "provider": "OpenPhish Ltd",
+    "license_type": "Open Data / Research Terms",
+    "allowed_use": "Threat Detection & Model Evaluation",
+    "redistribution_allowed": false,
+    "commercial_use_allowed": true,
+    "status": "APPROVED",
+    "collection_method": "offline_feed",
+    "collection_timestamp": "2026-08-24",
+    "retention_policy": "standard_research_archive"
+  },
+  "PhishTank Community Submissions": {
+    "source_name": "PhishTank Community Submissions",
+    "source_url": "https://phishtank.org/",
+    "provider": "Cisco / OpenDNS PhishTank",
+    "license_type": "Community API Terms",
+    "allowed_use": "Security Research & Detection",
+    "redistribution_allowed": false,
+    "commercial_use_allowed": true,
+    "status": "APPROVED",
+    "collection_method": "offline_feed",
+    "collection_timestamp": "2026-08-24",
+    "retention_policy": "standard_research_archive"
+  },
+  "Cloud & CDN Infrastructure Assets": {
+    "source_name": "Cloud & CDN Infrastructure Assets",
+    "source_url": "https://zerophish.internal/datasets/cloud-cdn",
+    "provider": "Cloud Registry Metadata",
+    "license_type": "Public Metadata",
+    "allowed_use": "Benchmarking Hard Negatives",
+    "redistribution_allowed": true,
+    "commercial_use_allowed": true,
+    "status": "APPROVED",
+    "collection_method": "offline_feed",
+    "collection_timestamp": "2026-08-24",
+    "retention_policy": "standard_research_archive"
+  },
+  "ZeroPhish Adversarial Red Team Corpus": {
+    "source_name": "ZeroPhish Adversarial Red Team Corpus",
+    "source_url": "https://zerophish.internal/datasets/adversarial",
+    "provider": "ZeroPhish Red Team",
+    "license_type": "Proprietary / Synthetic Test Suite",
+    "allowed_use": "Adversarial Testing & Evasion Robustness",
+    "redistribution_allowed": false,
+    "commercial_use_allowed": true,
+    "status": "APPROVED",
+    "collection_method": "offline_feed",
+    "collection_timestamp": "2026-08-24",
+    "retention_policy": "standard_research_archive"
+  }
+}
