@@ -1,0 +1,53 @@
+{
+  "benchmark_id": "url_benchmark_v2",
+  "evaluated_on_frozen_holdout": true,
+  "holdout_samples": 13,
+  "holdout_registered_domains": 13,
+  "selected_threshold": 0.34,
+  "metrics": {
+    "roc_auc": 0.6,
+    "pr_auc": 0.7324,
+    "raw_ece": 0.2677,
+    "calibrated_ece": 0.2298,
+    "brier_score": 0.258,
+    "f1_at_selected_threshold": 0.6206,
+    "precision": 0.7264,
+    "recall": 0.5895,
+    "fpr": 0.1318,
+    "confidence_intervals_95": {
+      "f1": {
+        "mean": 0.6206,
+        "ci_low": 0.0,
+        "ci_high": 0.9683
+      },
+      "precision": {
+        "mean": 0.7264,
+        "ci_low": 0.0,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "mean": 0.5895,
+        "ci_low": 0.0,
+        "ci_high": 1.0
+      },
+      "fpr": {
+        "mean": 0.1318,
+        "ci_low": 0.0,
+        "ci_high": 0.4286
+      }
+    }
+  },
+  "mcnemar_vs_heuristics": {
+    "statistic": 0.25,
+    "p_value": 0.6171,
+    "significant": false,
+    "b_model_a_superior": 3,
+    "c_model_b_superior": 1
+  },
+  "latency": {
+    "mean_ms": 14.8,
+    "median_ms": 12.5,
+    "p95_ms": 28.4,
+    "p99_ms": 34.2
+  }
+}

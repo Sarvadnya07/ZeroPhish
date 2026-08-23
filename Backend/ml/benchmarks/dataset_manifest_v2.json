@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "url_benchmark_v2",
+  "version": "2.0.0",
+  "timestamp": "2026-08-24T00:00:00Z",
+  "dataset_sha256": "8cc242964e819ea5ee352b1721a3e7d56196be3c32e60e35323f968ebb2b3a35",
+  "sources": {
+    "tranco_top_benign": "Tranco Research Top 1M",
+    "openphish_community": "OpenPhish Community Feed",
+    "phishtank_verified": "PhishTank Community Submissions",
+    "cloud_cdn_benign": "Cloud & CDN Infrastructure Assets",
+    "adversarial_curated": "ZeroPhish Adversarial Red Team Corpus"
+  },
+  "split_hashes": {
+    "TRAIN": "c4a5be324521117795d6371bec64393ec85ca473aa95c4fe854a6a66d784439b",
+    "CALIBRATION": "c9b954299889543de0fac740bd6989aff91edbe11e901db077a5b67e9eb9f282",
+    "VALIDATION": "cadd8d1bc70240871bf4a0eae08b17e43d37135560222420d3a7838424a6a273",
+    "FINAL_TEST": "8637a6eae2bc2ff1b1aa69e952f12d5b1ac87887d569bf53caa915669a1316cc"
+  }
+}

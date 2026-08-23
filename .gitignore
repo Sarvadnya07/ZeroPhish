@@ -53,8 +53,11 @@ Thumbs.db
 models/
 Backend/models/
 Backend/ml/models/
+Backend/ml/data/raw/
+Backend/ml/data/processed/
 *.onnx
 *.safetensors
 *.bin
 *.pt
+
 

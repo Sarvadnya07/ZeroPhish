@@ -1,0 +1,15 @@
+{
+  "split_strategy": "Registered-Domain Disjoint (Zero Cross-Split Leakage)",
+  "split_counts": {
+    "TRAIN": 28,
+    "CALIBRATION": 7,
+    "VALIDATION": 7,
+    "FINAL_TEST": 13
+  },
+  "split_hashes": {
+    "TRAIN": "c4a5be324521117795d6371bec64393ec85ca473aa95c4fe854a6a66d784439b",
+    "CALIBRATION": "c9b954299889543de0fac740bd6989aff91edbe11e901db077a5b67e9eb9f282",
+    "VALIDATION": "cadd8d1bc70240871bf4a0eae08b17e43d37135560222420d3a7838424a6a273",
+    "FINAL_TEST": "8637a6eae2bc2ff1b1aa69e952f12d5b1ac87887d569bf53caa915669a1316cc"
+  }
+}

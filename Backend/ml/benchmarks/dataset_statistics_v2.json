@@ -1,0 +1,11 @@
+{
+  "total_raw": 55,
+  "cleaned_records": 55,
+  "duplicates_removed": 0,
+  "conflicting_labels": 0,
+  "unique_domains": 55,
+  "unique_registered_domains": 53,
+  "benign_count": 25,
+  "phishing_count": 30,
+  "adversarial_count": 16
+}

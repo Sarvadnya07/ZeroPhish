@@ -1,0 +1,13 @@
+{
+  "model_name": "urlbert-zeroPhish-v1",
+  "task": "URL Phishing Detection",
+  "license": "Apache-2.0",
+  "format": "safetensors",
+  "evaluation_benchmark": "url_benchmark_v2",
+  "production_classification": "B. PROMISING \u2014 NEEDS MORE DATA",
+  "recommended_threshold": 0.34,
+  "recommended_weights": {
+    "heuristics": 0.4,
+    "url_ml": 0.6
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "decision": "BASE_MODEL_KEPT",
+  "rationale": "Pretrained base model achieved target generalization without fine-tuning."
+}

@@ -1,0 +1,8 @@
+{
+  "calibrator_type": "PlattSigmoid_NewtonRaphson",
+  "platt_w": 1.0099200023645047,
+  "platt_b": 0.19840004728977118,
+  "raw_ece": 0.2677,
+  "calibrated_ece": 0.2298,
+  "brier_score": 0.258
+}

@@ -1,0 +1,10 @@
+{
+  "model_architecture": "CrabInHoney/urlbert-tiny-v4-phishing-classifier",
+  "fine_tuning_decision": "BASE_MODEL_KEPT",
+  "optimizer": "AdamW",
+  "learning_rate": 2e-05,
+  "epochs": 3,
+  "batch_size": 16,
+  "max_sequence_length": 128,
+  "random_seed": 42
+}
