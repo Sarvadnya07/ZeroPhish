@@ -72,6 +72,11 @@ except ImportError as _ext_err:
     _logging.warning("Extension modules not fully loaded: %s", _ext_err)
     EXTENSIONS_AVAILABLE = False
 
+try:
+    from ml.shadow import ShadowCascadeManager
+except ImportError:
+    ShadowCascadeManager = None
+
 load_dotenv()
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -518,6 +523,15 @@ async def gateway_scan(
     asyncio.create_task(
         _notify_live_dashboard(response, scan_request.sender, scan_request.subject or "No Subject")
     )
+
+    # Controlled Shadow Cascade Observation (Non-interfering, Fire-and-Forget)
+    if ShadowCascadeManager and scan_request.links:
+        for link in scan_request.links[:5]:
+            ShadowCascadeManager.get_instance().observe_async(
+                url=link,
+                production_verdict=verdict,
+                production_score=float(partial_score),
+            )
 
     background_tasks.add_task(
         _finalize_tier3, scan_id, scan_request.body, scan_request.sender, scan_request.subject
