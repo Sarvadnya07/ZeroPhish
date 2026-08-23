@@ -1,0 +1,32 @@
+{
+  "false_positives": [],
+  "false_negatives": [
+    {
+      "url_redacted": "microsoft-support-alert.com/...",
+      "category": "phish_brand",
+      "prob": 0.05
+    },
+    {
+      "url_redacted": "coinbase-wallet-security-unlock.xyz/...",
+      "category": "phish_crypto",
+      "prob": 0.07
+    },
+    {
+      "url_redacted": "irs-tax-refund-urgent-claim.cc/...",
+      "category": "phish_gov",
+      "prob": 0.03
+    },
+    {
+      "url_redacted": "bankofamerica-login-verify.cc/...",
+      "category": "phish_financial",
+      "prob": 0.03
+    },
+    {
+      "url_redacted": "192.168.1.105/...",
+      "category": "adv_ip_host",
+      "prob": 0.11
+    }
+  ],
+  "total_fp": 0,
+  "total_fn": 5
+}

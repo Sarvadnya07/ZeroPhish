@@ -1,0 +1,7 @@
+{
+  "platt_w": 1.0195627908087959,
+  "platt_b": 0.39125581618297434,
+  "raw_ece": 0.3164,
+  "platt_calibrated_ece": 0.2231,
+  "isotonic_ece": 0.3571
+}

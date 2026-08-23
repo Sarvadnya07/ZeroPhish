@@ -1,0 +1,14 @@
+{
+  "benchmark_id": "url_benchmark_v3_multisource",
+  "timestamp": "2026-08-24T00:00:00Z",
+  "sources": {
+    "tranco_top_benign": "Tranco Research Top 1M",
+    "openphish_community": "OpenPhish Community Feed",
+    "phishtank_verified": "PhishTank Community Submissions",
+    "cloud_cdn_benign": "Cloud & CDN Infrastructure Assets",
+    "adversarial_curated": "ZeroPhish Adversarial Red Team Corpus"
+  },
+  "split_strategy": "Domain-Disjoint (Registered Domain Partitioning)",
+  "total_normalized_samples": 55,
+  "unique_registered_domains": 53
+}

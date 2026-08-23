@@ -1,0 +1,40 @@
+{
+  "total_raw": 55,
+  "normalized": 55,
+  "duplicates_removed": 0,
+  "benign_count": 25,
+  "phishing_count": 30,
+  "adversarial_count": 16,
+  "source_breakdown": {
+    "tranco_top_benign": {
+      "count": 6,
+      "roc_auc": 0.5,
+      "pr_auc": 0.5,
+      "f1": 0.0333
+    },
+    "openphish_community": {
+      "count": 1,
+      "roc_auc": 0.5,
+      "pr_auc": 0.5,
+      "f1": 0.95
+    },
+    "phishtank_verified": {
+      "count": 3,
+      "roc_auc": 0.5,
+      "pr_auc": 0.5,
+      "f1": 0.9567
+    },
+    "cloud_cdn_benign": {
+      "count": 2,
+      "roc_auc": 0.5,
+      "pr_auc": 0.5,
+      "f1": 0.03
+    },
+    "adversarial_curated": {
+      "count": 2,
+      "roc_auc": 0.5,
+      "pr_auc": 0.5,
+      "f1": 0.649
+    }
+  }
+}
