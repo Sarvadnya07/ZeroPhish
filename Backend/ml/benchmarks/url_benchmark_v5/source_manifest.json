@@ -1,0 +1,12 @@
+{
+  "tranco": {
+    "mode": "BULK_FILE",
+    "status": "LIVE_ACCESS",
+    "records": 30
+  },
+  "openphish": {
+    "mode": "API",
+    "status": "LIVE_ACCESS",
+    "records": 30
+  }
+}

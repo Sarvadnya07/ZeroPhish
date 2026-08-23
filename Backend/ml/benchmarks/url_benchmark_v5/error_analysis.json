@@ -1,0 +1,4 @@
+{
+  "false_positive_analysis": "Hard negative CDNs and SaaS portals exhibit elevated perplexity without domain reputation signal.",
+  "false_negative_analysis": "Adversarial homoglyphs and unusual ports evade pure lexical subword matching without rule fusion."
+}

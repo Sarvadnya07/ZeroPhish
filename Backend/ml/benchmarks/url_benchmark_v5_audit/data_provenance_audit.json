@@ -1,0 +1,8 @@
+{
+  "dataset_version": "v5",
+  "total_records": 60,
+  "live_benign_source": "Tranco Research Top 1M",
+  "live_phishing_source": "OpenPhish Community Feed",
+  "adversarial_source": "ZeroPhish Synthetic Red Team Suite",
+  "provenance_tracked_per_record": true
+}

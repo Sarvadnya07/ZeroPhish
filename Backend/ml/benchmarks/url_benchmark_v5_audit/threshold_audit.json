@@ -1,0 +1,6 @@
+{
+  "provisional_production_threshold": 0.65,
+  "selected_on_split": "CALIBRATION / VALIDATION ONLY",
+  "final_test_threshold_leakage": false,
+  "status": "VALID_PROVISIONAL"
+}

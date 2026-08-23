@@ -1,0 +1,10 @@
+{
+  "cli_command": "python -m Backend.ml.data.pipeline evaluate-v5",
+  "entry_point": "Backend/ml/data/pipeline.py -> main()",
+  "evaluator_module": "Backend/ml/benchmark/benchmark_v5.py -> BenchmarkV5Evaluator.evaluate_v5_benchmark()",
+  "dataset_loader": "Backend/ml/benchmark/benchmark_v5.py -> BenchmarkV5DatasetBuilder.load_or_build_v5_candidate()",
+  "splitter_module": "Backend/ml/data/splitting/disjoint_splitter.py -> DomainDisjointSplitter.create_4way_split()",
+  "predictor_used_in_phase9": "MockURLPredictor (Identified Root Cause of Latency Discrepancy)",
+  "fusion_formula": "hybrid_score = 0.40 * heuristics + 0.60 * calibrated_ml",
+  "prediction_source_tag": "MOCK (Must be REAL_MODEL for production validation)"
+}

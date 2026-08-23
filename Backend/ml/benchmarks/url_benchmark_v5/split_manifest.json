@@ -1,0 +1,14 @@
+{
+  "benchmark_id": "url_benchmark_v4",
+  "split_strategy": "4-Way Domain-Disjoint (Registered Domain Partitioning)",
+  "train_count": 31,
+  "calibration_count": 8,
+  "validation_count": 8,
+  "final_test_count": 13,
+  "train_sha256": "16c96a3e22b5f94de9582954bac2e9868d55e6a5a01231d5e256089cd44fcb6d",
+  "calibration_sha256": "d374f82edda3aafd41edceba21e2ce60bb77635fdb5084092904997e5ddbb23a",
+  "validation_sha256": "dce360d0c5c5a74e26124d0ab7ec07fd8c4b939ee5531190091f04e7c1f004f1",
+  "final_test_sha256": "ec495205e25a5257172745793e0631cf6bc2227b205118f5d8477d47c8402c7b",
+  "final_test_frozen": true,
+  "disjoint_guarantee_verified": true
+}

@@ -1,0 +1,160 @@
+{
+  "benchmark_id": "url_benchmark_v5",
+  "cohort_evaluations": {
+    "CORE_BALANCED": {
+      "sample_count": 13,
+      "unique_domains": 13,
+      "roc_auc": 0.8,
+      "pr_auc": 0.8718,
+      "calibrated_ece": 0.1909,
+      "brier_score": 0.2731,
+      "confidence_intervals": {
+        "f1": {
+          "mean": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0
+        },
+        "precision": {
+          "mean": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0
+        },
+        "recall": {
+          "mean": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0
+        },
+        "fpr": {
+          "mean": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0
+        }
+      },
+      "mcnemar": {
+        "statistic": 0.0,
+        "p_value": 1.0,
+        "significant": false,
+        "b": 0,
+        "c": 0
+      }
+    },
+    "HARD_NEGATIVE": {
+      "sample_count": 12,
+      "unique_domains": 12,
+      "roc_auc": 0.5,
+      "pr_auc": 0.5644,
+      "calibrated_ece": 0.4561,
+      "brier_score": 0.2927,
+      "confidence_intervals": {
+        "f1": {
+          "mean": 0.4939,
+          "ci_low": 0.0,
+          "ci_high": 1.0
+        },
+        "precision": {
+          "mean": 0.644,
+          "ci_low": 0.0,
+          "ci_high": 1.0
+        },
+        "recall": {
+          "mean": 0.4285,
+          "ci_low": 0.0,
+          "ci_high": 1.0
+        },
+        "fpr": {
+          "mean": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0
+        }
+      },
+      "mcnemar": {
+        "statistic": 0.0,
+        "p_value": 1.0,
+        "significant": false,
+        "b_model_a_superior": 1,
+        "c_model_b_superior": 0
+      }
+    },
+    "ADVERSARIAL": {
+      "sample_count": 12,
+      "unique_domains": 12,
+      "roc_auc": 0.5,
+      "pr_auc": 0.5,
+      "calibrated_ece": 0.5755,
+      "brier_score": 0.3312,
+      "confidence_intervals": {
+        "f1": {
+          "mean": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0
+        },
+        "precision": {
+          "mean": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0
+        },
+        "recall": {
+          "mean": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0
+        },
+        "fpr": {
+          "mean": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0
+        }
+      },
+      "mcnemar": {
+        "statistic": 0.0,
+        "p_value": 1.0,
+        "significant": false,
+        "b": 0,
+        "c": 0
+      }
+    },
+    "UNSEEN_DOMAIN": {
+      "sample_count": 13,
+      "unique_domains": 13,
+      "roc_auc": 0.8,
+      "pr_auc": 0.8718,
+      "calibrated_ece": 0.1909,
+      "brier_score": 0.2731,
+      "confidence_intervals": {
+        "f1": {
+          "mean": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0
+        },
+        "precision": {
+          "mean": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0
+        },
+        "recall": {
+          "mean": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0
+        },
+        "fpr": {
+          "mean": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0
+        }
+      },
+      "mcnemar": {
+        "statistic": 0.0,
+        "p_value": 1.0,
+        "significant": false,
+        "b": 0,
+        "c": 0
+      }
+    }
+  },
+  "latency": {
+    "preprocessing_ms": 0.003,
+    "onnx_inference_ms": 0.001,
+    "urlbert_inference_ms": 0.004,
+    "hybrid_ms": 0.007,
+    "warm_rss_mb": 118.4
+  }
+}

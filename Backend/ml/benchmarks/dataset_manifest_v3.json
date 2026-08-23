@@ -21,10 +21,10 @@
   },
   "throughput": {
     "total_samples": 55,
-    "preprocessing_records_per_sec": 308988.8,
-    "urlbert_inference_records_per_sec": 236051.5,
-    "onnx_inference_records_per_sec": 1180257.5,
-    "hybrid_pipeline_records_per_sec": 236051.5,
+    "preprocessing_records_per_sec": 329538.6,
+    "urlbert_inference_records_per_sec": 242397.5,
+    "onnx_inference_records_per_sec": 1211987.7,
+    "hybrid_pipeline_records_per_sec": 242397.5,
     "warm_memory_rss_mb": 118.4
   },
   "evaluation_summary": {

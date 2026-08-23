@@ -469,7 +469,15 @@ def main():
     parser = argparse.ArgumentParser(description="ZeroPhish Threat Feed & Benchmark CLI")
     parser.add_argument(
         "action",
-        choices=["ingest", "sync", "build-benchmark", "growth-report", "verify-sources"],
+        choices=[
+            "ingest",
+            "sync",
+            "build-benchmark",
+            "growth-report",
+            "verify-sources",
+            "evaluate-v5",
+            "audit-v5",
+        ],
         help="Action to execute",
     )
     parser.add_argument("--source", default=None, help="Specific source to sync")
@@ -481,7 +489,27 @@ def main():
 
     args = parser.parse_args()
 
-    if args.action == "verify-sources":
+    if args.action == "audit-v5":
+        from ml.benchmark.benchmark_v5_audit import BenchmarkIntegrityAuditor
+
+        print("Executing Forensic Benchmark v5 Integrity & Latency Audit...")
+        res = asyncio.run(BenchmarkIntegrityAuditor.run_full_audit())
+        print(f"\n--- Forensic Benchmark Audit Complete ---")
+        print(
+            f"Final Holdout Contamination Detected: {res['overlap_audit']['final_test_holdout_contamination_detected']}"
+        )
+        print(
+            f"Real URLBERT Latency (CPU): {res['latency_results']['urlbert_actual_model']['mean_ms']} ms"
+        )
+        print(
+            f"Real ONNX Latency (CPU): {res['latency_results']['onnx_actual_model']['mean_ms']} ms"
+        )
+        print(
+            f"Mock Latency Root Cause: {res['latency_results']['mock_predictor_measured']['mean_ms']} ms"
+        )
+        print(f"Recalculated ROC-AUC: {res['metric_recalc']['roc_auc']:.4f}")
+
+    elif args.action == "verify-sources":
         from ml.data.verifier import ThreatFeedAccessVerifier
 
         verifier = ThreatFeedAccessVerifier(allow_sample=args.allow_sample)
@@ -522,23 +550,47 @@ def main():
         )
         print(f"Verdict: {report['target_scale_audit']['evaluation_verdict']}")
 
-    elif args.action in ("ingest", "build-benchmark"):
-        print(f"Executing ZeroPhish Benchmark Pipeline ({args.version})...")
-        res = asyncio.run(BenchmarkV3Builder.build_benchmark_v3(version=args.version))
-        from ml.data.growth import DatasetGrowthTracker
+    elif args.action == "evaluate-v5":
+        from ml.benchmark.benchmark_v5 import BenchmarkV5Evaluator
 
-        _ = DatasetGrowthTracker.generate_growth_report()
-        print(f"\n--- Benchmark {args.version} Build Complete ---")
+        print("Executing ZeroPhish Benchmark v5 Cohort Evaluations...")
+        res = asyncio.run(BenchmarkV5Evaluator.evaluate_v5_benchmark())
+        print(f"\n--- Benchmark v5 Evaluation Complete ---")
+        for cohort, data in res["cohort_results"].items():
+            print(
+                f"Cohort [{cohort}]: ROC-AUC={data['roc_auc']:.4f}, PR-AUC={data['pr_auc']:.4f}, ECE={data['calibrated_ece']:.4f}, N={data['sample_count']}"
+            )
         print(
-            f"Total Accepted Records: {res['quality_report']['valid_records_accepted']} ({res['quality_report']['unique_registered_domains']} Registered Domains)"
+            f"Latency: Preprocessing={res['latency']['preprocessing_ms']}ms, URLBERT={res['latency']['urlbert_inference_ms']}ms"
         )
-        print(
-            f"Final Test Frozen: {res['split_manifest']['final_test_frozen']} (Disjoint Verified: {res['split_manifest']['disjoint_guarantee_verified']})"
-        )
-        print(
-            f"Inference Throughput: {res['throughput']['urlbert_inference_records_per_sec']} rec/s"
-        )
-        print(f"Calibrated ECE: {res['evaluation']['metrics']['calibrated_ece']:.4f}")
+
+    elif args.action in ("ingest", "build-benchmark"):
+        if args.version == "v5":
+            from ml.benchmark.benchmark_v5 import BenchmarkV5Evaluator
+
+            print("Executing ZeroPhish Benchmark v5 Build & Evaluation...")
+            res = asyncio.run(BenchmarkV5Evaluator.evaluate_v5_benchmark())
+            print(f"\n--- Benchmark v5 Build Complete ---")
+            print(
+                f"Total Evaluated Records: {res['meta']['total_records']} ({res['meta']['unique_registered_domains']} Registered Domains)"
+            )
+        else:
+            print(f"Executing ZeroPhish Benchmark Pipeline ({args.version})...")
+            res = asyncio.run(BenchmarkV3Builder.build_benchmark_v3(version=args.version))
+            from ml.data.growth import DatasetGrowthTracker
+
+            _ = DatasetGrowthTracker.generate_growth_report()
+            print(f"\n--- Benchmark {args.version} Build Complete ---")
+            print(
+                f"Total Accepted Records: {res['quality_report']['valid_records_accepted']} ({res['quality_report']['unique_registered_domains']} Registered Domains)"
+            )
+            print(
+                f"Final Test Frozen: {res['split_manifest']['final_test_frozen']} (Disjoint Verified: {res['split_manifest']['disjoint_guarantee_verified']})"
+            )
+            print(
+                f"Inference Throughput: {res['throughput']['urlbert_inference_records_per_sec']} rec/s"
+            )
+            print(f"Calibrated ECE: {res['evaluation']['metrics']['calibrated_ece']:.4f}")
 
 
 if __name__ == "__main__":

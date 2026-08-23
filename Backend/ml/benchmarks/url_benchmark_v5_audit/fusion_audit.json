@@ -1,0 +1,5 @@
+{
+  "formula": "0.40 * heuristics + 0.60 * calibrated_ml",
+  "hard_security_override_precedence": "Absolute (SSRF, IOCs, and blocklists strictly override ML)",
+  "fusion_verification_status": "VERIFIED_MATHEMATICALLY"
+}

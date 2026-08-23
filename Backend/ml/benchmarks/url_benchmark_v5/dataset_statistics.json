@@ -1,0 +1,8 @@
+{
+  "total_records": 60,
+  "benign_count": 30,
+  "phishing_count": 30,
+  "unique_registered_domains": 58,
+  "hard_negative_count": 10,
+  "adversarial_count": 10
+}

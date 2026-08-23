@@ -1,0 +1,9 @@
+{
+  "calibrator_type": "Platt Scaling (Newton-Raphson MLE)",
+  "calibration_split_isolation": true,
+  "platt_w": 1.7096441616719233,
+  "platt_b": 0.2188867871268241,
+  "probabilities_bounded_0_1": true,
+  "calibrated_ece": 0.1909,
+  "brier_score": 0.2731
+}
