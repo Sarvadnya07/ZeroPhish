@@ -1,0 +1,41 @@
+{
+  "benchmark_id": "url_benchmark_v4",
+  "evaluated_on_frozen_holdout": true,
+  "holdout_samples": 13,
+  "holdout_registered_domains": 13,
+  "metrics": {
+    "roc_auc": 1.0,
+    "pr_auc": 1.0,
+    "calibrated_ece": 0.4086,
+    "brier_score": 0.3088,
+    "confidence_intervals_95": {
+      "f1": {
+        "mean": 0.735,
+        "ci_low": 0.0,
+        "ci_high": 1.0
+      },
+      "precision": {
+        "mean": 0.958,
+        "ci_low": 0.0,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "mean": 0.6218,
+        "ci_low": 0.0,
+        "ci_high": 1.0
+      },
+      "fpr": {
+        "mean": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0
+      }
+    }
+  },
+  "mcnemar_vs_heuristics": {
+    "statistic": 1.3333,
+    "p_value": 0.2482,
+    "significant": false,
+    "b_model_a_superior": 3,
+    "c_model_b_superior": 0
+  }
+}

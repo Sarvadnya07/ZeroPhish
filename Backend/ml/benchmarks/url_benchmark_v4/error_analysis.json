@@ -1,0 +1,7 @@
+{
+  "false_positives": [],
+  "false_negatives": [
+    "http://docu-sign-document-signature-review.top/envelope/view",
+    "http://192.168.1.105/auth/bank-update/login.html"
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "growth_timeline": [
+    {
+      "version": "url_benchmark_v1",
+      "total_records": 70,
+      "unique_domains": 70,
+      "benign_count": 40,
+      "phishing_count": 30,
+      "sources_count": 2,
+      "final_holdout_domains": 18,
+      "status": "FROZEN_HISTORICAL"
+    },
+    {
+      "version": "url_benchmark_v2",
+      "total_records": 55,
+      "unique_domains": 53,
+      "benign_count": 25,
+      "phishing_count": 30,
+      "sources_count": 5,
+      "final_holdout_domains": 10,
+      "status": "FROZEN_HISTORICAL"
+    },
+    {
+      "version": "url_benchmark_v3",
+      "total_records": 55,
+      "unique_domains": 53,
+      "benign_count": 25,
+      "phishing_count": 30,
+      "sources_count": 5,
+      "final_holdout_domains": 10,
+      "status": "FROZEN_HISTORICAL"
+    },
+    {
+      "version": "url_benchmark_v4",
+      "total_records": 55,
+      "unique_domains": 53,
+      "benign_count": 25,
+      "phishing_count": 30,
+      "sources_count": 5,
+      "final_holdout_domains": 10,
+      "status": "FROZEN_ACTIVE"
+    }
+  ],
+  "target_scale_audit": {
+    "target_domains": 10000,
+    "actual_domains": 53,
+    "target_domains_status": "TARGET NOT REACHED",
+    "target_benign": 10000,
+    "actual_benign": 25,
+    "target_benign_status": "TARGET NOT REACHED",
+    "target_phishing": 10000,
+    "actual_phishing": 30,
+    "target_phishing_status": "TARGET NOT REACHED",
+    "evaluation_verdict": "PROMISING \u2014 NEEDS MORE DATA"
+  },
+  "recommendation": "Maintain frozen holdouts; ingest large-scale public data dumps in background."
+}

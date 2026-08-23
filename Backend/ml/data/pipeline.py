@@ -1,7 +1,7 @@
 """
-Master Threat-Feed Ingestion and Benchmark v3 Orchestration Pipeline.
+Master Threat-Feed Ingestion and Benchmark v4 Orchestration Pipeline.
 Integrates legal governance, multi-level deduplication, domain-disjoint splitting,
-throughput profiling, and snapshot manifest generation.
+throughput profiling, and snapshot manifest generation for url_benchmark_v4.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from ml.calibration import (
     PlattCalibrator,
     compute_bootstrap_confidence_intervals,
     compute_brier_score,
+    compute_cost_sensitive_threshold,
     compute_ece,
     compute_roc_pr_auc,
     find_optimal_operating_points,
@@ -225,7 +226,7 @@ class ThreatFeedIngestionOrchestrator:
         self.storage = SnapshotStorageManager()
 
     def ingest_approved_sources(
-        self,
+        self, benchmark_id: str = "url_benchmark_v3"
     ) -> Tuple[
         List[DatasetRecordV3],
         DataQualityReportV3,
@@ -296,8 +297,8 @@ class ThreatFeedIngestionOrchestrator:
         unique_tlds = len({r.tld for r in v3_records if r.tld})
 
         dq_report = DataQualityReportV3(
-            benchmark_id="url_benchmark_v3",
-            schema_version="v3",
+            benchmark_id=benchmark_id,
+            schema_version="v3" if benchmark_id == "url_benchmark_v3" else "v4",
             total_raw_ingested=len(raw_records),
             valid_records_accepted=len(v3_records),
             malformed_rejected=0,
@@ -324,12 +325,14 @@ class ThreatFeedIngestionOrchestrator:
 
 
 class BenchmarkV3Builder:
-    """Builds frozen benchmark v3 snapshots, measures throughput, and validates holdouts."""
+    """Builds frozen benchmark v3/v4 snapshots, measures throughput, and validates holdouts."""
 
     @classmethod
-    async def build_benchmark_v3(cls) -> Dict[str, Any]:
+    async def build_benchmark_v3(cls, version: str = "v3") -> Dict[str, Any]:
         orchestrator = ThreatFeedIngestionOrchestrator()
-        records, dq_report, source_govs, conflicts = orchestrator.ingest_approved_sources()
+        records, dq_report, source_govs, conflicts = orchestrator.ingest_approved_sources(
+            benchmark_id=f"url_benchmark_{version}"
+        )
 
         # 1. 4-Way Domain-Disjoint Partitioning
         splits, split_manifest = DomainDisjointSplitter.create_4way_split(records, seed=42)
@@ -396,7 +399,11 @@ class BenchmarkV3Builder:
         test_h_preds = (np.array(test_h_scores) >= 0.50).astype(int).tolist()
         mcnemar = paired_mcnemar_test(test_y, test_preds, test_h_preds)
 
+        threshold_curve = sweep_thresholds(test_y, test_hyb)
+        op_points = find_optimal_operating_points(threshold_curve)
+
         evaluation_results = {
+            "benchmark_id": f"url_benchmark_{version}",
             "evaluated_on_frozen_holdout": True,
             "holdout_samples": len(test_set),
             "holdout_registered_domains": len({r.registered_domain for r in test_set}),
@@ -410,15 +417,45 @@ class BenchmarkV3Builder:
             "mcnemar_vs_heuristics": mcnemar,
         }
 
-        # 5. Save Immutable Release
-        saved_paths = orchestrator.storage.save_benchmark_v3_snapshot(
+        calib_results = {
+            "platt_w": platt.w,
+            "platt_b": platt.b,
+            "raw_ece": compute_ece(test_y, test_m_scores),
+            "calibrated_ece": test_ece,
+            "brier_score": test_brier,
+        }
+
+        thresh_results = {
+            "operating_points": op_points,
+            "cost_sensitive_optimal": compute_cost_sensitive_threshold(
+                threshold_curve, cost_fn=10.0, cost_fp=1.0
+            ),
+        }
+
+        error_analysis = {
+            "false_positives": [
+                r.url_model_input
+                for r, pred in zip(test_set, test_preds)
+                if r.label == 0 and pred == 1
+            ],
+            "false_negatives": [
+                r.url_model_input
+                for r, pred in zip(test_set, test_preds)
+                if r.label == 1 and pred == 0
+            ],
+        }
+
+        # 5. Save Immutable Benchmark Release
+        saved_paths = orchestrator.storage.save_benchmark_v4_release(
             records=records,
             dq_report=dq_report,
             split_manifest=split_manifest,
             source_governances=source_govs,
             throughput=throughput_metrics,
             evaluation_results=evaluation_results,
-            conflict_records=conflicts,
+            calibration_results=calib_results,
+            threshold_results=thresh_results,
+            error_analysis=error_analysis,
         )
 
         return {
@@ -432,15 +469,48 @@ class BenchmarkV3Builder:
 
 def main():
     parser = argparse.ArgumentParser(description="ZeroPhish Threat Feed & Benchmark CLI")
-    parser.add_argument("action", choices=["ingest", "build-benchmark"], help="Action to execute")
-    parser.add_argument("--version", default="v3", help="Target benchmark version")
+    parser.add_argument(
+        "action",
+        choices=["ingest", "sync", "build-benchmark", "growth-report"],
+        help="Action to execute",
+    )
+    parser.add_argument("--source", default=None, help="Specific source to sync")
+    parser.add_argument("--all-approved", action="store_true", help="Sync all approved sources")
+    parser.add_argument("--version", default="v4", help="Target benchmark version (e.g. v3, v4)")
 
     args = parser.parse_args()
 
-    if args.action in ("ingest", "build-benchmark"):
+    if args.action == "sync":
+        from ml.data.sync import ThreatFeedSyncEngine
+
+        engine = ThreatFeedSyncEngine()
+        if args.source:
+            print(f"Syncing source: {args.source}...")
+            res = engine.sync_source(args.source)
+            print(f"Result: {res}")
+        else:
+            print("Syncing all approved sources...")
+            res = engine.sync_all_approved()
+            print(f"Sync Results: {res}")
+
+    elif args.action == "growth-report":
+        from ml.data.growth import DatasetGrowthTracker
+
+        report = DatasetGrowthTracker.generate_growth_report()
+        print("\n--- ZeroPhish Dataset Growth Audit ---")
+        print(f"Target Scale Status: {report['target_scale_audit']['target_domains_status']}")
+        print(
+            f"Actual Domains: {report['target_scale_audit']['actual_domains']} / {report['target_scale_audit']['target_domains']}"
+        )
+        print(f"Verdict: {report['target_scale_audit']['evaluation_verdict']}")
+
+    elif args.action in ("ingest", "build-benchmark"):
         print(f"Executing ZeroPhish Benchmark Pipeline ({args.version})...")
-        res = asyncio.run(BenchmarkV3Builder.build_benchmark_v3())
-        print("\n--- Benchmark v3 Build Complete ---")
+        res = asyncio.run(BenchmarkV3Builder.build_benchmark_v3(version=args.version))
+        from ml.data.growth import DatasetGrowthTracker
+
+        _ = DatasetGrowthTracker.generate_growth_report()
+        print(f"\n--- Benchmark {args.version} Build Complete ---")
         print(
             f"Total Accepted Records: {res['quality_report']['valid_records_accepted']} ({res['quality_report']['unique_registered_domains']} Registered Domains)"
         )

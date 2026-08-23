@@ -6,7 +6,7 @@
   "total_records": 55,
   "unique_registered_domains": 53,
   "split_manifest": {
-    "benchmark_id": "url_benchmark_v3",
+    "benchmark_id": "url_benchmark_v4",
     "split_strategy": "4-Way Domain-Disjoint (Registered Domain Partitioning)",
     "train_count": 28,
     "calibration_count": 7,
@@ -21,13 +21,14 @@
   },
   "throughput": {
     "total_samples": 55,
-    "preprocessing_records_per_sec": 320326.2,
-    "urlbert_inference_records_per_sec": 228215.8,
-    "onnx_inference_records_per_sec": 1141078.8,
-    "hybrid_pipeline_records_per_sec": 228215.8,
+    "preprocessing_records_per_sec": 300546.4,
+    "urlbert_inference_records_per_sec": 232558.1,
+    "onnx_inference_records_per_sec": 1162790.7,
+    "hybrid_pipeline_records_per_sec": 232558.1,
     "warm_memory_rss_mb": 118.4
   },
   "evaluation_summary": {
+    "benchmark_id": "url_benchmark_v4",
     "evaluated_on_frozen_holdout": true,
     "holdout_samples": 13,
     "holdout_registered_domains": 13,

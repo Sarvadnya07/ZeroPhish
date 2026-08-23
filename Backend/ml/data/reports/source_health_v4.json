@@ -1,0 +1,81 @@
+{
+  "timestamp": "2026-08-23T20:11:16.766818+00:00",
+  "sources": {
+    "Tranco Research Top 1M": {
+      "source_name": "Tranco Research Top 1M",
+      "last_attempt": "2026-08-23T20:11:16.764686+00:00",
+      "last_successful_sync": "2026-08-23T20:11:16.764693+00:00",
+      "status": "HEALTHY",
+      "records_fetched": 15,
+      "records_accepted": 15,
+      "records_rejected": 0,
+      "duplicate_count": 0,
+      "conflict_count": 0,
+      "bytes_received": 3269,
+      "checksum": "8c91db3dd5eb3631a5f187973e4fea0a25f434f2426b795d7054cc9ff3db5ea9",
+      "latency_ms": 0.12,
+      "error_message": null
+    },
+    "OpenPhish Community Feed": {
+      "source_name": "OpenPhish Community Feed",
+      "last_attempt": "2026-08-23T20:11:16.765112+00:00",
+      "last_successful_sync": "2026-08-23T20:11:16.765117+00:00",
+      "status": "HEALTHY",
+      "records_fetched": 10,
+      "records_accepted": 10,
+      "records_rejected": 0,
+      "duplicate_count": 0,
+      "conflict_count": 0,
+      "bytes_received": 2377,
+      "checksum": "1beaa46f95b409500e366a89004f3d6818d00b075ccf171ac5dcd0493afd6b64",
+      "latency_ms": 0.05,
+      "error_message": null
+    },
+    "PhishTank Community Submissions": {
+      "source_name": "PhishTank Community Submissions",
+      "last_attempt": "2026-08-23T20:11:16.765537+00:00",
+      "last_successful_sync": "2026-08-23T20:11:16.765541+00:00",
+      "status": "HEALTHY",
+      "records_fetched": 10,
+      "records_accepted": 10,
+      "records_rejected": 0,
+      "duplicate_count": 0,
+      "conflict_count": 0,
+      "bytes_received": 2433,
+      "checksum": "356015aa2131ba971e72cc1cca1b4cc4ba209cfebc3dd39b27727f19c69b80e1",
+      "latency_ms": 0.05,
+      "error_message": null
+    },
+    "Cloud & CDN Infrastructure Assets": {
+      "source_name": "Cloud & CDN Infrastructure Assets",
+      "last_attempt": "2026-08-23T20:11:16.765949+00:00",
+      "last_successful_sync": "2026-08-23T20:11:16.765953+00:00",
+      "status": "HEALTHY",
+      "records_fetched": 10,
+      "records_accepted": 10,
+      "records_rejected": 0,
+      "duplicate_count": 0,
+      "conflict_count": 0,
+      "bytes_received": 2429,
+      "checksum": "9bfc0954f534a5b38c027da6c6614c2cc2c078f72741266e9ab8b53a047c5fc9",
+      "latency_ms": 0.05,
+      "error_message": null
+    },
+    "ZeroPhish Adversarial Red Team Corpus": {
+      "source_name": "ZeroPhish Adversarial Red Team Corpus",
+      "last_attempt": "2026-08-23T20:11:16.766346+00:00",
+      "last_successful_sync": "2026-08-23T20:11:16.766350+00:00",
+      "status": "HEALTHY",
+      "records_fetched": 10,
+      "records_accepted": 10,
+      "records_rejected": 0,
+      "duplicate_count": 0,
+      "conflict_count": 0,
+      "bytes_received": 2300,
+      "checksum": "c736eabb988622dfbd2a849958e00530faed5afe2fd48401e18e4430ecf98a61",
+      "latency_ms": 0.05,
+      "error_message": null
+    }
+  },
+  "overall_status": "HEALTHY"
+}

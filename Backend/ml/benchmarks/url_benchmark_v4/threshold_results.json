@@ -1,0 +1,65 @@
+{
+  "operating_points": {
+    "max_f1": {
+      "threshold": 0.44,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "fpr": 0.0,
+      "fnr": 0.0,
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "tn": 8
+    },
+    "high_recall_security": {
+      "threshold": 0.44,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "fpr": 0.0,
+      "fnr": 0.0,
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "tn": 8
+    },
+    "low_fpr_enterprise": {
+      "threshold": 0.44,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "fpr": 0.0,
+      "fnr": 0.0,
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "tn": 8
+    },
+    "balanced": {
+      "threshold": 0.44,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "fpr": 0.0,
+      "fnr": 0.0,
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "tn": 8
+    }
+  },
+  "cost_sensitive_optimal": {
+    "threshold": 0.44,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "fpr": 0.0,
+    "fnr": 0.0,
+    "tp": 5,
+    "fp": 0,
+    "fn": 0,
+    "tn": 8,
+    "expected_cost": 0.0
+  }
+}

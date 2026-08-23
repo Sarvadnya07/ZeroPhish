@@ -1,5 +1,5 @@
 """
-Versioned Pydantic Data Schemas for Threat-Feed Ingestion and Benchmark v3.
+Versioned Pydantic Data Schemas for Threat-Feed Ingestion and Benchmark v3/v4.
 """
 
 from __future__ import annotations
@@ -22,6 +22,27 @@ class FeedIngestionStatus(str, Enum):
     PARTIAL = "PARTIAL"
     FAILED = "FAILED"
     DISABLED = "DISABLED"
+    DEGRADED = "DEGRADED"
+
+
+class AdapterOperationalMode(str, Enum):
+    FIXTURE = "FIXTURE"
+    SAMPLE = "SAMPLE"
+    API = "API"
+    BULK_FILE = "BULK_FILE"
+    FIXTURE_FALLBACK = "FIXTURE_FALLBACK"
+
+
+class DetailedNetworkTelemetry(BaseModel):
+    dns_tls_connect_ms: float = 0.0
+    network_fetch_ms: float = 0.0
+    bytes_downloaded: int = 0
+    http_status: int = 200
+    content_parse_ms: float = 0.0
+    normalization_ms: float = 0.0
+    deduplication_ms: float = 0.0
+    snapshot_write_ms: float = 0.0
+    total_sync_ms: float = 0.0
 
 
 class SourceGovernance(BaseModel):
@@ -33,6 +54,7 @@ class SourceGovernance(BaseModel):
     redistribution_allowed: bool
     commercial_use_allowed: bool
     status: SourceApprovalStatus = SourceApprovalStatus.APPROVED
+    operational_mode: AdapterOperationalMode = AdapterOperationalMode.SAMPLE
     collection_method: str = "offline_feed"
     collection_timestamp: str = "2026-08-24"
     retention_policy: str = "standard_research_archive"
@@ -60,8 +82,8 @@ class DatasetRecordV3(BaseModel):
 
 
 class DataQualityReportV3(BaseModel):
-    benchmark_id: str = "url_benchmark_v3"
-    schema_version: str = "v3"
+    benchmark_id: str = "url_benchmark_v4"
+    schema_version: str = "v4"
     total_raw_ingested: int
     valid_records_accepted: int
     malformed_rejected: int
@@ -83,7 +105,7 @@ class DataQualityReportV3(BaseModel):
 
 
 class SplitManifestV3(BaseModel):
-    benchmark_id: str = "url_benchmark_v3"
+    benchmark_id: str = "url_benchmark_v4"
     split_strategy: str = "4-Way Domain-Disjoint (Registered Domain Partitioning)"
     train_count: int
     calibration_count: int
