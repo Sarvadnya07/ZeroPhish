@@ -1,0 +1,5 @@
+{
+  "adversarial_samples": 10,
+  "cascade_recall_on_adversarial": 1.0,
+  "notes": "Punycode and userinfo representations intercepted by deterministic hard rules and lexical heuristics"
+}

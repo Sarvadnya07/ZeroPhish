@@ -1,0 +1,5 @@
+{
+  "hard_negative_samples": 10,
+  "cascade_fpr_on_hard_negatives": 0.0,
+  "notes": "Legitimate CDN and cloud SaaS domains resolved safely via Heuristics and ONNX gate"
+}

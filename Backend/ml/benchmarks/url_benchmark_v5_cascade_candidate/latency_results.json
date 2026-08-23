@@ -1,0 +1,6 @@
+{
+  "full_hybrid_ms": 15.049999999999999,
+  "cascade_expected_ms": 1.45,
+  "urlbert_invocation_pct": 0.0,
+  "latency_reduction_pct": 90.4
+}

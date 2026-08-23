@@ -477,6 +477,7 @@ def main():
             "verify-sources",
             "evaluate-v5",
             "audit-v5",
+            "evaluate-cascade",
         ],
         help="Action to execute",
     )
@@ -489,7 +490,18 @@ def main():
 
     args = parser.parse_args()
 
-    if args.action == "audit-v5":
+    if args.action == "evaluate-cascade":
+        from ml.benchmark.cascade_evaluator import CascadeEvaluator
+
+        print("Executing URL Detection Cascade Comparative Benchmark...")
+        res = asyncio.run(CascadeEvaluator.evaluate_cascade_architectures())
+        print(f"\n--- Cascade Evaluation Complete ---")
+        for arch, data in res.items():
+            print(
+                f"[{arch}]: ROC-AUC={data['roc_auc']}, Latency={data['latency_ms']}ms, URLBERT Invocations={data['urlbert_invocation_pct']}%"
+            )
+
+    elif args.action == "audit-v5":
         from ml.benchmark.benchmark_v5_audit import BenchmarkIntegrityAuditor
 
         print("Executing Forensic Benchmark v5 Integrity & Latency Audit...")

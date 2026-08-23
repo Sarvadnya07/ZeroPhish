@@ -1,0 +1,8 @@
+{
+  "total_queries": 13,
+  "hard_rule_resolved": 0,
+  "heuristics_resolved": 13,
+  "onnx_resolved": 0,
+  "urlbert_escalated": 0,
+  "invocation_rate_pct": 0.0
+}
