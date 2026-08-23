@@ -137,6 +137,8 @@ class GatewayScanResponse(BaseModel):
     combined_evidence: List[str]
     weights: ScoringWeights
     cached: bool = False
+    sender: Optional[str] = None
+    subject: Optional[str] = None
 
     # Performance
     total_execution_time_ms: Optional[float] = None

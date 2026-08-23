@@ -1,10 +1,13 @@
 """
-ZeroPhish API Gateway
+ZeroPhish API Gateway & Central Application Server.
 Orchestrates Tier 1 (client), Tier 2 (metadata), and Tier 3 (AI) analysis.
 Final Score = (T1 * 0.2) + (T2 * 0.3) + (T3 * 0.5)
 """
+from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import os
 import sys
 import time
@@ -12,12 +15,12 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Security, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from fastapi.security import APIKeyHeader
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -40,29 +43,31 @@ from models.gateway_models import (
     Tier2Result,
     Tier3Result,
 )
+from repositories.factory import get_scan_result_repository
 from security.middleware import (
     InputValidator,
     RequestSizeLimitMiddleware,
     SecurityHeadersMiddleware,
 )
-from tier_2.main import ThreatAnalyzer, get_domain_age, analyze_domain_age
+from tier_2 import ThreatAnalyzer, analyze_domain_age, get_domain_age
 
 # ── New feature modules ────────────────────────────────────────────────────────
 try:
-    from auth.router import router as auth_router
-    from webhooks.router import router as webhooks_router
-    from incidents.router import router as incidents_router
-    from email_scanner.router import router as email_router
     from analytics.router import router as analytics_router
-    from awareness.router import router as awareness_router
-    from webhooks.service import WebhookService
-    from webhooks.models import WebhookEventType
     from analytics.service import AnalyticsService
+    from auth.router import router as auth_router
+    from awareness.router import router as awareness_router
+    from email_scanner.router import router as email_router
+    from incidents.router import router as incidents_router
     from vision.router import router as vision_router
+    from webhooks.models import WebhookEventType
+    from webhooks.router import router as webhooks_router
+    from webhooks.service import WebhookService
+
     EXTENSIONS_AVAILABLE = True
 except ImportError as _ext_err:
-    import logging as _logging
-    _logging.getLogger(__name__).warning("Extension modules not fully loaded: %s", _ext_err)
+    _logging = logging.getLogger(__name__)
+    _logging.warning("Extension modules not fully loaded: %s", _ext_err)
     EXTENSIONS_AVAILABLE = False
 
 load_dotenv()
@@ -129,14 +134,9 @@ ALLOWED_ORIGINS = [
     if o.strip() and o.strip() != "chrome-extension://*"
 ]
 
-# SECURITY: allow_credentials=True requires explicit origins (not wildcard).
-# Browsers will refuse cookies on cross-origin requests if allow_credentials is False.
-# Extension clients use Bearer tokens (not cookies) and are handled separately.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    # To allow a specific Chrome extension ID, set ALLOW_ORIGIN_REGEX env var,
-    # e.g. r"chrome-extension://your-extension-id-here"
     allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX"),
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "Cookie", "X-API-Key", "X-Request-ID"],
@@ -166,9 +166,11 @@ if EXTENSIONS_AVAILABLE:
     app.include_router(awareness_router)
     app.include_router(vision_router)
 
-scan_results: Dict[str, GatewayScanResponse] = {}
+# In-process scan time tracker and SSE broadcast queues
 scan_started_at: Dict[str, float] = {}
 scan_results_lock = asyncio.Lock()
+_latest_tier1_report: Optional[Dict[str, Any]] = None
+_sse_subscribers: Dict[str, asyncio.Queue] = {}
 
 
 def _clamp_score(score: float) -> float:
@@ -255,44 +257,51 @@ def _merge_evidence(
 
 
 async def _notify_live_dashboard(res: GatewayScanResponse, sender: str, subject: str) -> None:
-    """Send scan update to the Tier 1 live dashboard (port 8000)."""
-    try:
-        import httpx
-        url = os.getenv("LIVE_DASHBOARD_URL", "http://127.0.0.1:8000/tier1/report")
-        payload = {
-            "scan_id": res.scan_id,
-            "timestamp": res.timestamp,
-            "sender": sender,
-            "subject": subject,
-            "final_score": res.final_score if res.final_score is not None else res.partial_score,
-            "verdict": res.verdict,
-            "layers_completed": res.layers_completed,
-            "evidence": res.combined_evidence,
-            "threat_analysis": {
-                "category": res.tier3.category if res.tier3 else "Processing",
-                "reasoning": res.tier3.reasoning if res.tier3 else "Awaiting AI Analysis"
-            },
-            "tier_details": {
-                "tier1": {"score": res.tier1.score},
-                "tier2": {"score": res.tier2.score},
-                "tier3": {"score": res.tier3.score if res.tier3 else 0},
-            },
-        }
-        async with httpx.AsyncClient() as client:
-            await client.post(url, json=payload, timeout=2.0)
-    except Exception as e:
-        # Don't fail the scan if dashboard notification fails
-        import logging as _logging
+    """Broadcast scan update to in-process SSE queues and optional external dashboard."""
+    global _latest_tier1_report
 
-        _logging.getLogger(__name__).debug("Live dashboard notify failed: %s", str(e)[:200])
-        return
+    payload = {
+        "scan_id": res.scan_id,
+        "timestamp": res.timestamp,
+        "sender": sender,
+        "subject": subject,
+        "final_score": res.final_score if res.final_score is not None else res.partial_score,
+        "verdict": res.verdict,
+        "layers_completed": res.layers_completed,
+        "evidence": res.combined_evidence,
+        "threat_analysis": {
+            "category": res.tier3.category if res.tier3 else "Processing",
+            "reasoning": res.tier3.reasoning if res.tier3 else "Awaiting AI Analysis",
+        },
+        "tier_details": {
+            "tier1": {"score": res.tier1.score},
+            "tier2": {"score": res.tier2.score},
+            "tier3": {"score": res.tier3.score if res.tier3 else 0},
+        },
+    }
 
+    _latest_tier1_report = payload
 
-def _trim_scan_history() -> None:
-    while len(scan_results) > SCAN_HISTORY_LIMIT:
-        oldest_scan_id = next(iter(scan_results))
-        scan_results.pop(oldest_scan_id, None)
-        scan_started_at.pop(oldest_scan_id, None)
+    # Broadcast to all live SSE subscribers in-process
+    dead_subscribers = []
+    for sub_id, q in list(_sse_subscribers.items()):
+        try:
+            q.put_nowait(payload)
+        except Exception:
+            dead_subscribers.append(sub_id)
+
+    for sub_id in dead_subscribers:
+        _sse_subscribers.pop(sub_id, None)
+
+    # Optional webhook/external URL notification
+    live_url = os.getenv("LIVE_DASHBOARD_URL")
+    if live_url and "8001" not in live_url:
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                await client.post(live_url, json=payload, timeout=2.0)
+        except Exception as e:
+            logging.getLogger(__name__).debug("External live dashboard notify skipped/failed: %s", str(e)[:200])
 
 
 async def execute_tier2(sender: str, body: str, links: list[str]) -> Tier2Result:
@@ -361,7 +370,9 @@ async def execute_tier2(sender: str, body: str, links: list[str]) -> Tier2Result
         )
 
 
-async def _finalize_tier3(scan_id: str, email_body: str) -> None:
+async def _finalize_tier3(
+    scan_id: str, email_body: str, sender: Optional[str] = None, subject: Optional[str] = None
+) -> None:
     try:
         tier3_result = await execute_tier3_with_circuit_breaker(
             body=email_body,
@@ -377,8 +388,9 @@ async def _finalize_tier3(scan_id: str, email_body: str) -> None:
             status="failed",
         )
 
+    scan_repo = get_scan_result_repository()
     async with scan_results_lock:
-        existing = scan_results.get(scan_id)
+        existing = scan_repo.get(scan_id)
         if not existing:
             return
 
@@ -389,6 +401,9 @@ async def _finalize_tier3(scan_id: str, email_body: str) -> None:
         total_ms = None
         if scan_id in scan_started_at:
             total_ms = (time.perf_counter() - scan_started_at[scan_id]) * 1000
+
+        sender_meta = existing.sender or sender or "unknown@unknown.com"
+        subject_meta = existing.subject or subject or "No Subject"
 
         updated = existing.model_copy(
             update={
@@ -404,13 +419,13 @@ async def _finalize_tier3(scan_id: str, email_body: str) -> None:
                     tier3_result.flagged_phrases,
                 ),
                 "total_execution_time_ms": total_ms,
+                "sender": sender_meta,
+                "subject": subject_meta,
             }
         )
-        scan_results[scan_id] = updated
+        scan_repo.save(scan_id, updated)
 
         # Notify dashboard of final result (Level 3)
-        sender_meta = getattr(existing, "_sender", "unknown@unknown.com")
-        subject_meta = getattr(existing, "_subject", "No Subject")
         asyncio.create_task(_notify_live_dashboard(updated, sender_meta, subject_meta))
 
     # Fire webhooks and record analytics (outside the lock)
@@ -423,8 +438,6 @@ async def _finalize_tier3(scan_id: str, email_body: str) -> None:
             await WebhookService.fire(WebhookEventType.SCAN_SUSPICIOUS, payload)
 
         # Record telemetry
-        sender_meta = getattr(existing, "_sender", "unknown@unknown.com")
-        subject_meta = getattr(existing, "_subject", "")
         AnalyticsService.record_scan(
             scan_id=scan_id,
             sender=sender_meta,
@@ -487,20 +500,23 @@ async def gateway_scan(
         layers_completed=2,
         combined_evidence=_merge_evidence(tier1.evidence, tier2.evidence, None),
         weights=WEIGHTS,
+        sender=scan_request.sender,
+        subject=scan_request.subject or "No Subject",
         total_execution_time_ms=(time.perf_counter() - scan_started_at[scan_id]) * 1000,
     )
 
+    scan_repo = get_scan_result_repository()
     async with scan_results_lock:
-        # Cache metadata for reporting
-        setattr(response, "_sender", scan_request.sender)
-        setattr(response, "_subject", scan_request.subject or "No Subject")
-        scan_results[scan_id] = response
-        _trim_scan_history()
+        scan_repo.save(scan_id, response)
 
     # Notify dashboard of partial result (Level 2)
-    asyncio.create_task(_notify_live_dashboard(response, scan_request.sender, scan_request.subject or "No Subject"))
+    asyncio.create_task(
+        _notify_live_dashboard(response, scan_request.sender, scan_request.subject or "No Subject")
+    )
 
-    background_tasks.add_task(_finalize_tier3, scan_id, scan_request.body)
+    background_tasks.add_task(
+        _finalize_tier3, scan_id, scan_request.body, scan_request.sender, scan_request.subject
+    )
     return response
 
 
@@ -509,8 +525,9 @@ async def gateway_scan(
 async def gateway_status(
     request: Request, scan_id: str, api_key: str = Depends(verify_api_key)
 ) -> ScanStatusResponse:
+    scan_repo = get_scan_result_repository()
     async with scan_results_lock:
-        result = scan_results.get(scan_id)
+        result = scan_repo.get(scan_id)
 
     if result is None:
         raise HTTPException(status_code=404, detail=f"Unknown scan_id: {scan_id}")
@@ -537,8 +554,9 @@ async def gateway_status(
 async def gateway_result(
     request: Request, scan_id: str, api_key: str = Depends(verify_api_key)
 ) -> GatewayScanResponse:
+    scan_repo = get_scan_result_repository()
     async with scan_results_lock:
-        result = scan_results.get(scan_id)
+        result = scan_repo.get(scan_id)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Unknown scan_id: {scan_id}")
     return result
@@ -546,9 +564,10 @@ async def gateway_result(
 
 @app.get("/gateway/health")
 async def gateway_health() -> dict:
+    scan_repo = get_scan_result_repository()
     async with scan_results_lock:
-        total_scans = len(scan_results)
-        pending_scans = sum(1 for v in scan_results.values() if not v.complete)
+        total_scans = scan_repo.count()
+        pending_scans = scan_repo.count_pending()
 
     return {
         "status": "healthy",
@@ -579,6 +598,72 @@ async def gateway_circuit_reset() -> dict:
         return {"enabled": False, "status": "disabled"}
     tier3_circuit_breaker.reset()
     return {"enabled": True, "status": "reset", **tier3_circuit_breaker.get_status()}
+
+
+# ── Direct Live SSE Stream Endpoints (Unified Gateway) ──────────────────────────
+
+
+@app.get("/tier1/latest")
+async def get_latest_tier1_scan() -> Optional[Dict[str, Any]]:
+    """Return the most recent scan report for dashboard refresh."""
+    return _latest_tier1_report
+
+
+@app.post("/tier1/report")
+async def receive_tier1_report(report: Dict[str, Any]) -> Dict[str, Any]:
+    """Receive scan report from Chrome Extension or internal pipeline."""
+    global _latest_tier1_report
+    _latest_tier1_report = report
+
+    dead = []
+    for sub_id, q in list(_sse_subscribers.items()):
+        try:
+            q.put_nowait(report)
+        except Exception:
+            dead.append(sub_id)
+
+    for sub_id in dead:
+        _sse_subscribers.pop(sub_id, None)
+
+    return {"status": "success", "message": "Report received"}
+
+
+@app.get("/tier1/stream")
+async def stream_tier1_scans(request: Request) -> StreamingResponse:
+    """Server-Sent Events stream for real-time frontend scan updates."""
+    sub_id = str(uuid.uuid4())
+    q: asyncio.Queue = asyncio.Queue(maxsize=50)
+    _sse_subscribers[sub_id] = q
+
+    async def event_generator():
+        yield f"event: ping\ndata: {json.dumps({'status': 'connected'})}\n\n"
+        if _latest_tier1_report:
+            yield f"data: {json.dumps(_latest_tier1_report)}\n\n"
+
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                item = await asyncio.wait_for(q.get(), timeout=10.0)
+                yield f"data: {json.dumps(item)}\n\n"
+            except asyncio.TimeoutError:
+                yield f"event: ping\ndata: {json.dumps({'status': 'alive'})}\n\n"
+            except Exception:
+                break
+
+    async def cleanup():
+        _sse_subscribers.pop(sub_id, None)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+        background=BackgroundTasks([cleanup]),
+    )
 
 
 if __name__ == "__main__":

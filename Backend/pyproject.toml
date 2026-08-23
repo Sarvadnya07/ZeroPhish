@@ -74,6 +74,8 @@ omit = [
     "*/venv/*",
     "*/ENV/*",
     "*/env/*",
+    "tier_2/benchmark*.py",
+    "tier_2/main.py",
 ]
 
 [tool.coverage.report]

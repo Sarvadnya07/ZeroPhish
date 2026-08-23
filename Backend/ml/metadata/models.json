@@ -1,0 +1,42 @@
+{
+  "models": [
+    {
+      "model_id": "cybersectony/phishing-email-detection-distilbert_v2.1",
+      "task": "email_phishing_classification",
+      "revision": "e9b5a83a",
+      "license": "MIT",
+      "framework": "transformers",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source": "huggingface",
+      "input_max_tokens": 512,
+      "calibration": {
+        "temperature": 1.0,
+        "phishing_threshold": 0.50
+      },
+      "evaluation": {
+        "accuracy": 0.972,
+        "f1_score": 0.971,
+        "precision": 0.968,
+        "recall": 0.975
+      }
+    },
+    {
+      "model_id": "zerophish/urlbert-tiny-onnx",
+      "task": "url_phishing_classification",
+      "revision": "v1.0.0",
+      "license": "Apache-2.0",
+      "framework": "onnx",
+      "sha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a",
+      "source": "internal_onnx",
+      "input_max_tokens": 128,
+      "calibration": {
+        "temperature": 1.0,
+        "phishing_threshold": 0.65
+      },
+      "evaluation": {
+        "accuracy": 0.958,
+        "f1_score": 0.955
+      }
+    }
+  ]
+}
