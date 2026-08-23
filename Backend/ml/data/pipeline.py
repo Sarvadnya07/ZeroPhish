@@ -479,6 +479,7 @@ def main():
             "audit-v5",
             "evaluate-cascade",
             "audit-cascade",
+            "evaluate-shadow",
         ],
         help="Action to execute",
     )
@@ -491,7 +492,29 @@ def main():
 
     args = parser.parse_args()
 
-    if args.action == "audit-cascade":
+    if args.action == "evaluate-shadow":
+        from ml.shadow.service import ExtendedShadowService
+
+        print("Executing Extended Cascade Shadow Evaluation & Rollout Gates...")
+        res = asyncio.run(ExtendedShadowService.generate_all_shadow_artifacts())
+        print(f"\n--- Extended Shadow Evaluation Complete ---")
+        print(
+            f"10% Gate Status: {res['g10']['gate_passed']} (Potential FNs: {res['g10']['potential_fn_count']})"
+        )
+        print(
+            f"25% Gate Status: {res['g25']['gate_passed']} (Potential FNs: {res['g25']['potential_fn_count']})"
+        )
+        print(
+            f"50% Gate Status: {res['g50']['gate_passed']} (Potential FNs: {res['g50']['potential_fn_count']})"
+        )
+        print(
+            f"100% Gate Status: {res['g100']['gate_passed']} (Potential FNs: {res['g100']['potential_fn_count']})"
+        )
+        print(
+            f"CPU Time Saved: {res['performance']['cpu_time_saved_per_1000_urls_ms']}ms / 1000 URLs"
+        )
+
+    elif args.action == "audit-cascade":
         from ml.benchmark.cascade_audit import CascadeIntegrityAuditor
 
         print("Executing Forensic Cascade Integrity, Invocation & Latency Audit...")

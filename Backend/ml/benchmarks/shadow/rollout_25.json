@@ -1,0 +1,16 @@
+{
+  "stage": "25%",
+  "sample_rate": 0.25,
+  "observations_count": 60,
+  "gate_passed": true,
+  "urlbert_invocation_pct": 0.0,
+  "onnx_invocation_pct": 6.67,
+  "heuristic_resolution_pct": 93.33,
+  "disagreement_pct": 0.0,
+  "potential_fn_count": 0,
+  "p95_latency_ms": 12.24,
+  "error_pct": 0.0,
+  "reasons": [
+    "All safety criteria satisfied: 0 potential false negatives, stable latency, clean error rate."
+  ]
+}

@@ -7,27 +7,27 @@
   },
   "latency_measurements": {
     "preprocessing": {
-      "mean_ms": 0.0352,
-      "median_ms": 0.0387,
-      "p50_ms": 0.0387,
-      "p95_ms": 0.0434,
-      "p99_ms": 0.0534,
-      "min_ms": 0.0206,
-      "max_ms": 0.0584,
-      "throughput_rec_sec": 28419.9
+      "mean_ms": 0.037,
+      "median_ms": 0.0397,
+      "p50_ms": 0.0397,
+      "p95_ms": 0.0528,
+      "p99_ms": 0.0584,
+      "min_ms": 0.0218,
+      "max_ms": 0.0586,
+      "throughput_rec_sec": 27059.9
     },
     "heuristics": {
-      "mean_ms": 52.7566,
-      "median_ms": 0.0087,
-      "p50_ms": 0.0087,
-      "p95_ms": 241.7852,
-      "p99_ms": 938.8748,
-      "throughput_rec_sec": 19.0
+      "mean_ms": 42.8184,
+      "median_ms": 0.009,
+      "p50_ms": 0.009,
+      "p95_ms": 238.9377,
+      "p99_ms": 729.3573,
+      "throughput_rec_sec": 23.4
     },
     "mock_predictor_measured": {
-      "mean_ms": 0.0042,
+      "mean_ms": 0.0043,
       "median_ms": 0.0038,
-      "throughput_rec_sec": 236406.6,
+      "throughput_rec_sec": 233009.7,
       "forensic_status": "HISTORICAL_PHASE9_MEASUREMENT_SOURCE (MOCK)"
     },
     "urlbert_actual_model": {
@@ -49,16 +49,16 @@
       "forensic_status": "REAL_MODEL_VERIFIED_ON_CPU"
     },
     "risk_fusion": {
-      "mean_ms": 0.0064,
-      "median_ms": 0.0061,
-      "throughput_rec_sec": 155714.7
+      "mean_ms": 0.0067,
+      "median_ms": 0.0063,
+      "throughput_rec_sec": 148876.0
     }
   },
   "latency_comparison_table": [
     {
       "component": "URL Preprocessing",
       "historical_p9": "0.002 ms",
-      "forensic_verified": "0.0352 ms",
+      "forensic_verified": "0.037 ms",
       "status": "VERIFIED_ACCURATE"
     },
     {
@@ -76,7 +76,7 @@
     {
       "component": "Mock Predictor",
       "historical_p9": "0.003 ms",
-      "forensic_verified": "0.0042 ms",
+      "forensic_verified": "0.0043 ms",
       "status": "CONFIRMED_ROOT_CAUSE"
     }
   ]

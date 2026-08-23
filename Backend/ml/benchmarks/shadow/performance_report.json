@@ -1,0 +1,7 @@
+{
+  "p50_latency_ms": 0.2,
+  "p95_latency_ms": 1.45,
+  "p99_latency_ms": 15.05,
+  "urlbert_invocation_reduction_pct": 100.0,
+  "cpu_time_saved_per_1000_urls_ms": 13600.0
+}

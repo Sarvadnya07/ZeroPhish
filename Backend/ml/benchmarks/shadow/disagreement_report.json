@@ -1,0 +1,10 @@
+{
+  "total_disagreements": 0,
+  "potential_false_negatives": 0,
+  "taxonomy_breakdown": {
+    "MATCH": 60,
+    "PRODUCTION_MALICIOUS_CASCADE_SAFE": 0,
+    "PRODUCTION_SAFE_CASCADE_MALICIOUS": 0
+  },
+  "status": "ZERO_POTENTIAL_FN_VALIDATED"
+}

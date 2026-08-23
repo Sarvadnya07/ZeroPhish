@@ -1,7 +1,5 @@
 """
-Controlled URL Cascade Shadow Mode Architecture for Phase 11.
-Executes non-interfering parallel observation with bounded concurrency,
-privacy redaction, timeout protection, disagreement categorization, and aggregate metrics.
+Controlled URL Cascade Shadow Mode Manager.
 """
 
 from __future__ import annotations
@@ -170,7 +168,6 @@ class ShadowCascadeManager:
         host = URLNormalizer.extract_hostname(url)
         host_hash = self._hash_str(host)
 
-        # Capacity Control (Bounded Concurrency)
         if self._semaphore.locked():
             obs = ShadowCascadeObservation(
                 observation_id=obs_id,
@@ -186,14 +183,12 @@ class ShadowCascadeManager:
 
         async with self._semaphore:
             try:
-                # Bounded Timeout Protection
                 timeout_sec = max(0.001, self.timeout_ms / 1000.0)
                 cascade_res: CascadePredictionResult = await asyncio.wait_for(
                     self._cascade.predict_cascade(url),
                     timeout=timeout_sec,
                 )
 
-                # Disagreement Categorization
                 disagreement = False
                 disag_cat = DisagreementCategory.NONE
 
@@ -272,17 +267,14 @@ class ShadowCascadeManager:
         production_verdict: str,
         production_score: float,
     ) -> Optional[asyncio.Task]:
-        """Fire-and-forget background dispatcher for production requests."""
         if not self.enabled:
             return None
 
-        # Configurable Sampling Gate
         if self.sample_rate <= 0.0 or (
             self.sample_rate < 1.0 and random.random() > self.sample_rate
         ):
             return None
 
-        # Dispatch non-blocking task
         return asyncio.create_task(
             self.execute_shadow_task(url, production_verdict, production_score)
         )

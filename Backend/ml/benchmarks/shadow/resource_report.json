@@ -1,0 +1,7 @@
+{
+  "max_concurrency_limit": 10,
+  "bounded_memory_buffer_max": 5000,
+  "memory_leak_detected": false,
+  "unawaited_coroutines_detected": false,
+  "runtime_warnings_count": 0
+}
