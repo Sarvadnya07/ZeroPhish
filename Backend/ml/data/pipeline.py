@@ -480,6 +480,8 @@ def main():
             "evaluate-cascade",
             "audit-cascade",
             "evaluate-shadow",
+            "audit-shadow",
+            "stage-shadow",
         ],
         help="Action to execute",
     )
@@ -492,7 +494,37 @@ def main():
 
     args = parser.parse_args()
 
-    if args.action == "evaluate-shadow":
+    if args.action == "stage-shadow":
+        from ml.shadow.staging import StagingShadowEngine
+
+        print("Executing Real Staging Shadow Evaluation & Tail-Latency Profiling...")
+        res = asyncio.run(StagingShadowEngine.evaluate_real_staging_shadow(count=1000))
+        print(f"\n--- Real Staging Shadow Evaluation Complete ---")
+        print(f"Total Staging Observations: {res['total_observations_count']}")
+        print(
+            f"Tail Outlier Root Cause: {res['tail_latency_forensics']['root_cause_classification']}"
+        )
+        print(
+            f"Warm p50: {res['tail_latency_forensics']['warm_p50_ms']}ms, p95: {res['tail_latency_forensics']['warm_p95_ms']}ms, p99: {res['tail_latency_forensics']['warm_p99_ms']}ms"
+        )
+        print(
+            f"User Response Overhead: {res['user_latency_impact']['user_response_overhead_ms']}ms"
+        )
+        print(f"Recommendation: {res['rollout_recommendation']}")
+
+    elif args.action == "audit-shadow":
+        from ml.shadow.audit import ShadowTelemetryAuditor
+
+        print("Executing Forensic Shadow Telemetry & Statistical Consistency Audit...")
+        res = asyncio.run(ShadowTelemetryAuditor.run_forensic_audit())
+        print(f"\n--- Shadow Telemetry Audit Complete ---")
+        print(f"Total Observations: {res['total_observations']}")
+        print(
+            f"Empirical p50: {res['latency']['p50']}ms, p95: {res['latency']['p95']}ms, p99: {res['latency']['p99']}ms"
+        )
+        print(f"Workload Status: {res['discrepancy_diagnosis']['workload_classification']}")
+
+    elif args.action == "evaluate-shadow":
         from ml.shadow.service import ExtendedShadowService
 
         print("Executing Extended Cascade Shadow Evaluation & Rollout Gates...")

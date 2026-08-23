@@ -153,8 +153,8 @@
   "latency": {
     "preprocessing_ms": 0.003,
     "onnx_inference_ms": 0.001,
-    "urlbert_inference_ms": 0.005,
-    "hybrid_ms": 0.008,
+    "urlbert_inference_ms": 0.004,
+    "hybrid_ms": 0.007,
     "warm_rss_mb": 118.4
   }
 }

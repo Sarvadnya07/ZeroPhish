@@ -33,6 +33,7 @@ class ExtendedShadowObservation(BaseModel):
     observation_id: str
     timestamp: str
     environment: str = "staging"
+    data_provenance: str = "REAL_STAGING"  # "REAL_STAGING" | "BENCHMARK_REPLAY" | "SYNTHETIC_TEST"
     sample_rate: float
     production_verdict: str
     production_score: float
@@ -46,8 +47,14 @@ class ExtendedShadowObservation(BaseModel):
     model_health: str = "MODEL_READY"
     status: ShadowStatus
     total_latency_ms: float = 0.0
-    onnx_latency_ms: float = 0.0
-    urlbert_latency_ms: float = 0.0
+    preprocessing_ms: float = 0.0
+    heuristic_ms: float = 0.0
+    onnx_ms: float = 0.0
+    urlbert_ms: float = 0.0
+    fusion_ms: float = 0.0
+    semaphore_wait_ms: float = 0.0
+    total_wall_ms: float = 0.0
+    is_cold_start: bool = False
     disagreement_type: DisagreementTaxonomy = DisagreementTaxonomy.MATCH
     security_override: Optional[str] = None
     url_hash: str
