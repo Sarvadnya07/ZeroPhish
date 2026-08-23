@@ -1,7 +1,9 @@
 """
 Unit tests for email_scanner/dns_validator.py.
 """
+
 from unittest.mock import MagicMock, patch
+
 import pytest
 
 from email_scanner.dns_validator import DNSAuthRecord, DnsValidator

@@ -2,6 +2,7 @@
 Webhook delivery service — HMAC signing, async dispatch with retry, delivery log.
 Backed by repository abstraction.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -16,11 +17,13 @@ from typing import Any, Dict, List, Optional
 
 try:
     import httpx
+
     HTTPX_AVAILABLE = True
 except ImportError:
     HTTPX_AVAILABLE = False
 
 from repositories.factory import get_webhook_repository
+
 from .models import (
     WebhookDelivery,
     WebhookEvent,
@@ -44,8 +47,11 @@ def _sign(secret: str, payload: bytes) -> str:
 class WebhookService:
 
     @staticmethod
-    def subscribe(data: WebhookSubscriptionCreate, owner_id: Optional[str] = None) -> WebhookSubscription:
+    def subscribe(
+        data: WebhookSubscriptionCreate, owner_id: Optional[str] = None
+    ) -> WebhookSubscription:
         from security.middleware import is_safe_webhook_url
+
         is_dev = os.getenv("ENV", "development") == "development"
         if not is_safe_webhook_url(data.url, allow_http=is_dev):
             raise ValueError(f"Provided webhook URL is unsafe or invalid: {data.url}")
@@ -92,6 +98,7 @@ class WebhookService:
     async def fire(event_type: WebhookEventType, payload: Dict[str, Any]) -> None:
         """Dispatch event to all matching, enabled subscriptions (fire-and-forget)."""
         import asyncio
+
         repo = get_webhook_repository()
         targets = [s for s in repo.list_subscriptions() if s.enabled and event_type in s.events]
         tasks = [WebhookService._deliver(s, event_type, payload) for s in targets]

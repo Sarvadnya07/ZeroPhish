@@ -5,6 +5,7 @@ DEPRECATION NOTICE:
 `Backend/gateway.py` is the CANONICAL application entry point for ZeroPhish (Port 8001).
 This module is preserved as a backwards-compatibility delegation shim for tests and existing tooling.
 """
+
 from __future__ import annotations
 
 import logging
@@ -27,6 +28,7 @@ app = gateway_app
 
 
 # ── Legacy Pure Helper Functions & Models (Preserved for Tests) ───────────────
+
 
 class BertRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=4000)
@@ -153,5 +155,7 @@ def _coerce_extension_report(report: dict[str, Any]) -> Tier1Report:
 if __name__ == "__main__":
     import uvicorn
 
-    print("⚠️ NOTICE: Backend/main.py is deprecated. Delegating to Backend/gateway.py on Port 8001...")
+    print(
+        "⚠️ NOTICE: Backend/main.py is deprecated. Delegating to Backend/gateway.py on Port 8001..."
+    )
     uvicorn.run("gateway:app", host="0.0.0.0", port=8001, log_level="info")

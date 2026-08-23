@@ -112,7 +112,9 @@ class WhoisClient:
             logger.debug(f"❌ Library lookup failed for {domain}: {e}")
             return None
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=5), reraise=True)
+    @retry(
+        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=5), reraise=True
+    )
     async def _get_from_api(self, domain: str) -> Optional[int]:
         """Get domain age using WHOIS API with retry logic."""
         logger.debug(f"🌐 Trying WHOIS API ({self.api_provider}) for: {domain}")

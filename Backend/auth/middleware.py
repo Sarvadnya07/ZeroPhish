@@ -50,7 +50,7 @@ def require_auth(
     if is_cookie and request.method in ("POST", "PUT", "DELETE", "PATCH"):
         origin = request.headers.get("origin")
         referer = request.headers.get("referer")
-        
+
         # Check against allowed origins or request host
         allowed = os.getenv("ALLOWED_ORIGINS", "").split(",")
         allowed = [o.strip() for o in allowed if o.strip()]
@@ -58,12 +58,25 @@ def require_auth(
 
         if origin:
             parsed_origin = urllib.parse.urlparse(origin).netloc
-            if origin not in allowed and parsed_origin != host and "localhost" not in parsed_origin and "127.0.0.1" not in parsed_origin:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF origin check failed")
+            if (
+                origin not in allowed
+                and parsed_origin != host
+                and "localhost" not in parsed_origin
+                and "127.0.0.1" not in parsed_origin
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail="CSRF origin check failed"
+                )
         elif referer:
             parsed_ref = urllib.parse.urlparse(referer).netloc
-            if parsed_ref != host and "localhost" not in parsed_ref and "127.0.0.1" not in parsed_ref:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF referer check failed")
+            if (
+                parsed_ref != host
+                and "localhost" not in parsed_ref
+                and "127.0.0.1" not in parsed_ref
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail="CSRF referer check failed"
+                )
 
     user_db = AuthService.validate_token(token)
     if not user_db:
@@ -77,6 +90,7 @@ def require_auth(
 
 def require_role(*roles: UserRole):
     """Dependency factory: restricts endpoint to specific roles."""
+
     def _check(current_user: User = Depends(require_auth)) -> User:
         if current_user.role not in roles:
             raise HTTPException(
@@ -84,10 +98,10 @@ def require_role(*roles: UserRole):
                 detail=f"Requires one of roles: {[r.value for r in roles]}",
             )
         return current_user
+
     return _check
 
 
 # Convenience aliases
 require_admin = require_role(UserRole.ADMIN)
 require_analyst = require_role(UserRole.ADMIN, UserRole.ANALYST)
-

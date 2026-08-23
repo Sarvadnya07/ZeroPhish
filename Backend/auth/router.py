@@ -12,14 +12,17 @@ Auth router — /auth/* endpoints:
   PATCH /admin/users/{id}  (admin only)
   DELETE /admin/users/{id} (admin only)
 """
+
 from __future__ import annotations
 
 import os
-from typing import Optional, Annotated
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, Path
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
 
-from .middleware import _get_token, require_auth, require_admin
+from security.dependencies import limiter
+
+from .middleware import _get_token, require_admin, require_auth
 from .models import (
     MFAVerify,
     OAuthCallback,
@@ -33,12 +36,12 @@ from .models import (
     verify_password,
 )
 from .service import AuthService, _users_by_id
-from security.dependencies import limiter
 
 router = APIRouter(tags=["auth"])
 
 
 # ── Public ────────────────────────────────────────────────────────────────────
+
 
 @router.post("/auth/register", response_model=User, status_code=201)
 @limiter.limit("3/minute")
@@ -89,8 +92,8 @@ def logout(
     return None
 
 
-
 # ── Authenticated user self-service ──────────────────────────────────────────
+
 
 @router.get("/auth/me", response_model=User)
 def me(current_user: User = Depends(require_auth)):
@@ -110,10 +113,12 @@ def change_password(req: PasswordChangeRequest, current_user: User = Depends(req
     if not user_db or not verify_password(req.current_password, user_db.password_hash):
         raise HTTPException(status_code=400, detail="Current password incorrect")
     from .models import hash_password
+
     user_db.password_hash = hash_password(req.new_password)
 
 
 # ── MFA ───────────────────────────────────────────────────────────────────────
+
 
 @router.post("/auth/mfa/setup")
 def mfa_setup(current_user: User = Depends(require_auth)):
@@ -130,6 +135,7 @@ def mfa_verify(body: MFAVerify, current_user: User = Depends(require_auth)):
 
 # ── OAuth ─────────────────────────────────────────────────────────────────────
 
+
 @router.post("/auth/oauth/callback", response_model=Token)
 def oauth_callback(body: OAuthCallback):
     try:
@@ -139,6 +145,7 @@ def oauth_callback(body: OAuthCallback):
 
 
 # ── Admin user management ─────────────────────────────────────────────────────
+
 
 @router.get("/admin/users", response_model=list[User])
 def list_users(role: Optional[str] = None, _: User = Depends(require_admin)):

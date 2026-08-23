@@ -1,15 +1,17 @@
 """Security Awareness Training — models."""
+
 from __future__ import annotations
 
 from enum import Enum
 from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
 
 
 class LessonDifficulty(str, Enum):
-    BEGINNER     = "beginner"
+    BEGINNER = "beginner"
     INTERMEDIATE = "intermediate"
-    ADVANCED     = "advanced"
+    ADVANCED = "advanced"
 
 
 class QuizQuestion(BaseModel):
@@ -25,8 +27,8 @@ class Lesson(BaseModel):
     title: str
     description: str
     difficulty: LessonDifficulty
-    category: str           # "phishing" | "spear_phishing" | "smishing" | "bec" | ...
-    content_md: str         # Markdown lesson body
+    category: str  # "phishing" | "spear_phishing" | "smishing" | "bec" | ...
+    content_md: str  # Markdown lesson body
     quiz: List[QuizQuestion]
     xp_reward: int = 100
     estimated_minutes: int = 10
@@ -45,8 +47,8 @@ class LessonCreate(BaseModel):
 
 
 class CampaignStatus(str, Enum):
-    DRAFT    = "draft"
-    ACTIVE   = "active"
+    DRAFT = "draft"
+    ACTIVE = "active"
     COMPLETE = "complete"
 
 
@@ -81,7 +83,7 @@ class LeaderboardEntry(BaseModel):
     xp: int
     lessons_completed: int
     campaigns_reported: int
-    detection_score: float   # % of simulated phishing correctly identified
+    detection_score: float  # % of simulated phishing correctly identified
 
 
 class AwarenessProgress(BaseModel):
@@ -89,7 +91,7 @@ class AwarenessProgress(BaseModel):
     xp: int = 0
     level: int = 1
     lessons_completed: List[str] = Field(default_factory=list)
-    quiz_scores: Dict[str, int] = Field(default_factory=dict)   # lesson_id → score %
+    quiz_scores: Dict[str, int] = Field(default_factory=dict)  # lesson_id → score %
     campaigns_clicked: List[str] = Field(default_factory=list)  # campaign IDs clicked
     campaigns_reported: List[str] = Field(default_factory=list)
     detection_score: float = 0.0
@@ -97,4 +99,4 @@ class AwarenessProgress(BaseModel):
 
 
 class QuizSubmit(BaseModel):
-    answers: Dict[str, int]    # question_id → selected_index
+    answers: Dict[str, int]  # question_id → selected_index

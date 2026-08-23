@@ -3,6 +3,7 @@ Tier 2 ML Model Integration.
 Hugging Face DistilBERT model for phishing email detection.
 Safely handles optional torch/transformers dependencies.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 try:
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     torch = None
@@ -40,7 +42,9 @@ class PhishingMLModel:
         self.inference_timeout = inference_timeout
         self.model = None
         self.tokenizer = None
-        self.device = "cuda" if (torch and hasattr(torch, "cuda") and torch.cuda.is_available()) else "cpu"
+        self.device = (
+            "cuda" if (torch and hasattr(torch, "cuda") and torch.cuda.is_available()) else "cpu"
+        )
         self._loaded = False
 
     async def load_model(self) -> bool:
@@ -49,7 +53,9 @@ class PhishingMLModel:
             return True
 
         if not TRANSFORMERS_AVAILABLE or not torch or not AutoTokenizer:
-            logger.warning("Transformers / Torch libraries are not installed. ML model unavailable.")
+            logger.warning(
+                "Transformers / Torch libraries are not installed. ML model unavailable."
+            )
             self._loaded = False
             return False
 
@@ -59,9 +65,7 @@ class PhishingMLModel:
             logger.info("🖥️  Device: %s", self.device)
 
             def _load():
-                tokenizer = AutoTokenizer.from_pretrained(
-                    self.model_name, cache_dir=self.cache_dir
-                )
+                tokenizer = AutoTokenizer.from_pretrained(self.model_name, cache_dir=self.cache_dir)
                 model = AutoModelForSequenceClassification.from_pretrained(
                     self.model_name, cache_dir=self.cache_dir
                 )
@@ -103,7 +107,9 @@ class PhishingMLModel:
                     padding=True,
                 )
                 if hasattr(inputs, "items"):
-                    inputs = {k: (v.to(self.device) if hasattr(v, "to") else v) for k, v in inputs.items()}
+                    inputs = {
+                        k: (v.to(self.device) if hasattr(v, "to") else v) for k, v in inputs.items()
+                    }
 
                 if torch:
                     with torch.no_grad():

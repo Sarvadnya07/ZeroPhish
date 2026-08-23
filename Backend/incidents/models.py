@@ -1,6 +1,7 @@
 """
 Incident data models — ticket lifecycle, severity, analyst workflow.
 """
+
 from __future__ import annotations
 
 import time
@@ -13,19 +14,19 @@ from pydantic import BaseModel, Field
 
 class IncidentSeverity(str, Enum):
     CRITICAL = "critical"
-    HIGH     = "high"
-    MEDIUM   = "medium"
-    LOW      = "low"
-    INFO     = "info"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    INFO = "info"
 
 
 class IncidentStatus(str, Enum):
-    OPEN        = "open"
-    TRIAGING    = "triaging"
+    OPEN = "open"
+    TRIAGING = "triaging"
     IN_PROGRESS = "in_progress"
-    RESOLVED    = "resolved"
-    CLOSED      = "closed"
-    FALSE_POS   = "false_positive"
+    RESOLVED = "resolved"
+    CLOSED = "closed"
+    FALSE_POS = "false_positive"
 
 
 class IncidentComment(BaseModel):
@@ -42,8 +43,8 @@ class Incident(BaseModel):
     description: str
     severity: IncidentSeverity
     status: IncidentStatus = IncidentStatus.OPEN
-    scan_id: Optional[str] = None          # linked gateway scan
-    reporter_id: Optional[str] = None      # user who flagged it
+    scan_id: Optional[str] = None  # linked gateway scan
+    reporter_id: Optional[str] = None  # user who flagged it
     assignee_id: Optional[str] = None
     final_score: Optional[float] = None
     sender: Optional[str] = None

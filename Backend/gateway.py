@@ -3,6 +3,7 @@ ZeroPhish API Gateway & Central Application Server.
 Orchestrates Tier 1 (client), Tier 2 (metadata), and Tier 3 (AI) analysis.
 Final Score = (T1 * 0.2) + (T2 * 0.3) + (T3 * 0.5)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,6 +26,7 @@ from fastapi.security import APIKeyHeader
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+from starlette.background import BackgroundTask
 
 BACKEND_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BACKEND_DIR))
@@ -298,10 +300,13 @@ async def _notify_live_dashboard(res: GatewayScanResponse, sender: str, subject:
     if live_url and "8001" not in live_url:
         try:
             import httpx
+
             async with httpx.AsyncClient() as client:
                 await client.post(live_url, json=payload, timeout=2.0)
         except Exception as e:
-            logging.getLogger(__name__).debug("External live dashboard notify skipped/failed: %s", str(e)[:200])
+            logging.getLogger(__name__).debug(
+                "External live dashboard notify skipped/failed: %s", str(e)[:200]
+            )
 
 
 async def execute_tier2(sender: str, body: str, links: list[str]) -> Tier2Result:
@@ -662,7 +667,7 @@ async def stream_tier1_scans(request: Request) -> StreamingResponse:
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
-        background=BackgroundTasks([cleanup]),
+        background=BackgroundTask(cleanup),
     )
 
 

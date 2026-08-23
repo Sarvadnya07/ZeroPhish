@@ -1,7 +1,9 @@
 """
 Unit tests for email_scanner/attachment_sandbox.py.
 """
+
 import os
+
 import pytest
 
 from email_scanner.attachment_sandbox import AttachmentSandbox

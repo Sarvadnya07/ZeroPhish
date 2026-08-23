@@ -1,15 +1,17 @@
 """
 Analytics models — heatmaps, threat feed, model metrics, false-positive records.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel
 
 
 class ThreatHeatmapEntry(BaseModel):
-    hour: int        # 0-23
-    day: int         # 0 = Monday
+    hour: int  # 0-23
+    day: int  # 0 = Monday
     count: int
     avg_score: float
 
@@ -58,9 +60,9 @@ class PolicyRule(BaseModel):
     name: str
     description: str
     enabled: bool = True
-    condition_type: str   # "score_threshold" | "sender_domain" | "keyword"
+    condition_type: str  # "score_threshold" | "sender_domain" | "keyword"
     condition_value: str
-    action: str           # "block" | "quarantine" | "alert" | "allow"
+    action: str  # "block" | "quarantine" | "alert" | "allow"
     created_by: str
     created_at: str
 

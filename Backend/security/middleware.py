@@ -8,10 +8,10 @@ import re
 import urllib.parse
 from typing import Optional
 
-from fastapi import Request, HTTPException
+from email_validator import EmailNotValidError, validate_email
+from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from email_validator import validate_email, EmailNotValidError
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -72,7 +72,7 @@ def validate_email_address(email: str) -> bool:
     """
     if not email or len(email) > 320:  # RFC 5321
         return False
-    
+
     try:
         # check_deliverability=False avoids performing a DNS lookup during validation
         validate_email(email, check_deliverability=False)
@@ -127,7 +127,6 @@ def is_safe_webhook_url(url: str, allow_http: bool = False) -> bool:
     if scheme == "http" and not allow_http:
         return False
 
-
     hostname = parsed.hostname
     if not hostname:
         return False
@@ -178,7 +177,6 @@ def is_safe_webhook_url(url: str, allow_http: bool = False) -> bool:
 def is_safe_url(url: str, allow_http: bool = False) -> bool:
     """Alias for is_safe_webhook_url for general SSRF checks."""
     return is_safe_webhook_url(url, allow_http=allow_http)
-
 
 
 def sanitize_log_message(message: str) -> str:

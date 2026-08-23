@@ -1,6 +1,7 @@
 """
 ZeroPhish Tier 2 Threat Rules & Pattern Matching Constants.
 """
+
 from __future__ import annotations
 
 import json
@@ -41,38 +42,70 @@ SUSPICIOUS_URLS: List[str] = _PATTERNS.get("SUSPICIOUS_URLS", [])
 
 # Pre-compiled regular expressions
 URGENCY_RE = re.compile(
-    "|".join(map(re.escape, sorted(URGENCY_PATTERNS, key=len, reverse=True))) if URGENCY_PATTERNS else "$^"
+    "|".join(map(re.escape, sorted(URGENCY_PATTERNS, key=len, reverse=True)))
+    if URGENCY_PATTERNS
+    else "$^"
 )
 FINANCIAL_RE = re.compile(
-    "|".join(map(re.escape, sorted(FINANCIAL_PATTERNS, key=len, reverse=True))) if FINANCIAL_PATTERNS else "$^"
+    "|".join(map(re.escape, sorted(FINANCIAL_PATTERNS, key=len, reverse=True)))
+    if FINANCIAL_PATTERNS
+    else "$^"
 )
 CREDENTIAL_RE = re.compile(
-    "|".join(map(re.escape, sorted(CREDENTIAL_PATTERNS, key=len, reverse=True))) if CREDENTIAL_PATTERNS else "$^"
+    "|".join(map(re.escape, sorted(CREDENTIAL_PATTERNS, key=len, reverse=True)))
+    if CREDENTIAL_PATTERNS
+    else "$^"
 )
 AUTHORITY_RE = re.compile(
-    "|".join(map(re.escape, sorted(AUTHORITY_PATTERNS, key=len, reverse=True))) if AUTHORITY_PATTERNS else "$^"
+    "|".join(map(re.escape, sorted(AUTHORITY_PATTERNS, key=len, reverse=True)))
+    if AUTHORITY_PATTERNS
+    else "$^"
 )
 SCARE_RE = re.compile(
-    "|".join(map(re.escape, sorted(SCARE_TACTICS, key=len, reverse=True))) if SCARE_TACTICS else "$^"
+    "|".join(map(re.escape, sorted(SCARE_TACTICS, key=len, reverse=True)))
+    if SCARE_TACTICS
+    else "$^"
 )
 SUSPICIOUS_URLS_RE = re.compile(
-    "|".join(map(re.escape, sorted(SUSPICIOUS_URLS, key=len, reverse=True))) if SUSPICIOUS_URLS else "$^"
+    "|".join(map(re.escape, sorted(SUSPICIOUS_URLS, key=len, reverse=True)))
+    if SUSPICIOUS_URLS
+    else "$^"
 )
 
 IP_LINK_REGEX = re.compile(r"https?://\d{1,3}(?:\.\d{1,3}){3}(?:[:/]|$)")
-SUSPICIOUS_TLD_REGEX = re.compile(
-    r"\.(zip|mov|top|xyz|click|country|stream|gq|tk|ml|ga|cf)(?:/|$)"
-)
+SUSPICIOUS_TLD_REGEX = re.compile(r"\.(zip|mov|top|xyz|click|country|stream|gq|tk|ml|ga|cf)(?:/|$)")
 
 TOP_50_SPOOFED: Set[str] = set(
     _PATTERNS.get(
         "TOP_50_SPOOFED",
         [
-            "paypal.com", "apple.com", "microsoft.com", "google.com", "amazon.com", "netflix.com",
-            "facebook.com", "chase.com", "wellsfargo.com", "bankofamerica.com", "github.com",
-            "linkedin.com", "dropbox.com", "docusign.com", "adobe.com", "instagram.com",
-            "yahoo.com", "outlook.com", "office.com", "live.com", "amazonaws.com",
-            "twitter.com", "x.com", "salesforce.com", "slack.com", "zoom.us", "citi.com",
+            "paypal.com",
+            "apple.com",
+            "microsoft.com",
+            "google.com",
+            "amazon.com",
+            "netflix.com",
+            "facebook.com",
+            "chase.com",
+            "wellsfargo.com",
+            "bankofamerica.com",
+            "github.com",
+            "linkedin.com",
+            "dropbox.com",
+            "docusign.com",
+            "adobe.com",
+            "instagram.com",
+            "yahoo.com",
+            "outlook.com",
+            "office.com",
+            "live.com",
+            "amazonaws.com",
+            "twitter.com",
+            "x.com",
+            "salesforce.com",
+            "slack.com",
+            "zoom.us",
+            "citi.com",
         ],
     )
 )
@@ -81,7 +114,15 @@ URL_SHORTENERS: Set[str] = set(
     _PATTERNS.get(
         "URL_SHORTENERS",
         [
-            "bit.ly", "t.co", "tinyurl.com", "goo.gl", "ow.ly", "is.gd", "buff.ly", "cutt.ly", "rebrand.ly"
+            "bit.ly",
+            "t.co",
+            "tinyurl.com",
+            "goo.gl",
+            "ow.ly",
+            "is.gd",
+            "buff.ly",
+            "cutt.ly",
+            "rebrand.ly",
         ],
     )
 )

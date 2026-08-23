@@ -185,7 +185,9 @@ class CircuitBreaker:
             if self._failure_count >= self.failure_threshold:
                 self._transition_to(CircuitState.OPEN)
                 self._opened_at = now
-                logger.error("Circuit '%s' OPENED after %s failures", self.name, self._failure_count)
+                logger.error(
+                    "Circuit '%s' OPENED after %s failures", self.name, self._failure_count
+                )
 
     def _transition_to(self, new_state: CircuitState) -> None:
         old_state = self._state

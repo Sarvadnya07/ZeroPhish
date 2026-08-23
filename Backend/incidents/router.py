@@ -1,13 +1,14 @@
 """
 Incidents FastAPI router — /incidents/* endpoints.
 """
+
 from __future__ import annotations
 
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from auth.middleware import require_auth, require_analyst
+from auth.middleware import require_analyst, require_auth
 from auth.models import User, UserRole
 from webhooks.models import WebhookEventType
 from webhooks.service import WebhookService
@@ -96,7 +97,8 @@ async def add_comment(
         raise HTTPException(status_code=403, detail="Forbidden")
 
     inc = IncidentService.add_comment(
-        incident_id, body,
+        incident_id,
+        body,
         author_id=current_user.id,
         author_name=current_user.full_name,
     )

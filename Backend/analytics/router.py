@@ -1,10 +1,12 @@
 """Analytics FastAPI router — /analytics/* and /admin/* endpoints."""
+
 from __future__ import annotations
 
 from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
 
-from auth.middleware import require_auth, require_admin, require_analyst
+from auth.middleware import require_admin, require_analyst, require_auth
 from auth.models import User
 
 from .models import FalsePositiveReport, PolicyRuleCreate
@@ -14,6 +16,7 @@ router = APIRouter(tags=["analytics"])
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
+
 
 @router.get("/admin/dashboard")
 async def admin_dashboard(_: User = Depends(require_analyst)):
@@ -36,6 +39,7 @@ async def model_metrics(_: User = Depends(require_analyst)):
 
 
 # ── False-positive review ─────────────────────────────────────────────────────
+
 
 @router.get("/analytics/false-positives")
 async def list_false_positives(
@@ -76,6 +80,7 @@ async def review_false_positive(
 
 # ── Policy management ─────────────────────────────────────────────────────────
 
+
 @router.get("/admin/policies")
 async def list_policies(_: User = Depends(require_admin)):
     return AnalyticsService.list_policies()
@@ -93,6 +98,7 @@ async def delete_policy(rule_id: str, _: User = Depends(require_admin)):
 
 
 # ── Per-user history & risk ───────────────────────────────────────────────────
+
 
 @router.get("/user/history")
 async def my_scan_history(limit: int = 100, current_user: User = Depends(require_auth)):

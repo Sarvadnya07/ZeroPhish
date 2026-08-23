@@ -1,6 +1,7 @@
 """
 SQLAlchemy 2.x ORM models for durable storage across ZeroPhish domains.
 """
+
 from __future__ import annotations
 
 import json
@@ -59,7 +60,9 @@ class IncidentDB(Base):
     updated_at = Column(String(64), nullable=False)
     resolved_at = Column(String(64), nullable=True)
 
-    comments = relationship("IncidentCommentDB", back_populates="incident", cascade="all, delete-orphan")
+    comments = relationship(
+        "IncidentCommentDB", back_populates="incident", cascade="all, delete-orphan"
+    )
 
 
 class IncidentCommentDB(Base):
@@ -142,7 +145,9 @@ class WebhookDeliveryDB(Base):
     __tablename__ = "webhook_deliveries"
 
     id = Column(String(64), primary_key=True, index=True)
-    subscription_id = Column(String(64), ForeignKey("webhook_subscriptions.id"), nullable=False, index=True)
+    subscription_id = Column(
+        String(64), ForeignKey("webhook_subscriptions.id"), nullable=False, index=True
+    )
     event_type = Column(String(64), nullable=False)
     payload_json = Column(Text, nullable=False)
     status = Column(String(32), nullable=False)

@@ -3,10 +3,12 @@ Tests for webhooks — SSRF URL validation, subscription lifecycle,
 role restriction, and delivery log.
 Extends existing test_webhooks.py tests for _sign.
 """
+
 import hashlib
 import hmac
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from webhooks.service import _sign
 
@@ -44,38 +46,46 @@ def test_sign_with_empty_secret_and_payload():
 
 # ── SSRF validator unit tests ──────────────────────────────────────────────────
 
+
 def test_ssrf_blocks_loopback():
     from security.middleware import is_safe_webhook_url
+
     assert is_safe_webhook_url("http://127.0.0.1/hook", allow_http=True) is False
 
 
 def test_ssrf_blocks_localhost():
     from security.middleware import is_safe_webhook_url
+
     assert is_safe_webhook_url("http://localhost/hook", allow_http=True) is False
 
 
 def test_ssrf_blocks_private_rfc1918_192():
     from security.middleware import is_safe_webhook_url
+
     assert is_safe_webhook_url("http://192.168.1.1/hook", allow_http=True) is False
 
 
 def test_ssrf_blocks_private_rfc1918_10():
     from security.middleware import is_safe_webhook_url
+
     assert is_safe_webhook_url("http://10.0.0.1/hook", allow_http=True) is False
 
 
 def test_ssrf_blocks_private_rfc1918_172():
     from security.middleware import is_safe_webhook_url
+
     assert is_safe_webhook_url("http://172.16.0.1/hook", allow_http=True) is False
 
 
 def test_ssrf_blocks_link_local_metadata():
     from security.middleware import is_safe_webhook_url
+
     assert is_safe_webhook_url("http://169.254.169.254/latest/meta-data/", allow_http=True) is False
 
 
 def test_ssrf_blocks_ftp_scheme():
     from security.middleware import is_safe_webhook_url
+
     assert is_safe_webhook_url("ftp://example.com/hook", allow_http=True) is False
 
 
@@ -84,19 +94,23 @@ def test_ssrf_allows_public_https():
     mock_addrinfo = [(None, None, None, None, ("1.1.1.1", 443))]
     with patch("socket.getaddrinfo", return_value=mock_addrinfo):
         from security.middleware import is_safe_webhook_url
+
         assert is_safe_webhook_url("https://example.com/hook", allow_http=True) is True
 
 
 def test_ssrf_blocks_http_in_production():
     from security.middleware import is_safe_webhook_url
+
     # allow_http=False rejects http:// even to public hosts
     assert is_safe_webhook_url("http://1.1.1.1/hook", allow_http=False) is False
 
 
 # ── WebhookService unit tests ─────────────────────────────────────────────────
 
+
 def _make_subscription_data():
-    from webhooks.models import WebhookSubscriptionCreate, WebhookEventType
+    from webhooks.models import WebhookEventType, WebhookSubscriptionCreate
+
     return WebhookSubscriptionCreate(
         url="https://example.com/hook",
         events=[WebhookEventType.INCIDENT_CREATED],
@@ -121,8 +135,8 @@ def test_webhook_subscribe_valid_url():
 
 
 def test_webhook_subscribe_invalid_url_raises():
+    from webhooks.models import WebhookEventType, WebhookSubscriptionCreate
     from webhooks.service import WebhookService
-    from webhooks.models import WebhookSubscriptionCreate, WebhookEventType
 
     data = WebhookSubscriptionCreate(
         url="http://127.0.0.1:9999/evil",

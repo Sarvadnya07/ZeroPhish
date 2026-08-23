@@ -1,4 +1,10 @@
-# main.py - Speed Layer + Intent Threat Analysis + ML Model Integration
+"""
+DEPRECATION NOTICE:
+`tier_2/main.py` was the legacy standalone Tier 2 server.
+The canonical production application server is `Backend/gateway.py` (Port 8001).
+All core threat detection logic has been refactored into `tier_2.analyzer`, `tier_2.rules`, and `tier_2.domain_intel`.
+"""
+
 import asyncio
 import json
 import logging
@@ -19,6 +25,9 @@ from pydantic import BaseModel
 # Configure logging FIRST before using logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logger.warning(
+    "DEPRECATION WARNING: tier_2/main.py is deprecated. Use Backend/gateway.py (Port 8001)."
+)
 
 # Security imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -112,9 +121,7 @@ app.add_middleware(RequestSizeLimitMiddleware, max_size=1_000_000)  # 1MB limit
 # CORS Configuration - Environment-based
 ALLOWED_ORIGINS = [
     origin.strip()
-    for origin in os.getenv("ALLOWED_ORIGINS", "").split(
-        ","
-    )
+    for origin in os.getenv("ALLOWED_ORIGINS", "").split(",")
     if origin.strip() and origin.strip() != "chrome-extension://*"
 ]
 
@@ -178,7 +185,6 @@ from tier_2.rules import (
     SUSPICIOUS_URLS,
     URGENCY_PATTERNS,
 )
-
 
 # --- SPEED LAYER (REDIS) ---
 

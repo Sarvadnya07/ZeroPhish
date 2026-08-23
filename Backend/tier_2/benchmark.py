@@ -1,5 +1,5 @@
-import time
 import re
+import time
 
 # Simulate a typical load: 10,000 links
 links = [

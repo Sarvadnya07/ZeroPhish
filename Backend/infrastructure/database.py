@@ -2,6 +2,7 @@
 Database engine, session management, and Base model for SQLAlchemy 2.x.
 Supports SQLite (local dev/test) and PostgreSQL (production).
 """
+
 from __future__ import annotations
 
 import os

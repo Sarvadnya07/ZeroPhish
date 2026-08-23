@@ -1,6 +1,7 @@
 """
 ML Predictor interface and deterministic mock predictors for testing and inference.
 """
+
 from __future__ import annotations
 
 import logging
@@ -15,8 +16,7 @@ class TextPredictor(Protocol):
         """Return (threat_score 0-100, confidence_category 'phishing'|'safe'|'spam')."""
         ...
 
-    def is_loaded(self) -> bool:
-        ...
+    def is_loaded(self) -> bool: ...
 
 
 class MockPhishingPredictor:

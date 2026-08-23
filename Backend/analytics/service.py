@@ -2,6 +2,7 @@
 Analytics & Policy service — Repository-backed scan telemetry, heatmaps, threat feed,
 model metrics, false-positive review, and policy rule engine.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -10,6 +11,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from repositories.factory import get_analytics_repository
+
 from .models import (
     AdminDashboardSummary,
     FalsePositiveReport,
@@ -40,21 +42,23 @@ class AnalyticsService:
         ts = time.time()
         dt = _dt.datetime.now(_dt.timezone.utc)
         repo = get_analytics_repository()
-        repo.record_scan_event({
-            "scan_id": scan_id,
-            "timestamp": dt.isoformat(),
-            "ts": ts,
-            "hour": dt.hour,
-            "day": dt.weekday(),
-            "sender_domain": sender.split("@")[-1] if "@" in sender else sender,
-            "subject": subject[:80],
-            "final_score": final_score,
-            "verdict": verdict,
-            "category": category,
-            "tier1_score": tier1,
-            "tier2_score": tier2,
-            "tier3_score": tier3,
-        })
+        repo.record_scan_event(
+            {
+                "scan_id": scan_id,
+                "timestamp": dt.isoformat(),
+                "ts": ts,
+                "hour": dt.hour,
+                "day": dt.weekday(),
+                "sender_domain": sender.split("@")[-1] if "@" in sender else sender,
+                "subject": subject[:80],
+                "final_score": final_score,
+                "verdict": verdict,
+                "category": category,
+                "tier1_score": tier1,
+                "tier2_score": tier2,
+                "tier3_score": tier3,
+            }
+        )
 
     # ── Dashboard summary ─────────────────────────────────────────────────────
 
@@ -65,6 +69,7 @@ class AnalyticsService:
 
         try:
             from incidents.service import IncidentService
+
             inc_stats = IncidentService.stats()
             summary.open_incidents = inc_stats.get("open", 0)
         except Exception:
@@ -126,7 +131,9 @@ class AnalyticsService:
         return repo.list_false_positives(reviewed=reviewed)
 
     @staticmethod
-    def review_false_positive(fp_id: str, reviewer_id: str, resolution: str) -> Optional[FalsePositiveReport]:
+    def review_false_positive(
+        fp_id: str, reviewer_id: str, resolution: str
+    ) -> Optional[FalsePositiveReport]:
         repo = get_analytics_repository()
         return repo.review_false_positive(fp_id, reviewer_id, resolution)
 

@@ -1,10 +1,13 @@
-from pydantic import BaseModel
 from typing import List, Optional
+
+from pydantic import BaseModel
+
 
 class VisionAnalysisRequest(BaseModel):
     image_data_b64: str
     url: Optional[str] = None
     title: Optional[str] = None
+
 
 class BoundingBox(BaseModel):
     x: int
@@ -12,10 +15,12 @@ class BoundingBox(BaseModel):
     width: int
     height: int
 
+
 class DetectedElement(BaseModel):
     class_name: str
     confidence: float
     box: Optional[BoundingBox] = None
+
 
 class VisionAnalysisResult(BaseModel):
     is_phishing: bool

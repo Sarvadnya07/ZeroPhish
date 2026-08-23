@@ -1,11 +1,13 @@
-import time
 import re
+import time
 
 # Simulate a typical load: 10,000 links
 links = [
-    f"http://192.168.1.{i}/index.html" if i % 10 == 0
-    else f"http://example.zip/page{i}" if i % 15 == 0
-    else f"http://example.com/page{i}"
+    (
+        f"http://192.168.1.{i}/index.html"
+        if i % 10 == 0
+        else f"http://example.zip/page{i}" if i % 15 == 0 else f"http://example.com/page{i}"
+    )
     for i in range(10000)
 ]
 

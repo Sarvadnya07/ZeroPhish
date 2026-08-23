@@ -4,6 +4,7 @@ Full dynamic sandboxing (Cuckoo / ANY.RUN) requires external integrations;
 this module does local static triage: magic bytes, YARA-like signature matching,
 entropy scoring, and macro detection in Office documents.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -17,25 +18,25 @@ class SandboxReport(BaseModel):
     filename: str
     sha256: str
     size_bytes: int
-    magic_type: Optional[str] = None     # detected by magic bytes
-    entropy: float = 0.0                 # high entropy → packed/encrypted
+    magic_type: Optional[str] = None  # detected by magic bytes
+    entropy: float = 0.0  # high entropy → packed/encrypted
     has_macros: bool = False
     signatures_matched: List[str] = []
-    risk_level: str = "safe"             # "safe" | "suspicious" | "dangerous"
+    risk_level: str = "safe"  # "safe" | "suspicious" | "dangerous"
     risk_reasons: List[str] = []
-    vt_link: Optional[str] = None        # VirusTotal search URL
+    vt_link: Optional[str] = None  # VirusTotal search URL
 
 
 # Simple magic byte signatures
 _MAGIC = {
-    b"\x4d\x5a":                     "Windows PE (EXE/DLL)",
-    b"\x7f\x45\x4c\x46":             "Linux ELF",
-    b"\xca\xfe\xba\xbe":             "Java class",
-    b"\xd0\xcf\x11\xe0":             "MS Office (OLE)",
-    b"\x50\x4b\x03\x04":             "ZIP archive",
-    b"\x52\x61\x72\x21\x1a\x07":    "RAR archive",
-    b"\x25\x50\x44\x46":             "PDF",
-    b"\x1f\x8b":                     "GZIP",
+    b"\x4d\x5a": "Windows PE (EXE/DLL)",
+    b"\x7f\x45\x4c\x46": "Linux ELF",
+    b"\xca\xfe\xba\xbe": "Java class",
+    b"\xd0\xcf\x11\xe0": "MS Office (OLE)",
+    b"\x50\x4b\x03\x04": "ZIP archive",
+    b"\x52\x61\x72\x21\x1a\x07": "RAR archive",
+    b"\x25\x50\x44\x46": "PDF",
+    b"\x1f\x8b": "GZIP",
 }
 
 _MACRO_SIGNATURES = [
@@ -57,7 +58,9 @@ class AttachmentSandbox:
         magic = AttachmentSandbox._detect_magic(data)
         entropy = AttachmentSandbox._shannon_entropy(data)
         has_macros = AttachmentSandbox._scan_macros(data)
-        sigs, risk, reasons = AttachmentSandbox._risk_verdict(filename, magic, entropy, has_macros, data)
+        sigs, risk, reasons = AttachmentSandbox._risk_verdict(
+            filename, magic, entropy, has_macros, data
+        )
 
         vt_link = f"https://www.virustotal.com/gui/file/{sha}" if sha else None
 
@@ -77,7 +80,7 @@ class AttachmentSandbox:
     @staticmethod
     def _detect_magic(data: bytes) -> Optional[str]:
         for sig, label in _MAGIC.items():
-            if data[:len(sig)] == sig:
+            if data[: len(sig)] == sig:
                 return label
         return None
 
@@ -86,6 +89,7 @@ class AttachmentSandbox:
         if not data:
             return 0.0
         import math
+
         freq = [0] * 256
         for b in data:
             freq[b] += 1
@@ -113,7 +117,8 @@ class AttachmentSandbox:
         data: bytes,
     ) -> tuple[List[str], str, List[str]]:
         import os
-        ext  = os.path.splitext(filename.lower())[1]
+
+        ext = os.path.splitext(filename.lower())[1]
         sigs: List[str] = []
         reasons: List[str] = []
 
@@ -137,9 +142,12 @@ class AttachmentSandbox:
             reasons.append(f"Dangerous file extension: {ext}")
 
         if reasons:
-            risk = "dangerous" if (magic in ("Windows PE (EXE/DLL)", "Linux ELF") or has_macros or "RTLO" in sigs) else "suspicious"
+            risk = (
+                "dangerous"
+                if (magic in ("Windows PE (EXE/DLL)", "Linux ELF") or has_macros or "RTLO" in sigs)
+                else "suspicious"
+            )
         else:
             risk = "safe"
-
 
         return sigs, risk, reasons

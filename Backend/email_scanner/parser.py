@@ -2,6 +2,7 @@
 Enhanced Email Scanner — .eml parsing, SPF/DKIM/DMARC validation,
 attachment triage, recursive link extraction.
 """
+
 from __future__ import annotations
 
 import email
@@ -17,19 +18,19 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Pydantic result models
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class HeaderAuthResult(BaseModel):
-    spf: str          # "pass" | "fail" | "softfail" | "neutral" | "unknown"
-    dkim: str         # "pass" | "fail" | "none" | "unknown"
-    dmarc: str        # "pass" | "fail" | "none" | "unknown"
+    spf: str  # "pass" | "fail" | "softfail" | "neutral" | "unknown"
+    dkim: str  # "pass" | "fail" | "none" | "unknown"
+    dmarc: str  # "pass" | "fail" | "none" | "unknown"
     spf_domain: Optional[str] = None
     dkim_selector: Optional[str] = None
     dmarc_policy: Optional[str] = None
-    score_penalty: int = 0   # 0–40 added to Tier 2 score
+    score_penalty: int = 0  # 0–40 added to Tier 2 score
 
 
 class AttachmentInfo(BaseModel):
@@ -40,7 +41,7 @@ class AttachmentInfo(BaseModel):
     is_executable: bool
     is_archive: bool
     is_document: bool
-    risk_level: str   # "safe" | "suspicious" | "dangerous"
+    risk_level: str  # "safe" | "suspicious" | "dangerous"
     risk_reason: Optional[str] = None
 
 
@@ -50,7 +51,7 @@ class EmlParseResult(BaseModel):
     recipients: List[str]
     body_text: str
     body_html: str
-    links: List[str]         # all links extracted (incl. from HTML)
+    links: List[str]  # all links extracted (incl. from HTML)
     attachments: List[AttachmentInfo]
     headers_raw: Dict[str, str]
     auth_results: HeaderAuthResult
@@ -63,8 +64,21 @@ class EmlParseResult(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _EXECUTABLE_EXTS = {
-    ".exe", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".jse", ".wsf",
-    ".scr", ".pif", ".com", ".msi", ".dll", ".hta", ".jar",
+    ".exe",
+    ".bat",
+    ".cmd",
+    ".ps1",
+    ".vbs",
+    ".js",
+    ".jse",
+    ".wsf",
+    ".scr",
+    ".pif",
+    ".com",
+    ".msi",
+    ".dll",
+    ".hta",
+    ".jar",
 }
 _ARCHIVE_EXTS = {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".cab"}
 _DOCUMENT_EXTS = {".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".pdf", ".odt"}
@@ -86,11 +100,11 @@ class EmlParser:
     def parse(raw: bytes) -> EmlParseResult:
         msg: Message = message_from_bytes(raw, policy=email.policy.default)
 
-        subject   = str(msg.get("Subject",""))
-        sender    = str(msg.get("From",""))
+        subject = str(msg.get("Subject", ""))
+        sender = str(msg.get("From", ""))
         recipients = [str(r) for r in (msg.get_all("To") or [])]
-        message_id = str(msg.get("Message-ID","")) or None
-        date       = str(msg.get("Date","")) or None
+        message_id = str(msg.get("Message-ID", "")) or None
+        date = str(msg.get("Date", "")) or None
 
         body_text, body_html, attachments = EmlParser._walk_parts(msg)
         links = EmlParser._extract_links(body_text, body_html)
@@ -119,26 +133,31 @@ class EmlParser:
 
         for part in msg.walk():
             ct = part.get_content_type()
-            cd = str(part.get("Content-Disposition",""))
+            cd = str(part.get("Content-Disposition", ""))
             filename = part.get_filename()
 
             if filename:
-                payload = part.get_payload(decode=True) or b""
-                attachments.append(EmlParser._analyse_attachment(filename, ct, payload))
+                raw_payload = part.get_payload(decode=True)
+                payload_bytes: bytes = raw_payload if isinstance(raw_payload, bytes) else b""
+                attachments.append(EmlParser._analyse_attachment(filename, ct, payload_bytes))
                 continue
 
             if ct == "text/plain" and not body_text:
                 try:
-                    body_text = part.get_payload(decode=True).decode(
-                        part.get_content_charset() or "utf-8", errors="replace"
-                    )
+                    raw_payload = part.get_payload(decode=True)
+                    if isinstance(raw_payload, bytes):
+                        body_text = raw_payload.decode(
+                            part.get_content_charset() or "utf-8", errors="replace"
+                        )
                 except Exception:
                     pass
             elif ct == "text/html" and not body_html:
                 try:
-                    body_html = part.get_payload(decode=True).decode(
-                        part.get_content_charset() or "utf-8", errors="replace"
-                    )
+                    raw_payload = part.get_payload(decode=True)
+                    if isinstance(raw_payload, bytes):
+                        body_html = raw_payload.decode(
+                            part.get_content_charset() or "utf-8", errors="replace"
+                        )
                 except Exception:
                     pass
 
@@ -147,22 +166,31 @@ class EmlParser:
     @staticmethod
     def _analyse_attachment(filename: str, content_type: str, data: bytes) -> AttachmentInfo:
         import os
+
         ext = os.path.splitext(filename.lower())[1]
         sha = hashlib.sha256(data).hexdigest()
         is_exec = ext in _EXECUTABLE_EXTS
         is_arch = ext in _ARCHIVE_EXTS
-        is_doc  = ext in _DOCUMENT_EXTS
+        is_doc = ext in _DOCUMENT_EXTS
 
         # Check for RTLO (Right-to-Left Override) Unicode characters (e.g. U+202E)
         rtlo_chars = {"\u202e", "\u202b", "\u202d", "\u2066", "\u2067", "\u2068", "\u2069"}
         has_rtlo = any(c in filename for c in rtlo_chars)
 
         # Check for MIME executable mismatch
-        exec_mimes = {"application/x-msdownload", "application/x-executable", "application/x-dosexec", "application/x-msdos-program"}
+        exec_mimes = {
+            "application/x-msdownload",
+            "application/x-executable",
+            "application/x-dosexec",
+            "application/x-msdos-program",
+        }
         is_mime_exec = content_type.lower() in exec_mimes
 
         if has_rtlo:
-            risk, reason = "dangerous", f"RTLO (Right-to-Left Override) character detected in filename: {filename!r}"
+            risk, reason = (
+                "dangerous",
+                f"RTLO (Right-to-Left Override) character detected in filename: {filename!r}",
+            )
             is_exec = True
         elif is_mime_exec:
             risk, reason = "dangerous", f"Executable MIME type ({content_type}) detected"
@@ -187,7 +215,6 @@ class EmlParser:
             risk_level=risk,
             risk_reason=reason,
         )
-
 
     @staticmethod
     def _extract_links(text: str, html: str) -> List[str]:
@@ -231,12 +258,12 @@ class EmlParser:
             pat = re.search(rf"{proto}=(\w+)", header)
             return pat.group(1) if pat else "unknown"
 
-        spf   = _extract(ar, "spf") if "spf=" in ar else _extract(rcv_spf, "")
+        spf = _extract(ar, "spf") if "spf=" in ar else _extract(rcv_spf, "")
         if spf == "unknown" and rcv_spf:
             m = _RCV_SPF_RE.match(rcv_spf)
             spf = m.group(1) if m else "unknown"
 
-        dkim  = _extract(ar, "dkim")
+        dkim = _extract(ar, "dkim")
         dmarc = _extract(ar, "dmarc")
 
         # DKIM selector
@@ -249,12 +276,19 @@ class EmlParser:
 
         # Penalty scoring
         penalty = 0
-        if spf in ("fail", "softfail"):   penalty += 15
-        if dkim in ("fail", "none"):      penalty += 10
-        if dmarc in ("fail", "none"):     penalty += 15
+        if spf in ("fail", "softfail"):
+            penalty += 15
+        if dkim in ("fail", "none"):
+            penalty += 10
+        if dmarc in ("fail", "none"):
+            penalty += 15
 
         return HeaderAuthResult(
-            spf=spf, dkim=dkim, dmarc=dmarc,
-            spf_domain=None, dkim_selector=dkim_sel,
-            dmarc_policy=dmarc_pol, score_penalty=penalty,
+            spf=spf,
+            dkim=dkim,
+            dmarc=dmarc,
+            spf_domain=None,
+            dkim_selector=dkim_sel,
+            dmarc_policy=dmarc_pol,
+            score_penalty=penalty,
         )

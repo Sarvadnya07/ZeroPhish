@@ -1,8 +1,10 @@
 """
 Tests for gateway live SSE endpoints, health status, and circuit breaker endpoints.
 """
+
 import asyncio
 import json
+
 import pytest
 from fastapi.testclient import TestClient
 

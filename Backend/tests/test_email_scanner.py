@@ -2,12 +2,15 @@
 Tests for email_scanner — parser attachment triage: RTLO detection,
 MIME mismatch, executable extensions, streaming upload size guard.
 """
+
 import io
+
 import pytest
+
 from email_scanner.parser import EmlParser
 
-
 # ── Attachment triage ──────────────────────────────────────────────────────────
+
 
 def _triage(filename: str, content_type: str, data: bytes = b"x"):
     return EmlParser._analyse_attachment(filename, content_type, data)
@@ -56,18 +59,22 @@ def test_plain_image_is_safe():
 def test_sha256_computed():
     data = b"hello world"
     import hashlib
+
     info = _triage("test.txt", "text/plain", data)
     assert info.sha256 == hashlib.sha256(data).hexdigest()
 
 
 # ── Upload size guard (streaming reader) ──────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_upload_size_guard_rejects_oversized():
     """_read_file_with_limit must reject a file that exceeds max_bytes mid-stream."""
-    from fastapi.exceptions import HTTPException as FastApiHTTPException
-    from email_scanner.router import _read_file_with_limit
     from unittest.mock import AsyncMock, MagicMock
+
+    from fastapi.exceptions import HTTPException as FastApiHTTPException
+
+    from email_scanner.router import _read_file_with_limit
 
     # Build a fake UploadFile that streams 3 × 1 MB chunks
     one_mb = b"A" * (1024 * 1024)
@@ -90,8 +97,9 @@ async def test_upload_size_guard_rejects_oversized():
 
 @pytest.mark.asyncio
 async def test_upload_size_guard_accepts_small_file():
-    from email_scanner.router import _read_file_with_limit
     from unittest.mock import MagicMock
+
+    from email_scanner.router import _read_file_with_limit
 
     small = b"small content"
     chunks = [small, b""]
@@ -112,9 +120,11 @@ async def test_upload_size_guard_accepts_small_file():
 @pytest.mark.asyncio
 async def test_upload_size_guard_content_length_header_checked():
     """Content-Length header alone should trigger early rejection before any read."""
-    from fastapi.exceptions import HTTPException as FastApiHTTPException
-    from email_scanner.router import _read_file_with_limit
     from unittest.mock import MagicMock
+
+    from fastapi.exceptions import HTTPException as FastApiHTTPException
+
+    from email_scanner.router import _read_file_with_limit
 
     upload = MagicMock()
     request = MagicMock()
@@ -126,4 +136,3 @@ async def test_upload_size_guard_content_length_header_checked():
     assert exc_info.value.status_code == 413
     # No reads should have been attempted since header was enough
     upload.read.assert_not_called()
-

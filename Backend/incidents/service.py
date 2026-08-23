@@ -1,6 +1,7 @@
 """
 Incident service — Repository-backed ticket store for Security Operations Centers.
 """
+
 from __future__ import annotations
 
 import time
@@ -8,6 +9,7 @@ import uuid
 from typing import Dict, List, Optional
 
 from repositories.factory import get_incident_repository
+
 from .models import (
     Incident,
     IncidentComment,
@@ -86,7 +88,9 @@ class IncidentService:
         reporter_id: Optional[str] = None,
     ) -> List[Incident]:
         repo = get_incident_repository()
-        return repo.list_all(status=status, severity=severity, assignee_id=assignee_id, reporter_id=reporter_id)
+        return repo.list_all(
+            status=status, severity=severity, assignee_id=assignee_id, reporter_id=reporter_id
+        )
 
     @staticmethod
     def update(incident_id: str, update: IncidentUpdate) -> Optional[Incident]:

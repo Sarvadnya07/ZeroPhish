@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from auth.middleware import require_auth
 from auth.models import User
 from security.dependencies import limiter
+
 from .models import VisionAnalysisRequest, VisionAnalysisResult
 from .service import VisionService
 
@@ -32,4 +33,3 @@ async def analyze_screenshot(
     except Exception:
         # Do not expose internal error details to clients
         raise HTTPException(status_code=500, detail="Vision analysis failed")
-

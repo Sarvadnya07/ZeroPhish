@@ -1,9 +1,10 @@
 """Security awareness FastAPI router — /awareness/* endpoints."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from auth.middleware import require_auth, require_admin, require_analyst
+from auth.middleware import require_admin, require_analyst, require_auth
 from auth.models import User
 
 from .models import CampaignCreate, LessonCreate, QuizSubmit
@@ -13,6 +14,7 @@ router = APIRouter(prefix="/awareness", tags=["awareness"])
 
 
 # ── Lessons ───────────────────────────────────────────────────────────────────
+
 
 @router.get("/lessons")
 async def list_lessons(_: User = Depends(require_auth)):
@@ -34,6 +36,7 @@ async def create_lesson(data: LessonCreate, _: User = Depends(require_admin)):
 
 # ── Quiz ─────────────────────────────────────────────────────────────────────
 
+
 @router.post("/lessons/{lesson_id}/quiz")
 async def submit_quiz(
     lesson_id: str,
@@ -48,6 +51,7 @@ async def submit_quiz(
 
 # ── Progress ──────────────────────────────────────────────────────────────────
 
+
 @router.get("/progress")
 async def my_progress(current_user: User = Depends(require_auth)):
     return AwarenessService.get_progress(current_user.id)
@@ -60,12 +64,14 @@ async def user_progress(user_id: str, _: User = Depends(require_analyst)):
 
 # ── Leaderboard ───────────────────────────────────────────────────────────────
 
+
 @router.get("/leaderboard")
 async def leaderboard(limit: int = 20, _: User = Depends(require_auth)):
     return AwarenessService.leaderboard(limit=min(limit, 100))
 
 
 # ── Simulated campaigns ───────────────────────────────────────────────────────
+
 
 @router.get("/campaigns")
 async def list_campaigns(_: User = Depends(require_analyst)):

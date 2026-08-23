@@ -1,22 +1,23 @@
 ﻿import logging
+
 from security.audit_logger import (
-    log_login_success,
-    log_login_failure,
-    log_logout,
-    log_register,
-    log_mfa_success,
-    log_mfa_failure,
-    log_authz_denied,
-    log_authz_csrf_blocked,
     log_admin_action,
+    log_authz_csrf_blocked,
+    log_authz_denied,
+    log_config_error,
+    log_login_failure,
+    log_login_success,
+    log_logout,
+    log_mfa_failure,
+    log_mfa_success,
     log_rate_limited,
+    log_register,
     log_ssrf_blocked,
-    log_upload_rejected,
+    log_startup_warning,
     log_upload_accepted,
+    log_upload_rejected,
     log_webhook_delivery_failed,
     log_webhook_ssrf_blocked,
-    log_config_error,
-    log_startup_warning,
 )
 
 

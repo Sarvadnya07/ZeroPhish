@@ -2,6 +2,7 @@
 ThreatAnalyzer — Core detection engine decomposed into clean, cohesive analysis stages.
 Pure library independent of web frameworks, server startup, and ports.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -34,21 +35,18 @@ from .rules import (
 
 logger = logging.getLogger(__name__)
 
-# ML Model integration flag
 try:
     from tier_2.ml_model import get_ml_model
+
     ML_AVAILABLE = True
 except ImportError:
-    try:
-        from ml_model import get_ml_model
-        ML_AVAILABLE = True
-    except ImportError:
-        ML_AVAILABLE = False
-        logger.warning("ML model not available in analyzer environment")
+    ML_AVAILABLE = False
+    get_ml_model = None  # type: ignore[assignment]
 
 
 class ThreatAnalysis(BaseModel):
     """Pydantic model representing Threat Analysis output."""
+
     threat_level: int
     category: str
     reasoning: str
@@ -89,7 +87,10 @@ class ThreatAnalyzer:
             return url, []
         try:
             import httpx
-            async with httpx.AsyncClient(timeout=2.0, follow_redirects=True, max_redirects=3) as client:
+
+            async with httpx.AsyncClient(
+                timeout=2.0, follow_redirects=True, max_redirects=3
+            ) as client:
                 response = await client.head(url)
                 return str(response.url), []
         except Exception:
@@ -209,7 +210,9 @@ class ThreatAnalyzer:
         authority = pattern_scores["authority"] + sender_score
         scare = pattern_scores["scare"]
 
-        base_threat = min(100.0, float(urgency + financial + credential + authority + scare + link_score))
+        base_threat = min(
+            100.0, float(urgency + financial + credential + authority + scare + link_score)
+        )
 
         if urgency > 0 and (financial > 0 or credential > 0):
             base_threat = min(100.0, base_threat + 20.0)

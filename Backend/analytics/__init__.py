@@ -1,5 +1,12 @@
 """ZeroPhish Analytics Module — heatmaps, threat feed, model metrics."""
-from .models import ThreatHeatmapEntry, ThreatFeedItem, ModelMetrics, FalsePositiveReport
+
+from .models import FalsePositiveReport, ModelMetrics, ThreatFeedItem, ThreatHeatmapEntry
 from .service import AnalyticsService
 
-__all__ = ["AnalyticsService", "ThreatHeatmapEntry", "ThreatFeedItem", "ModelMetrics", "FalsePositiveReport"]
+__all__ = [
+    "AnalyticsService",
+    "ThreatHeatmapEntry",
+    "ThreatFeedItem",
+    "ModelMetrics",
+    "FalsePositiveReport",
+]

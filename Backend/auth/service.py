@@ -2,6 +2,7 @@
 Auth Service — Repositories-backed user and authentication management.
 Handles registration, login, token lifecycle, MFA, and OAuth.
 """
+
 from __future__ import annotations
 
 import base64
@@ -13,6 +14,7 @@ import uuid
 from typing import Dict, List, Optional
 
 from repositories.factory import get_user_repository
+
 from .models import (
     MFASetup,
     Token,
@@ -207,6 +209,7 @@ class AuthService:
             return False
         try:
             import pyotp  # type: ignore
+
             totp = pyotp.TOTP(user.mfa_secret)
             valid = totp.verify(code)
         except ImportError:
@@ -224,8 +227,13 @@ class AuthService:
         if provider not in ("google", "microsoft"):
             raise NotImplementedError(f"OAuth provider '{provider}' is not supported")
 
-        if os.getenv("ENV", "development") == "production" or os.getenv("ENABLE_MOCK_OAUTH", "false").lower() != "true":
-            raise NotImplementedError("OAuth provider integration requires production API credentials")
+        if (
+            os.getenv("ENV", "development") == "production"
+            or os.getenv("ENABLE_MOCK_OAUTH", "false").lower() != "true"
+        ):
+            raise NotImplementedError(
+                "OAuth provider integration requires production API credentials"
+            )
 
         repo = get_user_repository()
         mock_email = f"oauth_user+{code[:6]}@{provider}.com"

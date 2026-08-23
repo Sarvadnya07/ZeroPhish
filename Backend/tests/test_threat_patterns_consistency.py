@@ -2,8 +2,10 @@
 Consistency tests between centralized threat configuration and backend threat engines.
 Ensures threat intelligence rules never drift silently.
 """
+
 import json
 from pathlib import Path
+
 import pytest
 
 from tier_2.rules import (

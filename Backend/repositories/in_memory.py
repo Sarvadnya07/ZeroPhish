@@ -2,6 +2,7 @@
 In-memory repository adapters for unit testing, development, and zero-dependency execution.
 Thread-safe and fully compliant with repository Protocols.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -9,8 +10,6 @@ import time
 from collections import defaultdict, deque
 from typing import Any, Dict, List, Optional
 
-from auth.models import User, UserInDB, UserRole, UserStatus, UserUpdate
-from incidents.models import Incident, IncidentComment, IncidentSeverity, IncidentStatus, IncidentUpdate
 from analytics.models import (
     AdminDashboardSummary,
     FalsePositiveReport,
@@ -19,7 +18,16 @@ from analytics.models import (
     ThreatFeedItem,
     ThreatHeatmapEntry,
 )
+from auth.models import User, UserInDB, UserRole, UserStatus, UserUpdate
+from incidents.models import (
+    Incident,
+    IncidentComment,
+    IncidentSeverity,
+    IncidentStatus,
+    IncidentUpdate,
+)
 from webhooks.models import WebhookDelivery, WebhookSubscription
+
 from .base import (
     AnalyticsRepository,
     CacheBackend,
@@ -145,7 +153,11 @@ class InMemoryIncidentRepository:
             inc.false_positive = update.false_positive
         if update.status is not None:
             inc.status = update.status
-            if update.status in (IncidentStatus.RESOLVED, IncidentStatus.CLOSED, IncidentStatus.FALSE_POS):
+            if update.status in (
+                IncidentStatus.RESOLVED,
+                IncidentStatus.CLOSED,
+                IncidentStatus.FALSE_POS,
+            ):
                 inc.resolved_at = now
         inc.updated_at = now
         return inc
@@ -203,6 +215,7 @@ class InMemoryAnalyticsRepository:
 
     def get_dashboard_summary(self) -> AdminDashboardSummary:
         import datetime as _dt
+
         now = _dt.datetime.now(_dt.timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
         week_start = today_start - 6 * 86400
@@ -233,7 +246,9 @@ class InMemoryAnalyticsRepository:
             suspicious_today=suspicious,
             safe_today=safe,
             avg_score_today=round(avg_score, 2),
-            false_positives_pending=sum(1 for fp in self._false_positives.values() if not fp.reviewed),
+            false_positives_pending=sum(
+                1 for fp in self._false_positives.values() if not fp.reviewed
+            ),
             open_incidents=0,
             circuit_breaker_state="closed",
             top_malicious_domains=[{"domain": d, "count": c} for d, c in top_domains],

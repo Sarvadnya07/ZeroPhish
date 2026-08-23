@@ -2,12 +2,13 @@
 Unit tests for Backend/awareness/service.py.
 Covers lesson management, quiz evaluations, campaign tracking, and leaderboard rankings.
 """
+
 import pytest
 
 from awareness.models import (
     CampaignCreate,
-    LessonDifficulty,
     LessonCreate,
+    LessonDifficulty,
     QuizQuestion,
     QuizSubmit,
 )
@@ -53,9 +54,7 @@ def test_awareness_lesson_and_quiz():
     assert fetched.title == lesson.title
 
     # Submit Quiz (Correct answer)
-    quiz_res = AwarenessService.submit_quiz(
-        lesson.id, "user-abc", QuizSubmit(answers={"q1": 1})
-    )
+    quiz_res = AwarenessService.submit_quiz(lesson.id, "user-abc", QuizSubmit(answers={"q1": 1}))
     assert quiz_res["passed"] is True
     assert quiz_res["score_pct"] == 100
 

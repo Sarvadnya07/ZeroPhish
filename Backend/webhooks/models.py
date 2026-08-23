@@ -1,6 +1,7 @@
 """
 Webhook subscription models.
 """
+
 from __future__ import annotations
 
 from enum import Enum
@@ -11,8 +12,8 @@ from pydantic import BaseModel, Field, HttpUrl
 
 class WebhookEventType(str, Enum):
     SCAN_COMPLETE = "scan.complete"
-    SCAN_CRITICAL = "scan.critical"        # score >= 70
-    SCAN_SUSPICIOUS = "scan.suspicious"   # 30-69
+    SCAN_CRITICAL = "scan.critical"  # score >= 70
+    SCAN_SUSPICIOUS = "scan.suspicious"  # 30-69
     INCIDENT_CREATED = "incident.created"
     INCIDENT_UPDATED = "incident.updated"
     CIRCUIT_OPENED = "circuit.opened"
@@ -24,7 +25,7 @@ class WebhookSubscription(BaseModel):
     id: str
     url: str
     events: List[WebhookEventType]
-    secret: str                    # HMAC-SHA256 signing secret
+    secret: str  # HMAC-SHA256 signing secret
     enabled: bool = True
     created_at: str
     owner_id: Optional[str] = None
@@ -44,7 +45,7 @@ class WebhookDelivery(BaseModel):
     subscription_id: str
     event_type: WebhookEventType
     payload: Dict[str, Any]
-    status: str            # "success" | "failed" | "pending"
+    status: str  # "success" | "failed" | "pending"
     http_status: Optional[int] = None
     response_body: Optional[str] = None
     attempted_at: str

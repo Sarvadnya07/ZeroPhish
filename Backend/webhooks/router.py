@@ -1,11 +1,12 @@
 """
 Webhook FastAPI router — /webhooks/* endpoints.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from auth.middleware import require_auth, require_admin, require_analyst
+from auth.middleware import require_admin, require_analyst, require_auth
 from auth.models import User
 
 from .models import WebhookSubscription, WebhookSubscriptionCreate
@@ -25,10 +26,10 @@ async def create_subscription(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-
 @router.get("", response_model=list[WebhookSubscription])
 async def list_subscriptions(current_user: User = Depends(require_auth)):
     from auth.models import UserRole
+
     # Admins see all; others see only theirs
     owner = None if current_user.role == UserRole.ADMIN else current_user.id
     return WebhookService.list_subscriptions(owner_id=owner)
@@ -45,6 +46,7 @@ async def get_subscription(sub_id: str, current_user: User = Depends(require_aut
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
     from auth.models import UserRole
+
     if current_user.role != UserRole.ADMIN and sub.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Forbidden")
     return sub
@@ -53,6 +55,7 @@ async def get_subscription(sub_id: str, current_user: User = Depends(require_aut
 @router.delete("/{sub_id}", status_code=204)
 async def delete_subscription(sub_id: str, current_user: User = Depends(require_auth)):
     from auth.models import UserRole
+
     owner = None if current_user.role == UserRole.ADMIN else current_user.id
     ok = WebhookService.unsubscribe(sub_id, owner_id=owner)
     if not ok:

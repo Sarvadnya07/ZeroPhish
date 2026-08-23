@@ -2,6 +2,7 @@
 Auth data models — User, roles, tokens, JWT.
 In production replace the in-memory store with a real DB (SQLAlchemy / SQLModel).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -61,6 +62,7 @@ class User(BaseModel):
 
 class UserInDB(User):
     """Internal user record — includes hashed password, never sent to client."""
+
     password_hash: str
     mfa_secret: Optional[str] = None
 
@@ -75,6 +77,7 @@ class Token(BaseModel):
 
 class MFASetup(BaseModel):
     """Return QR code seed for TOTP app setup."""
+
     secret: str
     otpauth_url: str
 

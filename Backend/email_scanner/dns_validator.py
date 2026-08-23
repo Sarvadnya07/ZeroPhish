@@ -2,6 +2,7 @@
 DNS-based SPF, DKIM, and DMARC record validation.
 Complements the header-only parsing from parser.py with live DNS lookups.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -16,7 +17,7 @@ class DNSAuthRecord(BaseModel):
     spf_record: Optional[str] = None
     dmarc_record: Optional[str] = None
     spf_valid: bool = False
-    dmarc_policy: Optional[str] = None   # "none" | "quarantine" | "reject"
+    dmarc_policy: Optional[str] = None  # "none" | "quarantine" | "reject"
     dmarc_pct: int = 100
     score_penalty: int = 0
 
@@ -26,7 +27,7 @@ class DnsValidator:
 
     @staticmethod
     async def validate(domain: str) -> DNSAuthRecord:
-        spf_task   = asyncio.to_thread(DnsValidator._get_spf, domain)
+        spf_task = asyncio.to_thread(DnsValidator._get_spf, domain)
         dmarc_task = asyncio.to_thread(DnsValidator._get_dmarc, domain)
         spf_rec, dmarc_rec = await asyncio.gather(spf_task, dmarc_task)
 
@@ -38,12 +39,15 @@ class DnsValidator:
             pol_m = re.search(r"p=(\w+)", dmarc_rec)
             pct_m = re.search(r"pct=(\d+)", dmarc_rec)
             dmarc_policy = pol_m.group(1) if pol_m else None
-            dmarc_pct    = int(pct_m.group(1)) if pct_m else 100
+            dmarc_pct = int(pct_m.group(1)) if pct_m else 100
 
         penalty = 0
-        if not spf_valid:    penalty += 10
-        if not dmarc_rec:    penalty += 10
-        if dmarc_policy in (None, "none"):  penalty += 5
+        if not spf_valid:
+            penalty += 10
+        if not dmarc_rec:
+            penalty += 10
+        if dmarc_policy in (None, "none"):
+            penalty += 5
 
         return DNSAuthRecord(
             domain=domain,
@@ -59,6 +63,7 @@ class DnsValidator:
     def _get_spf(domain: str) -> Optional[str]:
         try:
             import dns.resolver  # type: ignore
+
             answers = dns.resolver.resolve(domain, "TXT", lifetime=5)
             for r in answers:
                 txt = r.to_text().strip('"')
@@ -72,6 +77,7 @@ class DnsValidator:
     def _get_dmarc(domain: str) -> Optional[str]:
         try:
             import dns.resolver  # type: ignore
+
             answers = dns.resolver.resolve(f"_dmarc.{domain}", "TXT", lifetime=5)
             for r in answers:
                 txt = r.to_text().strip('"')

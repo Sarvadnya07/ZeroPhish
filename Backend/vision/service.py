@@ -3,6 +3,7 @@ Vision Service — Development Simulation & Placeholder Endpoint.
 Provides a mock visual artifact inspection pipeline simulating CNN / Multimodal vision models
 (YOLO/ResNet or Gemini Vision) for login form brand mismatches during development.
 """
+
 from __future__ import annotations
 
 import asyncio

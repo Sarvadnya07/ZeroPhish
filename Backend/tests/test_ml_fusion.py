@@ -1,9 +1,10 @@
 """
 Unit tests for Backend/ml/fusion.py and Backend/ml/predictor.py.
 """
+
 import pytest
 
-from ml.fusion import RiskFusionEngine, FusionResult
+from ml.fusion import FusionResult, RiskFusionEngine
 from ml.predictor import MockPhishingPredictor
 
 

@@ -2,16 +2,29 @@
 Comprehensive repository tests for InMemory and SQLAlchemy adapters.
 Ensures identical behavioral parity across data storage implementations.
 """
+
 import time
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from auth.models import UserInDB, UserRole, UserStatus, UserUpdate
-from incidents.models import Incident, IncidentComment, IncidentSeverity, IncidentStatus, IncidentUpdate
 from analytics.models import FalsePositiveReport, PolicyRule
-from webhooks.models import WebhookDelivery, WebhookEventType, WebhookSubscription
+from auth.models import UserInDB, UserRole, UserStatus, UserUpdate
+from incidents.models import (
+    Incident,
+    IncidentComment,
+    IncidentSeverity,
+    IncidentStatus,
+    IncidentUpdate,
+)
 from infrastructure.database import Base
+from repositories.factory import (
+    get_incident_repository,
+    get_user_repository,
+    reset_repositories,
+    set_user_repository,
+)
 from repositories.in_memory import (
     InMemoryAnalyticsRepository,
     InMemoryCacheBackend,
@@ -21,12 +34,7 @@ from repositories.in_memory import (
     InMemoryWebhookRepository,
 )
 from repositories.sql_repositories import SQLIncidentRepository, SQLUserRepository
-from repositories.factory import (
-    get_incident_repository,
-    get_user_repository,
-    reset_repositories,
-    set_user_repository,
-)
+from webhooks.models import WebhookDelivery, WebhookEventType, WebhookSubscription
 
 
 @pytest.fixture
@@ -39,6 +47,7 @@ def sqlite_session_factory():
 
 
 # ── User Repository Parity Tests ───────────────────────────────────────────────
+
 
 @pytest.mark.parametrize("repo_type", ["in_memory", "sql"])
 def test_user_repository_crud_and_tokens(repo_type, sqlite_session_factory):
@@ -95,6 +104,7 @@ def test_user_repository_crud_and_tokens(repo_type, sqlite_session_factory):
 
 # ── Incident Repository Parity Tests ──────────────────────────────────────────
 
+
 @pytest.mark.parametrize("repo_type", ["in_memory", "sql"])
 def test_incident_repository_crud(repo_type, sqlite_session_factory):
     if repo_type == "in_memory":
@@ -146,22 +156,25 @@ def test_incident_repository_crud(repo_type, sqlite_session_factory):
 
 # ── Analytics Repository Tests ────────────────────────────────────────────────
 
+
 def test_analytics_repository_full_flow():
     repo = InMemoryAnalyticsRepository()
 
     # Record scan event
-    repo.record_scan_event({
-        "scan_id": "s-1",
-        "timestamp": "2026-01-01T12:00:00Z",
-        "ts": time.time(),
-        "hour": 12,
-        "day": 2,
-        "sender_domain": "spoofed.com",
-        "subject": "Urgent payroll",
-        "final_score": 88.0,
-        "verdict": "CRITICAL",
-        "category": "Credential",
-    })
+    repo.record_scan_event(
+        {
+            "scan_id": "s-1",
+            "timestamp": "2026-01-01T12:00:00Z",
+            "ts": time.time(),
+            "hour": 12,
+            "day": 2,
+            "sender_domain": "spoofed.com",
+            "subject": "Urgent payroll",
+            "final_score": 88.0,
+            "verdict": "CRITICAL",
+            "category": "Credential",
+        }
+    )
 
     events = repo.get_scan_events()
     assert len(events) == 1
@@ -214,6 +227,7 @@ def test_analytics_repository_full_flow():
 
 # ── Webhook Repository Tests ──────────────────────────────────────────────────
 
+
 def test_webhook_repository():
     repo = InMemoryWebhookRepository()
 
@@ -245,6 +259,7 @@ def test_webhook_repository():
 
 # ── Cache Backend Tests ───────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_cache_backend_ttl_and_prefix():
     cache = InMemoryCacheBackend(default_ttl=3600)
@@ -262,11 +277,20 @@ async def test_cache_backend_ttl_and_prefix():
     assert await cache.get("other:key") == "value"
 
 
-# ── Factory Reset Tests ───────────────────────────────────────────────────────
-
 def test_factory_reset_and_dependency_injection():
     reset_repositories()
     mock_repo = InMemoryUserRepository()
     set_user_repository(mock_repo)
     assert get_user_repository() is mock_repo
+    reset_repositories()
+
+
+def test_factory_production_missing_database_url_fails(monkeypatch):
+    """Verify that in production mode, missing DATABASE_URL raises a hard error."""
+    reset_repositories()
+    monkeypatch.setenv("ENV", "production")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    with pytest.raises(RuntimeError, match="DATABASE_URL must be configured"):
+        get_user_repository()
     reset_repositories()

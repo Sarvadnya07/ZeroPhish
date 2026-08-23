@@ -1,6 +1,7 @@
 """
 Domain Intelligence and WHOIS utilities for Tier 2 evaluation.
 """
+
 from __future__ import annotations
 
 import asyncio

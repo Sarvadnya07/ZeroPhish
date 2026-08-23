@@ -1,5 +1,6 @@
 """ZeroPhish Webhooks Module."""
-from .models import WebhookSubscription, WebhookEvent, WebhookDelivery
+
+from .models import WebhookDelivery, WebhookEvent, WebhookSubscription
 from .service import WebhookService
 
 __all__ = ["WebhookSubscription", "WebhookEvent", "WebhookDelivery", "WebhookService"]

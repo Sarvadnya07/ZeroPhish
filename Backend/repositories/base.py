@@ -2,14 +2,28 @@
 ZeroPhish Repository Protocols & Domain Interfaces.
 Lightweight Python Protocols defining clear data-access seams.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from analytics.models import (
+        AdminDashboardSummary,
+        FalsePositiveReport,
+        ModelMetrics,
+        PolicyRule,
+        ThreatFeedItem,
+        ThreatHeatmapEntry,
+    )
     from auth.models import User, UserInDB, UserRole, UserUpdate
-    from incidents.models import Incident, IncidentComment, IncidentSeverity, IncidentStatus, IncidentUpdate
-    from analytics.models import AdminDashboardSummary, FalsePositiveReport, ModelMetrics, PolicyRule, ThreatFeedItem, ThreatHeatmapEntry
+    from incidents.models import (
+        Incident,
+        IncidentComment,
+        IncidentSeverity,
+        IncidentStatus,
+        IncidentUpdate,
+    )
     from webhooks.models import WebhookDelivery, WebhookSubscription
 
 
@@ -55,7 +69,9 @@ class AnalyticsRepository(Protocol):
     def update_model_metrics(self, fp_delta: int = 0, fn_delta: int = 0) -> None: ...
     def save_false_positive(self, report: Any) -> Any: ...
     def list_false_positives(self, reviewed: Optional[bool] = None) -> List[Any]: ...
-    def review_false_positive(self, fp_id: str, reviewer_id: str, resolution: str) -> Optional[Any]: ...
+    def review_false_positive(
+        self, fp_id: str, reviewer_id: str, resolution: str
+    ) -> Optional[Any]: ...
     def save_policy_rule(self, rule: Any) -> Any: ...
     def list_policy_rules(self) -> List[Any]: ...
     def delete_policy_rule(self, rule_id: str) -> bool: ...

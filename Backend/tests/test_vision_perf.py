@@ -2,15 +2,18 @@
 Vision endpoint performance test.
 Tests that concurrent vision analyze requests complete within a reasonable time.
 """
-import pytest
+
 import time
+
+import pytest
 
 
 @pytest.mark.asyncio
 async def test_vision_performance():
     """Vision endpoint should handle concurrent requests efficiently."""
-    from httpx import AsyncClient, ASGITransport
     import asyncio
+
+    from httpx import ASGITransport, AsyncClient
 
     # Import inside test to avoid module-level FastAPI/Pydantic compat issue
     from gateway import app
@@ -20,7 +23,11 @@ async def test_vision_performance():
         # First register and login to get a token (vision requires auth)
         reg_resp = await client.post(
             "/auth/register",
-            json={"email": "visiontest@example.com", "password": "VisionTest@123", "full_name": "Vision Tester"},
+            json={
+                "email": "visiontest@example.com",
+                "password": "VisionTest@123",
+                "full_name": "Vision Tester",
+            },
         )
         # May already exist — just login
         login_resp = await client.post(
@@ -33,13 +40,14 @@ async def test_vision_performance():
         token = login_resp.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
 
-        data = {"image_data_b64": "data:image/png;base64,123", "url": "http://example.com", "title": "login"}
+        data = {
+            "image_data_b64": "data:image/png;base64,123",
+            "url": "http://example.com",
+            "title": "login",
+        }
 
         start_time = time.perf_counter()
-        tasks = [
-            client.post("/vision/analyze", json=data, headers=headers)
-            for _ in range(5)
-        ]
+        tasks = [client.post("/vision/analyze", json=data, headers=headers) for _ in range(5)]
         results = await asyncio.gather(*tasks)
         end_time = time.perf_counter()
 

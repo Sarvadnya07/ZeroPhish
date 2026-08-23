@@ -2,10 +2,12 @@
 Unit tests for tier_2/analyzer.py.
 Covers regex pattern matches, suspicious URLs, IP links, punycode, TLDs, typosquatting, compound heuristics, and ML integration.
 """
+
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
-from tier_2.analyzer import ThreatAnalyzer, ThreatAnalysis
+from tier_2.analyzer import ThreatAnalysis, ThreatAnalyzer
 
 
 @pytest.mark.asyncio
@@ -15,7 +17,9 @@ async def test_analyzer_clean_email():
     sender = "colleague@company.com"
     links = ["https://company.com/notes"]
 
-    result = await ThreatAnalyzer.analyze_threat(email_body=body, sender=sender, links=links, use_ml=False)
+    result = await ThreatAnalyzer.analyze_threat(
+        email_body=body, sender=sender, links=links, use_ml=False
+    )
     assert result.threat_level < 20
     assert result.category == "Safe"
     assert "No significant threat" in result.reasoning
@@ -24,11 +28,15 @@ async def test_analyzer_clean_email():
 @pytest.mark.asyncio
 async def test_analyzer_urgency_and_credential_harvest():
     """Test compound urgency + credential threat patterns."""
-    body = "URGENT: Your password will expire immediately. Verify your account login credentials now!"
+    body = (
+        "URGENT: Your password will expire immediately. Verify your account login credentials now!"
+    )
     sender = "security-update@randomhost.xyz"
     links = ["http://192.168.1.100/login", "https://xn--pypal-4ve.com/verify"]
 
-    result = await ThreatAnalyzer.analyze_threat(email_body=body, sender=sender, links=links, use_ml=False)
+    result = await ThreatAnalyzer.analyze_threat(
+        email_body=body, sender=sender, links=links, use_ml=False
+    )
     assert result.threat_level >= 70
     assert "Urgency" in result.category or "Credential" in result.category
     assert any("ip_based_link" in p for p in result.flagged_phrases)
@@ -42,7 +50,9 @@ async def test_analyzer_typosquatting_detection():
     sender = "support@paypa1.com"
     links = []
 
-    result = await ThreatAnalyzer.analyze_threat(email_body=body, sender=sender, links=links, use_ml=False)
+    result = await ThreatAnalyzer.analyze_threat(
+        email_body=body, sender=sender, links=links, use_ml=False
+    )
     assert any("typosquatting:paypal.com" in p for p in result.flagged_phrases)
     assert result.threat_level >= 40
 
@@ -68,9 +78,13 @@ async def test_analyzer_ml_enhancement():
     mock_model.is_loaded.return_value = True
     mock_model.predict = AsyncMock(return_value=(90.0, "phishing"))
 
-    with patch("tier_2.analyzer.get_ml_model", new_callable=AsyncMock, return_value=mock_model), \
-         patch("tier_2.analyzer.ML_AVAILABLE", True), \
-         patch.dict("os.environ", {"ML_ENABLED": "true"}):
-        res = await ThreatAnalyzer.analyze_threat(email_body=body, sender="service@bank.com", links=[], use_ml=True)
+    with (
+        patch("tier_2.analyzer.get_ml_model", new_callable=AsyncMock, return_value=mock_model),
+        patch("tier_2.analyzer.ML_AVAILABLE", True),
+        patch.dict("os.environ", {"ML_ENABLED": "true"}),
+    ):
+        res = await ThreatAnalyzer.analyze_threat(
+            email_body=body, sender="service@bank.com", links=[], use_ml=True
+        )
         assert res.threat_level >= 60
         assert "ML:Phishing" in res.category

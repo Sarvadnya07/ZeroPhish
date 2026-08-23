@@ -2,9 +2,11 @@
 Unit tests for tier_2/whois_client.py.
 Covers cache layer, library lookups, API fallbacks, retry logic, and singleton lifecycle.
 """
-from datetime import datetime, timezone
+
 import json
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from tier_2.whois_client import WhoisClient, get_whois_client
@@ -72,12 +74,12 @@ async def test_whois_api_whoisxml_fallback(mock_cache):
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.raise_for_status = MagicMock()
-    mock_resp.json.return_value = {
-        "WhoisRecord": {"createdDate": "2021-06-15T12:00:00Z"}
-    }
+    mock_resp.json.return_value = {"WhoisRecord": {"createdDate": "2021-06-15T12:00:00Z"}}
 
     with patch("whois.whois", side_effect=Exception("WHOIS server blocked")):
-        with patch.object(client.http_client, "get", new_callable=AsyncMock, return_value=mock_resp):
+        with patch.object(
+            client.http_client, "get", new_callable=AsyncMock, return_value=mock_resp
+        ):
             age, source = await client.get_domain_age("whoisxml-test.com")
             assert age is not None
             assert age > 500
@@ -96,7 +98,9 @@ async def test_whois_api_whoisapi_fallback():
     mock_resp.json.return_value = {"created_date": "2023-01-01T00:00:00+00:00"}
 
     with patch("whois.whois", side_effect=Exception("WHOIS library error")):
-        with patch.object(client.http_client, "get", new_callable=AsyncMock, return_value=mock_resp):
+        with patch.object(
+            client.http_client, "get", new_callable=AsyncMock, return_value=mock_resp
+        ):
             age, source = await client.get_domain_age("whoisapi-test.com")
             assert age is not None
             assert age > 200
@@ -108,7 +112,9 @@ async def test_whois_api_whoisapi_fallback():
 @pytest.mark.asyncio
 async def test_whois_all_methods_fail(mock_cache):
     """Test unknown source when library and API both fail."""
-    client = WhoisClient(api_provider="unknown_provider", api_key="dummy-key", cache_client=mock_cache)
+    client = WhoisClient(
+        api_provider="unknown_provider", api_key="dummy-key", cache_client=mock_cache
+    )
 
     with patch("whois.whois", side_effect=Exception("Fail")):
         age, source = await client.get_domain_age("nonexistent-domain.xyz")
@@ -141,6 +147,7 @@ async def test_whois_cache_exceptions_dont_crash():
 async def test_get_whois_client_singleton():
     """Test global singleton creator for WhoisClient."""
     import tier_2.whois_client as whois_mod
+
     whois_mod._whois_client_instance = None
 
     c1 = await get_whois_client()

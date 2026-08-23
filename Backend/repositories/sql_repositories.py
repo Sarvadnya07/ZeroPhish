@@ -1,6 +1,7 @@
 """
 SQLAlchemy repository implementations for durable relational storage.
 """
+
 from __future__ import annotations
 
 import json
@@ -9,8 +10,6 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from auth.models import User, UserInDB, UserRole, UserStatus, UserUpdate
-from incidents.models import Incident, IncidentComment, IncidentSeverity, IncidentStatus, IncidentUpdate
 from analytics.models import (
     AdminDashboardSummary,
     FalsePositiveReport,
@@ -19,7 +18,14 @@ from analytics.models import (
     ThreatFeedItem,
     ThreatHeatmapEntry,
 )
-from webhooks.models import WebhookDelivery, WebhookSubscription
+from auth.models import User, UserInDB, UserRole, UserStatus, UserUpdate
+from incidents.models import (
+    Incident,
+    IncidentComment,
+    IncidentSeverity,
+    IncidentStatus,
+    IncidentUpdate,
+)
 from infrastructure.models import (
     FalsePositiveDB,
     IncidentCommentDB,
@@ -32,6 +38,7 @@ from infrastructure.models import (
     WebhookDeliveryDB,
     WebhookSubscriptionDB,
 )
+from webhooks.models import WebhookDelivery, WebhookSubscription
 
 
 class SQLUserRepository:
@@ -40,18 +47,18 @@ class SQLUserRepository:
 
     def _to_user_in_db(self, u: UserDB) -> UserInDB:
         return UserInDB(
-            id=u.id,
-            email=u.email,
-            full_name=u.full_name,
-            password_hash=u.password_hash,
-            role=UserRole(u.role),
-            status=UserStatus(u.status),
-            mfa_secret=u.mfa_secret,
-            mfa_enabled=u.mfa_enabled,
-            scan_count=u.scan_count,
-            risk_score=u.risk_score,
-            created_at=u.created_at,
-            last_login=u.last_login,
+            id=str(u.id),
+            email=str(u.email),
+            full_name=str(u.full_name),
+            password_hash=str(u.password_hash),
+            role=UserRole(str(u.role)),
+            status=UserStatus(str(u.status)),
+            mfa_secret=str(u.mfa_secret) if u.mfa_secret else None,
+            mfa_enabled=bool(u.mfa_enabled),
+            scan_count=int(u.scan_count or 0),
+            risk_score=float(u.risk_score or 0.0),
+            created_at=str(u.created_at),
+            last_login=str(u.last_login) if u.last_login else None,
         )
 
     def get_by_id(self, user_id: str) -> Optional[UserInDB]:
@@ -168,32 +175,32 @@ class SQLIncidentRepository:
 
     def _to_incident(self, inc: IncidentDB) -> Incident:
         return Incident(
-            id=inc.id,
-            title=inc.title,
-            description=inc.description,
-            severity=IncidentSeverity(inc.severity),
-            status=IncidentStatus(inc.status),
-            scan_id=inc.scan_id,
-            reporter_id=inc.reporter_id,
-            assignee_id=inc.assignee_id,
-            final_score=inc.final_score,
-            sender=inc.sender,
-            subject=inc.subject,
-            evidence=json.loads(inc.evidence_json or "[]"),
-            tags=json.loads(inc.tags_json or "[]"),
-            false_positive=inc.false_positive,
-            created_at=inc.created_at,
-            updated_at=inc.updated_at,
-            resolved_at=inc.resolved_at,
+            id=str(inc.id),
+            title=str(inc.title),
+            description=str(inc.description),
+            severity=IncidentSeverity(str(inc.severity)),
+            status=IncidentStatus(str(inc.status)),
+            scan_id=str(inc.scan_id) if inc.scan_id else None,
+            reporter_id=str(inc.reporter_id) if inc.reporter_id else None,
+            assignee_id=str(inc.assignee_id) if inc.assignee_id else None,
+            final_score=float(inc.final_score) if inc.final_score is not None else None,
+            sender=str(inc.sender) if inc.sender else None,
+            subject=str(inc.subject) if inc.subject else None,
+            evidence=json.loads(str(inc.evidence_json) if inc.evidence_json else "[]"),
+            tags=json.loads(str(inc.tags_json) if inc.tags_json else "[]"),
+            false_positive=bool(inc.false_positive),
+            created_at=str(inc.created_at),
+            updated_at=str(inc.updated_at),
+            resolved_at=str(inc.resolved_at) if inc.resolved_at else None,
             comments=[
                 IncidentComment(
-                    id=c.id,
-                    author_id=c.author_id,
-                    author_name=c.author_name,
-                    body=c.body,
-                    created_at=c.created_at,
+                    id=str(c.id),
+                    author_id=str(c.author_id),
+                    author_name=str(c.author_name),
+                    body=str(c.body),
+                    created_at=str(c.created_at),
                 )
-                for c in inc.comments
+                for c in (inc.comments or [])
             ],
         )
 
@@ -267,7 +274,11 @@ class SQLIncidentRepository:
                 inc.false_positive = update.false_positive
             if update.status is not None:
                 inc.status = update.status.value
-                if update.status in (IncidentStatus.RESOLVED, IncidentStatus.CLOSED, IncidentStatus.FALSE_POS):
+                if update.status in (
+                    IncidentStatus.RESOLVED,
+                    IncidentStatus.CLOSED,
+                    IncidentStatus.FALSE_POS,
+                ):
                     inc.resolved_at = now
             inc.updated_at = now
             session.commit()
@@ -307,10 +318,13 @@ class SQLIncidentRepository:
                 "total": len(items),
                 "open": sum(1 for i in items if i.status == IncidentStatus.OPEN.value),
                 "triaging": sum(1 for i in items if i.status == IncidentStatus.TRIAGING.value),
-                "in_progress": sum(1 for i in items if i.status == IncidentStatus.IN_PROGRESS.value),
+                "in_progress": sum(
+                    1 for i in items if i.status == IncidentStatus.IN_PROGRESS.value
+                ),
                 "resolved": sum(1 for i in items if i.status == IncidentStatus.RESOLVED.value),
                 "false_positives": sum(1 for i in items if i.false_positive),
                 "by_severity": {
-                    s.value: sum(1 for i in items if i.severity == s.value) for s in IncidentSeverity
+                    s.value: sum(1 for i in items if i.severity == s.value)
+                    for s in IncidentSeverity
                 },
             }

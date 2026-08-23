@@ -1,5 +1,7 @@
 import pytest
+
 from security.middleware import get_generic_error_message
+
 
 @pytest.mark.parametrize(
     "status_code, expected_message",
@@ -18,6 +20,7 @@ def test_get_generic_error_message_mapped_codes(status_code, expected_message):
     """Test that mapped status codes return their specific error messages."""
     assert get_generic_error_message(status_code) == expected_message
 
+
 @pytest.mark.parametrize(
     "status_code",
     [
@@ -35,6 +38,7 @@ def test_get_generic_error_message_mapped_codes(status_code, expected_message):
 def test_get_generic_error_message_unmapped_codes(status_code):
     """Test that unmapped status codes return the default error message."""
     assert get_generic_error_message(status_code) == "An error occurred"
+
 
 def test_get_generic_error_message_invalid_type():
     """Test that invalid types (if they ever get passed) handle gracefully by returning the default error message."""

@@ -2,6 +2,7 @@
 Unit tests for Backend/analytics/service.py.
 Covers dashboard summary, user scan history, model metrics updates, policy rules, and false positive flows.
 """
+
 import pytest
 
 from analytics.models import PolicyRuleCreate

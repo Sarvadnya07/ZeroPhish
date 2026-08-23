@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 def client():
     """Import gateway inside fixture to avoid module-level FastAPI/Pydantic compat issue."""
     from gateway import app
+
     return TestClient(app)
 
 

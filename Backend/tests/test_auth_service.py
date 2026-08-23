@@ -2,14 +2,17 @@
 Tests for auth/service.py â€” covers register, login, logout, MFA, OAuth guard,
 token revocation, and admin seeding behaviour.
 """
+
 import builtins
 import os
-import pytest
-from auth.service import AuthService, _tokens, _users_by_email, _users_by_id
-from auth.models import UserCreate, UserLogin, UserRole, MFAVerify
 
+import pytest
+
+from auth.models import MFAVerify, UserCreate, UserLogin, UserRole
+from auth.service import AuthService, _tokens, _users_by_email, _users_by_id
 
 # â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 
 def _make_user(suffix: str = "a") -> tuple:
     email = f"test_{suffix}@example.com"
@@ -19,6 +22,7 @@ def _make_user(suffix: str = "a") -> tuple:
 
 
 # â”€â”€ Registration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 
 def test_register_creates_user():
     user, email = _make_user("reg1")
@@ -33,6 +37,7 @@ def test_register_duplicate_email_raises():
 
 
 # â”€â”€ Login â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 
 def test_login_returns_token():
     _, email = _make_user("login1")
@@ -52,8 +57,8 @@ def test_login_unknown_email_raises():
         AuthService.login(UserLogin(email="nobody@example.com", password="x"))
 
 
-
 # â”€â”€ Token validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 
 def test_validate_token_returns_user():
     _, email = _make_user("tok1")
@@ -68,6 +73,7 @@ def test_validate_token_invalid_returns_none():
 
 
 # â”€â”€ Logout / revocation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 
 def test_logout_revokes_token():
     _, email = _make_user("logout1")
@@ -87,6 +93,7 @@ def test_logout_twice_is_safe():
 
 # â”€â”€ MFA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+
 def test_mfa_setup_returns_secret():
     user, _ = _make_user("mfa1")
     setup = AuthService.setup_mfa(user.id)
@@ -105,32 +112,37 @@ def test_mfa_verify_no_secret_returns_false():
     # No setup_mfa called â€” no secret yet
     assert AuthService.verify_mfa(user.id, "123456") is False
 
+
 def test_mfa_verify_valid_code():
     import pyotp
+
     user, _ = _make_user("mfa_valid")
     setup = AuthService.setup_mfa(user.id)
     code = pyotp.TOTP(setup.secret).now()
     assert AuthService.verify_mfa(user.id, code) is True
+
 
 def test_mfa_verify_invalid_code():
     user, _ = _make_user("mfa_invalid")
     AuthService.setup_mfa(user.id)
     assert AuthService.verify_mfa(user.id, "999999") is False
 
+
 def test_mfa_verify_missing_pyotp(monkeypatch):
     user, _ = _make_user("mfa_missing_pyotp")
     AuthService.setup_mfa(user.id)
-    
+
     original_import = builtins.__import__
-    
+
     def mock_import(name, *args, **kwargs):
         if name == "pyotp":
             raise ImportError("Mocked ImportError for pyotp")
         return original_import(name, *args, **kwargs)
-        
+
     monkeypatch.setattr("builtins.__import__", mock_import)
     with pytest.raises(RuntimeError, match="pyotp is not installed"):
         AuthService.verify_mfa(user.id, "123456")
+
 
 def test_mfa_verify_mfa_not_enabled():
     user, _ = _make_user("mfa_not_enabled")
@@ -138,6 +150,7 @@ def test_mfa_verify_mfa_not_enabled():
 
 
 # â”€â”€ OAuth production guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 
 def test_oauth_callback_raises_in_production(monkeypatch):
     monkeypatch.setenv("ENV", "production")
@@ -160,6 +173,7 @@ def test_oauth_mock_works_in_dev(monkeypatch):
 
 
 # â”€â”€ Admin seeding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 
 def test_admin_user_exists():
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
@@ -189,11 +203,15 @@ def test_admin_login_works(monkeypatch):
     user = AuthService.validate_token(token.access_token)
     assert user.role == UserRole.ADMIN
 
+
 def test_admin_password_production_guard(monkeypatch):
     monkeypatch.setenv("ENV", "production")
     monkeypatch.setenv("ADMIN_PASSWORD", "ZeroPhish@Admin1")
     from auth.service import _seed_admin, _users_by_email, _users_by_id
+
     _users_by_email.clear()
     _users_by_id.clear()
-    with pytest.raises(RuntimeError, match="ADMIN_PASSWORD must be set to a non-default value in production"):
+    with pytest.raises(
+        RuntimeError, match="ADMIN_PASSWORD must be set to a non-default value in production"
+    ):
         _seed_admin()
