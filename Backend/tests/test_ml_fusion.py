@@ -76,3 +76,28 @@ async def test_mock_phishing_predictor():
     score_empty, cat_empty = await predictor.predict("")
     assert score_empty == 0.0
     assert cat_empty == "safe"
+
+
+def test_models_metadata_schema():
+    """Verify models.json contains verified models and required schema fields."""
+    import json
+    from pathlib import Path
+
+    meta_file = Path(__file__).resolve().parents[1] / "ml" / "metadata" / "models.json"
+    assert meta_file.exists()
+
+    with open(meta_file, "r") as f:
+        data = json.load(f)
+
+    models = data.get("models", {})
+    assert "url_primary" in models
+    assert "url_baseline" in models
+    assert "email_primary" in models
+
+    for key, spec in models.items():
+        assert "model_id" in spec
+        assert "revision" in spec
+        assert "license" in spec
+        assert "format" in spec
+        assert "sha256" in spec
+        assert spec.get("trust_remote_code") is False

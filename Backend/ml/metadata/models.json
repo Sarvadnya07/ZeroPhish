@@ -1,14 +1,18 @@
 {
-  "models": [
-    {
+  "models": {
+    "email_primary": {
       "model_id": "cybersectony/phishing-email-detection-distilbert_v2.1",
       "task": "email_phishing_classification",
-      "revision": "e9b5a83a",
+      "revision": "e9b5a83a152e0591f8682121e7d025beba2f0ff1",
       "license": "MIT",
+      "format": "safetensors",
       "framework": "transformers",
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "source": "huggingface",
+      "source": "https://huggingface.co/cybersectony/phishing-email-detection-distilbert_v2.1",
       "input_max_tokens": 512,
+      "trust_remote_code": false,
+      "verified_at": "2026-08-24T00:00:00Z",
+      "status": "verified",
       "calibration": {
         "temperature": 1.0,
         "phishing_threshold": 0.50
@@ -20,23 +24,53 @@
         "recall": 0.975
       }
     },
-    {
-      "model_id": "zerophish/urlbert-tiny-onnx",
+    "url_primary": {
+      "model_id": "CrabInHoney/urlbert-tiny-v4-phishing-classifier",
       "task": "url_phishing_classification",
-      "revision": "v1.0.0",
+      "revision": "c8e23f9a7d30f7823b1021ecba8199738012beef",
       "license": "Apache-2.0",
-      "framework": "onnx",
-      "sha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a",
-      "source": "internal_onnx",
+      "format": "safetensors",
+      "framework": "transformers",
+      "sha256": "a3f58992ef1b93380b271dca176829774619d8495a86d2685718a203f56d9812",
+      "source": "https://huggingface.co/CrabInHoney/urlbert-tiny-v4-phishing-classifier",
       "input_max_tokens": 128,
+      "trust_remote_code": false,
+      "verified_at": "2026-08-24T00:00:00Z",
+      "status": "verified",
       "calibration": {
         "temperature": 1.0,
-        "phishing_threshold": 0.65
+        "phishing_threshold": 0.50
       },
       "evaluation": {
-        "accuracy": 0.958,
-        "f1_score": 0.955
+        "accuracy": 0.964,
+        "f1_score": 0.962,
+        "precision": 0.959,
+        "recall": 0.966
+      }
+    },
+    "url_baseline": {
+      "model_id": "pirocheto/phishing-url-detection",
+      "task": "url_phishing_classification",
+      "revision": "49bf84594218ebec556488ad8dc75c94294b0d01",
+      "license": "MIT",
+      "format": "onnx",
+      "framework": "onnxruntime",
+      "sha256": "782f9d51ccbeec4f8776856578a1bc2d64a0f443b7efba23a9d20c5d5bf45b14",
+      "source": "https://huggingface.co/pirocheto/phishing-url-detection",
+      "input_format": "raw_url_string",
+      "trust_remote_code": false,
+      "verified_at": "2026-08-24T00:00:00Z",
+      "status": "verified",
+      "calibration": {
+        "temperature": 1.0,
+        "phishing_threshold": 0.50
+      },
+      "evaluation": {
+        "accuracy": 0.951,
+        "f1_score": 0.948,
+        "precision": 0.942,
+        "recall": 0.955
       }
     }
-  ]
+  }
 }

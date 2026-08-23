@@ -48,3 +48,13 @@ next-env.d.ts
 Thumbs.db
 .vscode/
 .idea/
+
+# Local ML Model Artifacts & Weights (Never commit binaries)
+models/
+Backend/models/
+Backend/ml/models/
+*.onnx
+*.safetensors
+*.bin
+*.pt
+
