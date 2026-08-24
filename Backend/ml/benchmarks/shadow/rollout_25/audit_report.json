@@ -23,7 +23,7 @@
     ]
   },
   "separation_audit": {
-    "canary_run_id": "rollout25_edb9dc4bda79",
+    "canary_run_id": "rollout25_0e9903160d63",
     "unique_observation_ids_confirmed": true,
     "id_overlap_count": 0,
     "provenance_confirmed": "REAL_STAGING_EXTERNAL"

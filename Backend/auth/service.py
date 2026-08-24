@@ -86,11 +86,14 @@ class AuthService:
 
         uid = str(uuid.uuid4())
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        # Always enforce USER role for public self-registration (prevent role escalation)
+        enforced_role = UserRole.USER
+
         user_in_db = UserInDB(
             id=uid,
             email=data.email,
             full_name=data.full_name,
-            role=data.role,
+            role=enforced_role,
             status=UserStatus.ACTIVE,
             created_at=now,
             password_hash=hash_password(data.password),
@@ -98,31 +101,32 @@ class AuthService:
         saved = repo.save(user_in_db)
         _users_by_id[saved.id] = saved
         _users_by_email[saved.email] = saved.id
-        logging.getLogger("security.auth").info(
-            "AUTH_REGISTER_SUCCESS user_id=%s role=%s", saved.id, saved.role
-        )
+        from security.audit_logger import log_register
+
+        log_register(user_id=saved.id, role=saved.role.value)
         return User(**saved.model_dump(exclude={"password_hash", "mfa_secret"}))
 
     @staticmethod
     def login(data: UserLogin) -> Token:
-        _log = logging.getLogger("security.auth")
+        from security.audit_logger import log_login_failure, log_login_success
+
         repo = get_user_repository()
         user = repo.get_by_email(data.email)
+        domain = data.email.split("@")[-1] if "@" in data.email else "[unknown]"
         if not user:
-            domain = data.email.split("@")[-1] if "@" in data.email else "[unknown]"
-            _log.warning("AUTH_LOGIN_FAILED reason=user_not_found domain=%s", domain)
+            log_login_failure(reason="user_not_found", email_domain=domain)
             raise PermissionError("Invalid credentials")
         if user.status != UserStatus.ACTIVE:
-            _log.warning("AUTH_LOGIN_FAILED reason=account_suspended user_id=%s", user.id)
+            log_login_failure(reason="account_suspended", user_id=user.id)
             raise PermissionError("Account suspended")
         if not verify_password(data.password, user.password_hash):
-            _log.warning("AUTH_LOGIN_FAILED reason=invalid_password user_id=%s", user.id)
+            log_login_failure(reason="invalid_password", user_id=user.id)
             raise PermissionError("Invalid credentials")
 
         user.last_login = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         repo.save(user)
         token = AuthService._issue_token(user)
-        _log.info("AUTH_LOGIN_SUCCESS user_id=%s role=%s", user.id, user.role)
+        log_login_success(user_id=user.id, role=user.role.value)
         return token
 
     @staticmethod
@@ -147,8 +151,26 @@ class AuthService:
     @staticmethod
     def logout(token: str) -> None:
         repo = get_user_repository()
+        user_db = repo.validate_token(token)
+        if user_db:
+            from security.audit_logger import log_logout
+
+            log_logout(user_id=user_db.id)
         repo.revoke_token(token)
         _tokens.pop(token, None)
+
+    @staticmethod
+    def change_password(user_id: str, current_password: str, new_password: str) -> None:
+        repo = get_user_repository()
+        user = repo.get_by_id(user_id)
+        if not user or not verify_password(current_password, user.password_hash):
+            raise ValueError("Current password incorrect")
+        if len(new_password) < 8 or len(new_password) > 128:
+            raise ValueError("Password must be between 8 and 128 characters")
+
+        user.password_hash = hash_password(new_password)
+        repo.save(user)
+        _users_by_id[user.id] = user
 
     @staticmethod
     def get_user(user_id: str) -> Optional[User]:
@@ -203,9 +225,12 @@ class AuthService:
 
     @staticmethod
     def verify_mfa(user_id: str, code: str) -> bool:
+        from security.audit_logger import log_mfa_failure, log_mfa_success
+
         repo = get_user_repository()
         user = repo.get_by_id(user_id)
         if not user or not user.mfa_secret:
+            log_mfa_failure(user_id=user_id, reason="no_mfa_secret")
             return False
         try:
             import pyotp  # type: ignore
@@ -218,6 +243,9 @@ class AuthService:
         if valid:
             user.mfa_enabled = True
             repo.save(user)
+            log_mfa_success(user_id=user_id)
+        else:
+            log_mfa_failure(user_id=user_id, reason="invalid_code")
         return valid
 
     # ── OAuth ─────────────────────────────────────────────────────────────────

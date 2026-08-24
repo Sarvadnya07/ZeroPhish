@@ -108,13 +108,16 @@ def update_me(update: UserUpdate, current_user: User = Depends(require_auth)):
 
 
 @router.post("/auth/password/change", status_code=204)
-def change_password(req: PasswordChangeRequest, current_user: User = Depends(require_auth)):
-    user_db = _users_by_id.get(current_user.id)
-    if not user_db or not verify_password(req.current_password, user_db.password_hash):
-        raise HTTPException(status_code=400, detail="Current password incorrect")
-    from .models import hash_password
-
-    user_db.password_hash = hash_password(req.new_password)
+@limiter.limit("5/minute")
+def change_password(
+    request: Request,
+    req: PasswordChangeRequest,
+    current_user: User = Depends(require_auth),
+):
+    try:
+        AuthService.change_password(current_user.id, req.current_password, req.new_password)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ── MFA ───────────────────────────────────────────────────────────────────────
@@ -126,7 +129,12 @@ def mfa_setup(current_user: User = Depends(require_auth)):
 
 
 @router.post("/auth/mfa/verify")
-def mfa_verify(body: MFAVerify, current_user: User = Depends(require_auth)):
+@limiter.limit("5/minute")
+def mfa_verify(
+    request: Request,
+    body: MFAVerify,
+    current_user: User = Depends(require_auth),
+):
     ok = AuthService.verify_mfa(current_user.id, body.code)
     if not ok:
         raise HTTPException(status_code=400, detail="Invalid or expired MFA code")

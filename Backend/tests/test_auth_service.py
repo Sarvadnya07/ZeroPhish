@@ -176,6 +176,9 @@ def test_oauth_mock_works_in_dev(monkeypatch):
 
 
 def test_admin_user_exists():
+    from auth.service import _seed_admin
+
+    _seed_admin()
     admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     assert admin_email in _users_by_email
 

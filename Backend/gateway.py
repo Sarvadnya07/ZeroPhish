@@ -77,6 +77,7 @@ try:
 except ImportError:
     ShadowCascadeManager = None
 
+load_dotenv(BACKEND_DIR / ".env")
 load_dotenv()
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -132,24 +133,43 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(RequestSizeLimitMiddleware, max_size=1_000_000)
-
-ALLOWED_ORIGINS = [
-    o.strip()
-    for o in os.getenv("ALLOWED_ORIGINS", "").split(",")
-    if o.strip() and o.strip() != "chrome-extension://*"
+DEFAULT_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://localhost:8001",
+    "http://127.0.0.1:8001",
 ]
+
+env_origins = os.getenv("ALLOWED_ORIGINS")
+if env_origins:
+    ALLOWED_ORIGINS = [
+        o.strip()
+        for o in env_origins.split(",")
+        if o.strip() and o.strip() != "chrome-extension://*"
+    ]
+else:
+    ALLOWED_ORIGINS = list(DEFAULT_ALLOWED_ORIGINS)
+
+if os.getenv("ENV", "development") != "production":
+    for default_orig in DEFAULT_ALLOWED_ORIGINS:
+        if default_orig not in ALLOWED_ORIGINS:
+            ALLOWED_ORIGINS.append(default_orig)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX"),
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "Cookie", "X-API-Key", "X-Request-ID"],
+    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX")
+    or r"^http://(localhost|127\.0\.0\.1):(3000|8000|8001)$",
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+    allow_headers=["*"],
     allow_credentials=True,
-    expose_headers=["X-Request-ID"],
+    expose_headers=["*"],
 )
+
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestSizeLimitMiddleware, max_size=1_000_000)
 
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter

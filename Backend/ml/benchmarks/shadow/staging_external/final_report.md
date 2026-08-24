@@ -4,7 +4,7 @@
 
 - **Staging Base URL:** `http://127.0.0.1:8000`
 - **Execution Status:** `COMPLETE`
-- **Run ID:** `ext_run_6bc24c62cd0c`
+- **Run ID:** `ext_run_60c3301e6920`
 - **Transport Mode:** `HTTP_TCP_SOCKET (True network client)`
 
 ---
@@ -23,9 +23,9 @@
 
 ## 3. Latency Quantiles (Empirical Dynamic Arrays)
 
-- **Client HTTP p50:** **0.238 ms**
-- **Client HTTP p95:** **0.387 ms**
-- **Client HTTP p99:** **0.414 ms**
+- **Client HTTP p50:** **0.227 ms**
+- **Client HTTP p95:** **0.320 ms**
+- **Client HTTP p99:** **0.327 ms**
 - **Static Constants:** Eliminated.
 
 ---

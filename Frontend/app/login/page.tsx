@@ -1,12 +1,22 @@
 "use client";
-import React, { useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { Shield, Lock, Mail, Eye, EyeOff, AlertCircle } from "lucide-react";
 
-export default function LoginPage() {
+function getSafeRedirectUrl(target: string | null): string {
+  if (!target) return "/dashboard";
+  // Must be a relative path, must start with / and not // (protocol-relative)
+  if (target.startsWith("/") && !target.startsWith("//") && !target.includes("://")) {
+    return target;
+  }
+  return "/dashboard";
+}
+
+function LoginForm() {
   const { login, register } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -26,7 +36,10 @@ export default function LoginPage() {
         await register(email, password, name);
         await login(email, password);
       }
-      router.replace("/dashboard");
+      const redirectTarget = getSafeRedirectUrl(
+        searchParams?.get("next") ?? searchParams?.get("redirect")
+      );
+      router.replace(redirectTarget);
     } catch (err: any) {
       setError(err.message ?? "Authentication failed");
     } finally {
@@ -56,10 +69,13 @@ export default function LoginPage() {
         <div className="bg-zinc-900/80 backdrop-blur border border-zinc-800 rounded-2xl p-8 shadow-2xl">
           {/* Mode toggle */}
           <div className="flex rounded-lg bg-zinc-800/50 p-1 mb-6">
-            {(["login", "register"] as const).map(m => (
+            {(["login", "register"] as const).map((m) => (
               <button
                 key={m}
-                onClick={() => { setMode(m); setError(null); }}
+                onClick={() => {
+                  setMode(m);
+                  setError(null);
+                }}
                 className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${
                   mode === m
                     ? "bg-cyan-500/20 text-cyan-400 shadow-sm"
@@ -74,11 +90,13 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             {mode === "register" && (
               <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1.5">Full Name</label>
+                <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+                  Full Name
+                </label>
                 <input
                   type="text"
                   value={name}
-                  onChange={e => setName(e.target.value)}
+                  onChange={(e) => setName(e.target.value)}
                   placeholder="Jane Smith"
                   required
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500 transition-colors"
@@ -87,13 +105,15 @@ export default function LoginPage() {
             )}
 
             <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1.5">Email</label>
+              <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+                Email
+              </label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
                 <input
                   type="email"
                   value={email}
-                  onChange={e => setEmail(e.target.value)}
+                  onChange={(e) => setEmail(e.target.value)}
                   placeholder="analyst@org.com"
                   required
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500 transition-colors"
@@ -102,13 +122,15 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1.5">Password</label>
+              <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+                Password
+              </label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
                 <input
                   type={showPw ? "text" : "password"}
                   value={password}
-                  onChange={e => setPassword(e.target.value)}
+                  onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   required
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-lg pl-10 pr-10 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500 transition-colors"
@@ -118,7 +140,11 @@ export default function LoginPage() {
                   onClick={() => setShowPw(!showPw)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
                 >
-                  {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showPw ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
                 </button>
               </div>
             </div>
@@ -140,18 +166,38 @@ export default function LoginPage() {
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   {mode === "login" ? "Signing in…" : "Creating account…"}
                 </span>
-              ) : mode === "login" ? "Sign In" : "Create Account"}
+              ) : mode === "login" ? (
+                "Sign In"
+              ) : (
+                "Create Account"
+              )}
             </button>
           </form>
 
           {mode === "login" && (
             <p className="text-center text-xs text-zinc-500 mt-4">
               Default admin:{" "}
-              <span className="text-zinc-400 font-mono">admin@zerophish.local</span>
+              <span className="text-zinc-400 font-mono">
+                admin@zerophish.local
+              </span>
             </p>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#050505] flex items-center justify-center p-4">
+          <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }

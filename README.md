@@ -284,11 +284,12 @@ If the request is a cache miss, the gateway fires asynchronous threads to evalua
 
 ### Prerequisites
 
-- **Python 3.10+**
-- **Node.js 18+** and **pnpm** (or npm)
-- **Redis** (optional, for caching — falls back gracefully without it)
-- **Google Chrome** (for the extension)
-- A **Gemini API Key** from [Google AI Studio](https://ai.google.dev/) (optional — Tier 3 is skipped without it)
+- **Python 3.13** (or Python 3.11+)
+- **Node.js 20+** (v22/v26 recommended) and **pnpm** (`pnpm@10+` or `pnpm@11+`)
+- **Google Chrome** (for the Sentinel Chrome Extension)
+- **Git** (for repository version control)
+- **Redis** *(Optional for local dev)* — Used for scan response caching and WHOIS lookups; falls back gracefully to in-memory caching if omitted.
+- **Google Gemini API Key** *(Optional)* — Obtained from [Google AI Studio](https://ai.google.dev/) for Tier-3 Semantic BEC analysis; Tier 3 is safely bypassed with neutral fallback if omitted.
 
 ---
 
@@ -299,83 +300,187 @@ git clone https://github.com/Sarvadnya07/ZeroPhish.git
 cd ZeroPhish
 ```
 
-### 2. Configure the Backend Environment
+---
 
-```bash
-cd Backend
-cp .env.example .env
+### 2. Create and Activate Python Virtual Environment
+
+Always install ZeroPhish backend dependencies inside a dedicated virtual environment.
+
+**Windows (PowerShell):**
+```powershell
+py -3.13 -m venv .venv
+.\.venv\Scripts\Activate.ps1
 ```
 
-Edit `.env` and fill in your values:
+**Unix / macOS (Bash / Zsh):**
+```bash
+python3.13 -m venv .venv
+source .venv/bin/activate
+```
+
+---
+
+### 3. Configure Backend Environment
+
+Copy the environment template to create your local `.env` configuration:
+
+**Windows (PowerShell):**
+```powershell
+Copy-Item Backend\.env.example Backend\.env
+```
+
+**Unix / macOS:**
+```bash
+cp Backend/.env.example Backend/.env
+```
+
+Edit `Backend/.env` to configure your environment settings:
 
 ```env
-# Required for Tier 3 AI analysis
+# ── General Server Configuration ─────────────────────
+ENV=development
+GATEWAY_PORT=8001
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=CHANGE_ME_BEFORE_PRODUCTION
+TIER3_TIMEOUT=5
+
+# ── CORS Configuration ────────────────────────────────
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8000,http://127.0.0.1:3000,http://127.0.0.1:8000
+
+# ── External AI & Metadata (Tier 3) ───────────────────
+# Optional: Required for Gemini AI threat analysis
 GEMINI_API_KEY=your_actual_gemini_api_key_here
 
-# CORS origins (comma-separated)
-ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8000
-
-# Optional: Redis for caching
+# ── Caching & Persistent Stores ───────────────────────
+# Optional: Falls back to in-memory caching if Redis is offline
 REDIS_URL=redis://localhost:6379
 
-# Optional: API key for production security
-# API_KEY=your_secure_api_key_here
-
-# Tier 3 (Gemini) timeout in seconds
-TIER3_TIMEOUT=5
+# ── WHOIS Provider ────────────────────────────────────
+WHOIS_API_PROVIDER=whoisxml
+WHOIS_API_KEY=
 ```
 
-### 3. Install Backend Dependencies
+> [!IMPORTANT]
+> Never commit `.env` or `.env.staging` files to Git. All secret variables must remain outside source control. Refer to [SECURITY.md](SECURITY.md) for full secret hygiene guidelines.
 
-```bash
-cd Backend
-pip install -r requirements.txt
+---
+
+### 4. Install Backend Dependencies
+
+From the repository root, install backend requirements into your active virtual environment:
+
+```powershell
+python -m pip install --upgrade pip
+python -m pip install -r Backend\requirements.txt
 ```
 
-> **Note for Windows:** If you encounter issues with `torch`, install the CPU-only version:
-> ```bash
-> pip install torch --index-url https://download.pytorch.org/whl/cpu
-> ```
-
-### 4. Start the Backend Services
-
-Open **two terminals**:
-
-**Terminal 1 — Tier 2 Analysis Backend (port 8000):**
-```bash
-cd Backend/tier_2
-python main.py
+Verify dependency integrity:
+```powershell
+python -m pip check
 ```
 
-**Terminal 2 — API Gateway (port 8001):**
-```bash
+---
+
+### 5. Start the Backend API Gateway
+
+The API Gateway (`Backend/gateway.py`) is the canonical single entrypoint for all scan orchestration, heuristic analysis, ML predictors, and SSE streams.
+
+From the repository root:
+```powershell
+python -m uvicorn Backend.gateway:app --host 0.0.0.0 --port 8001 --reload
+```
+
+Or from the `Backend/` directory:
+```powershell
 cd Backend
 python gateway.py
 ```
 
-Verify services are running:
-```bash
-curl http://localhost:8000/health
-curl http://localhost:8001/gateway/health
+Verify the backend service is healthy:
+```powershell
+curl http://localhost:8001/health
+curl http://localhost:8001/ready
 ```
 
-### 5. Install & Run the Frontend Dashboard
+---
 
-```bash
+### 6. Install & Run the Frontend Dashboard
+
+The ZeroPhish SOC Dashboard is a Next.js 16 (Turbopack) and React 19 application.
+
+In a **new terminal window**:
+```powershell
 cd Frontend
-pnpm install   # or: npm install
-pnpm dev       # or: npm run dev
+pnpm install
+pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-### 6. Load the Chrome Extension
+---
 
-1. Open **Chrome** and navigate to `chrome://extensions/`
-2. Enable **Developer mode** (top-right toggle)
+### 7. Load the Chrome Extension
+
+1. Open **Google Chrome** and navigate to `chrome://extensions/`
+2. Enable **Developer mode** via the top-right toggle
 3. Click **"Load unpacked"**
-4. Select the `Backend/extension/` folder
-5. The **ZeroPhish** icon will appear in your Chrome toolbar
+4. Select the `extension/` folder located in the root of the ZeroPhish repository
+5. The **ZeroPhish Sentinel** icon will appear in your Chrome toolbar / side panel
+
+---
+
+### 8. Verify the Installation
+
+Run the complete automated test suites to ensure all systems are functioning properly:
+
+```powershell
+# 1. Run Backend Unit & Integration Tests (322+ tests, 0 warnings)
+python -W error::RuntimeWarning -m pytest Backend/tests/ -q
+
+# 2. Run Frontend Vitest Suite (30/30 tests)
+cd Frontend
+pnpm test
+
+# 3. Verify Master Security Gate (Gitleaks, coverage, secret hygiene)
+cd ..
+powershell -ExecutionPolicy Bypass -File scripts\security-gate.ps1
+```
+
+---
+
+### 9. Optional: Isolated Staging Environment
+
+ZeroPhish includes an isolated staging environment with Docker Compose orchestration, separated database namespaces, and an observational cascade shadow pipeline.
+
+To start the staging environment:
+```powershell
+.\scripts\staging-up.ps1
+```
+
+Verify staging connectivity:
+```powershell
+.\scripts\staging-health.ps1
+```
+
+For complete deployment details, topology maps, and operational guides, see:
+- [Staging Architecture Guide](docs/staging/architecture.md)
+- [Staging Deployment Guide](docs/staging/deployment.md)
+- [Staging Operations Manual](docs/staging/operations.md)
+
+---
+
+### 🛠️ Troubleshooting
+
+- **PowerShell Script Execution:** If `Activate.ps1` or staging scripts fail to execute, run:
+  ```powershell
+  Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+  ```
+- **Port Conflicts (8001 / 3000):** If port 8001 is already in use, override it via `GATEWAY_PORT=8002` in `Backend/.env` or pass `--port 8002` to uvicorn.
+- **PyTorch CPU Wheel:** If running on Windows without a dedicated GPU, install the CPU-optimized PyTorch build:
+  ```powershell
+  python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+  ```
+- **Chrome Extension Reloading:** After making modifications to `extension/`, click the refresh icon on `chrome://extensions/` to apply changes.
 
 ---
 

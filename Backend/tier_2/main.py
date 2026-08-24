@@ -65,6 +65,7 @@ except ImportError:
         logger.warning("Enhanced WHOIS client not available")
 
 # Load environment variables
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 load_dotenv()
 
 # Redis imports
@@ -114,29 +115,45 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ZeroPhish Backend", lifespan=lifespan)
 
-# Security Middleware
-app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(RequestSizeLimitMiddleware, max_size=1_000_000)  # 1MB limit
-
 # CORS Configuration - Environment-based
-ALLOWED_ORIGINS = [
-    origin.strip()
-    for origin in os.getenv("ALLOWED_ORIGINS", "").split(",")
-    if origin.strip() and origin.strip() != "chrome-extension://*"
+DEFAULT_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://localhost:8001",
+    "http://127.0.0.1:8001",
 ]
+
+env_origins = os.getenv("ALLOWED_ORIGINS")
+if env_origins:
+    ALLOWED_ORIGINS = [
+        origin.strip()
+        for origin in env_origins.split(",")
+        if origin.strip() and origin.strip() != "chrome-extension://*"
+    ]
+else:
+    ALLOWED_ORIGINS = list(DEFAULT_ALLOWED_ORIGINS)
+
+if os.getenv("ENV", "development") != "production":
+    for default_orig in DEFAULT_ALLOWED_ORIGINS:
+        if default_orig not in ALLOWED_ORIGINS:
+            ALLOWED_ORIGINS.append(default_orig)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    # For security, do not default to allowing all Chrome extensions.
-    # To allow a specific extension, set ALLOW_ORIGIN_REGEX to match your
-    # extension's origin (e.g., r"chrome-extension://abcdefg...") or add
-    # the specific origin to ALLOWED_ORIGINS.
-    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX"),
-    allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Content-Type"],
-    allow_credentials=False,
+    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX")
+    or r"^http://(localhost|127\.0\.0\.1):(3000|8000|8001)$",
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=True,
+    expose_headers=["*"],
 )
+
+# Security Middleware
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestSizeLimitMiddleware, max_size=1_000_000)  # 1MB limit
 
 
 # --- DATA MODELS ---
