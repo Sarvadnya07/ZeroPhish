@@ -1,6 +1,6 @@
 {
   "baseline_full_hybrid_ms_per_1000": 15050.0,
-  "observed_cascade_ms_per_1000": 30869.1,
-  "reconciled_savings_ms_per_1000": -15819.1,
-  "percent_cpu_savings": -105.11
+  "observed_cascade_ms_per_1000": 20752.2,
+  "reconciled_savings_ms_per_1000": -5702.2,
+  "percent_cpu_savings": -37.89
 }

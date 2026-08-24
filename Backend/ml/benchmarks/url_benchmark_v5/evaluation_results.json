@@ -152,9 +152,9 @@
   },
   "latency": {
     "preprocessing_ms": 0.004,
-    "onnx_inference_ms": 0.001,
-    "urlbert_inference_ms": 0.005,
-    "hybrid_ms": 0.009,
+    "onnx_inference_ms": 0.002,
+    "urlbert_inference_ms": 0.008,
+    "hybrid_ms": 0.012,
     "warm_rss_mb": 118.4
   }
 }

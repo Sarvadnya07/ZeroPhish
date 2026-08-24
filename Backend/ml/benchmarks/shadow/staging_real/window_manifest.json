@@ -3,9 +3,9 @@
   "deployment_identifier": "zerophish-staging-v1.4.0",
   "commit_hash": "8f3b42a9c1e0",
   "configuration_hash": "c4ca4238a0b923820dcc509a6f75849b",
-  "timestamp": "2026-08-24T17:14:40.378096+00:00",
-  "observation_window_start": "2026-08-23T17:14:40.378096+00:00",
-  "observation_window_end": "2026-08-24T17:14:40.378096+00:00",
+  "timestamp": "2026-08-24T17:17:54.104025+00:00",
+  "observation_window_start": "2026-08-23T17:17:54.104025+00:00",
+  "observation_window_end": "2026-08-24T17:17:54.104025+00:00",
   "window_duration_hours": 24.0,
   "timezone": "UTC"
 }
