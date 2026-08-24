@@ -5,7 +5,7 @@
 | Execution Mode | p50 Latency | p95 Latency | p99 Latency | Mean Latency | Classification / Root Cause |
 | :--- | ---: | ---: | ---: | ---: | :--- |
 | **Cold Start (1st Sample)** | — | — | **658.215 ms** | **658.215 ms** | 🔴 **MODEL_LOAD_AND_TASK_SCHEDULING** (Initial event loop & thread pool warmup) |
-| **Warm Execution (50 Samples)** | **0.0776 ms** | **138.9405 ms** | **568.4540 ms** | **27.6928 ms** | 🟢 **NORMAL ASYNC EXECUTION** |
+| **Warm Execution (50 Samples)** | **0.0763 ms** | **136.8565 ms** | **496.3913 ms** | **24.7771 ms** | 🟢 **NORMAL ASYNC EXECUTION** |
 
 ---
 

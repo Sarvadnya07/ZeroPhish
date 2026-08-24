@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = "Continue"
+$ErrorActionPreference = "Continue"
 
 # ============================================================
 # ZeroPhish Security Gate
@@ -212,9 +212,12 @@ if ($EnvHistory) {
 }
 
 if (Has-Command "gitleaks") {
+    $ignorePath = Join-Path $RepoRoot ".gitleaksignore"
+    $ignoreArg = if (Test-Path $ignorePath) { @("--gitleaks-ignore-path", $ignorePath) } else { @() }
+
     Write-Host ""
     Write-Host "Running Gitleaks Git scan..." -ForegroundColor White
-    $gitleaksGit = gitleaks git --verbose 2>&1
+    $gitleaksGit = gitleaks git --verbose @ignoreArg 2>&1
     if ($LASTEXITCODE -eq 0 -or ($gitleaksGit -match "no leaks found")) {
         Pass "Gitleaks Git scan" "No leaks detected in Git commits."
     } else {
@@ -223,7 +226,7 @@ if (Has-Command "gitleaks") {
 
     Write-Host ""
     Write-Host "Running Gitleaks working-tree scan..." -ForegroundColor White
-    $gitleaksDetect = gitleaks detect --source $RepoRoot --verbose 2>&1
+    $gitleaksDetect = gitleaks detect --source $RepoRoot --verbose @ignoreArg 2>&1
     if ($LASTEXITCODE -eq 0 -or ($gitleaksDetect -match "no leaks found")) {
         Pass "Gitleaks working-tree scan" "No leaks detected in working tree."
     } else {

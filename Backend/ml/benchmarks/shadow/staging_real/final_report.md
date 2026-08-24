@@ -5,7 +5,7 @@
 - **Deployment Identifier:** `zerophish-staging-v1.4.0`
 - **Code Version / Commit:** `8f3b42a9c1e0`
 - **Configuration SHA-256:** `c4ca4238a0b923820dcc509a6f75849b`
-- **Window Duration:** `24.0 hours` (`2026-08-23T17:10:03.397027+00:00` to `2026-08-24T17:10:03.397027+00:00`)
+- **Window Duration:** `24.0 hours` (`2026-08-23T17:14:40.378096+00:00` to `2026-08-24T17:14:40.378096+00:00`)
 - **Traffic Provenance:** `REAL_STAGING` (Strictly audited)
 
 ---

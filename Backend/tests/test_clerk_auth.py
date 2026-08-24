@@ -12,13 +12,18 @@ from auth.service import AuthService, _users_by_clerk_id, _users_by_email, _user
 from gateway import app
 
 
+from repositories.factory import reset_repositories
+
+
 @pytest.fixture(autouse=True)
 def reset_auth_state(monkeypatch):
+    reset_repositories()
     _users_by_id.clear()
     _users_by_email.clear()
     _users_by_clerk_id.clear()
     monkeypatch.setenv("ZEROPHISH_TEST_AUTH", "true")
     yield
+    reset_repositories()
 
 
 @pytest.fixture

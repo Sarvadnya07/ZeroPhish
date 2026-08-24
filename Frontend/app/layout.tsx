@@ -23,10 +23,6 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         variables: {
           colorPrimary: "#00f0ff",
           colorBackground: "#09090b",
-          colorText: "#f8fafc",
-          colorTextSecondary: "#94a3b8",
-          colorInputBackground: "#18181b",
-          colorInputText: "#ffffff",
         },
       }}
     >

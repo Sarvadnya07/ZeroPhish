@@ -4,7 +4,7 @@
 
 - **Traffic Classification:** `CONTROLLED_STAGING` (Safe staging URL vectors)
 - **Workload Version:** `v1.0.0`
-- **Generator Run ID:** `gen_run_2d1cb1868efe`
+- **Generator Run ID:** `gen_run_b58ebdcaed6e`
 - **Total Requests Dispatched:** **20**
 - **Dispatched Rate:** `100.0 req/sec`
 
@@ -24,9 +24,9 @@
 
 | Metric | Client HTTP Latency | Server Cascade Shadow | User Response Delta |
 | :--- | ---: | ---: | :--- |
-| **p50 Latency** | **4.147 ms** | **0.021 ms** | **+0.001 ms** |
-| **p95 Latency** | **5.038 ms** | **0.200 ms** | **+0.001 ms** |
-| **p99 Latency** | **5.305 ms** | **15.050 ms** | **+0.001 ms** |
+| **p50 Latency** | **4.597 ms** | **0.021 ms** | **+0.001 ms** |
+| **p95 Latency** | **5.777 ms** | **0.200 ms** | **+0.001 ms** |
+| **p99 Latency** | **6.614 ms** | **15.050 ms** | **+0.001 ms** |
 
 ---
 
