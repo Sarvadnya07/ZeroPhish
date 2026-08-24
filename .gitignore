@@ -3,6 +3,10 @@ venv/
 env/
 .env
 .env.local
+.env.staging
+staging_data/
+*.staging.db
+staging_zerophish.db
 
 # Python
 __pycache__/

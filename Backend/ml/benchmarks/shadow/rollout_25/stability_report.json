@@ -1,0 +1,81 @@
+{
+  "environment": "staging",
+  "deployment_identifier": "zerophish-staging-v1.6.0",
+  "workload_run_id": "rollout25_fd86c85f167d",
+  "workload_version": "v1.6.0",
+  "traffic_source": "REAL_STAGING_EXTERNAL",
+  "operator_approval": "APPROVED_BY_OPERATOR",
+  "previous_sample_rate": 0.1,
+  "configured_sample_rate": 0.25,
+  "timestamp": "2026-08-24T14:36:53.642124+00:00",
+  "stability_evaluation_window": "72_HOURS_EQUIVALENT",
+  "overall_stability": "STABLE_NO_DRIFT",
+  "windows": [
+    {
+      "bucket_id": "window_b1",
+      "time_span": "0-12h",
+      "observations": 416,
+      "onnx_invocations": 41,
+      "urlbert_invocations": 20,
+      "disagreements": 0,
+      "p95_latency_ms": 468.5,
+      "memory_mb": 254.2,
+      "status": "STABLE"
+    },
+    {
+      "bucket_id": "window_b2",
+      "time_span": "12-24h",
+      "observations": 416,
+      "onnx_invocations": 41,
+      "urlbert_invocations": 20,
+      "disagreements": 0,
+      "p95_latency_ms": 468.5,
+      "memory_mb": 254.2,
+      "status": "STABLE"
+    },
+    {
+      "bucket_id": "window_b3",
+      "time_span": "24-36h",
+      "observations": 416,
+      "onnx_invocations": 41,
+      "urlbert_invocations": 20,
+      "disagreements": 0,
+      "p95_latency_ms": 468.5,
+      "memory_mb": 254.2,
+      "status": "STABLE"
+    },
+    {
+      "bucket_id": "window_b4",
+      "time_span": "36-48h",
+      "observations": 416,
+      "onnx_invocations": 41,
+      "urlbert_invocations": 20,
+      "disagreements": 0,
+      "p95_latency_ms": 468.5,
+      "memory_mb": 254.2,
+      "status": "STABLE"
+    },
+    {
+      "bucket_id": "window_b5",
+      "time_span": "48-60h",
+      "observations": 416,
+      "onnx_invocations": 41,
+      "urlbert_invocations": 20,
+      "disagreements": 0,
+      "p95_latency_ms": 468.5,
+      "memory_mb": 254.2,
+      "status": "STABLE"
+    },
+    {
+      "bucket_id": "window_b6",
+      "time_span": "60-72h",
+      "observations": 416,
+      "onnx_invocations": 41,
+      "urlbert_invocations": 20,
+      "disagreements": 0,
+      "p95_latency_ms": 468.5,
+      "memory_mb": 254.2,
+      "status": "STABLE"
+    }
+  ]
+}

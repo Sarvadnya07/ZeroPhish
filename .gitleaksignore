@@ -1,0 +1,2 @@
+# Gitleaks ignore list for test string vectors
+d0a9aa0dbe9c0b08c35047caeb5214a624b3ff27:Backend/ml/data/staging_workload.py:generic-api-key:60

@@ -1,0 +1,53 @@
+# ==============================================================================
+# ZeroPhish — Staging Deployment Topology
+# ==============================================================================
+# Isolated staging container stack with dedicated staging DB, Redis, and storage.
+# Run: docker compose -f docker-compose.staging.yml up -d
+
+services:
+  staging-backend:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile.staging
+    container_name: zerophish-staging-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ZEROPHISH_ENV=staging
+      - ZEROPHISH_STAGING_BASE_URL=http://127.0.0.1:8000
+      - ZEROPHISH_STAGING_ALLOWED_HOSTS=127.0.0.1,localhost,staging.zerophish.internal
+      - DATABASE_URL=sqlite:///./staging_data/staging_zerophish.db
+      - REDIS_URL=redis://staging-redis:6379/1
+      - ZEROPHISH_CASCADE_SHADOW_MODE=true
+      - ZEROPHISH_CASCADE_SHADOW_SAMPLE_RATE=0.10
+      - MAX_SHADOW_CASCADE_CONCURRENCY=10
+      - CASCADE_SHADOW_TIMEOUT_MS=2000
+      - STORAGE_PATH=/app/staging_data
+    volumes:
+      - staging_storage:/app/staging_data
+    depends_on:
+      - staging-redis
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  staging-redis:
+    image: redis:7.2-alpine
+    container_name: zerophish-staging-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - staging_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  staging_storage:
+  staging_redis_data:

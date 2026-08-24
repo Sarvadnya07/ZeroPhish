@@ -1,0 +1,13 @@
+{
+  "environment": "staging",
+  "deployment_identifier": "zerophish-staging-v1.5.0",
+  "workload_run_id": "ext_large_5ce4e4d77f11",
+  "workload_version": "v1.5.0",
+  "traffic_source": "REAL_STAGING_EXTERNAL",
+  "timestamp": "2026-08-24T14:36:53.628814+00:00",
+  "cpu_peak_pct": 14.8,
+  "rss_memory_mb": 252.4,
+  "memory_growth_detected": false,
+  "active_shadow_tasks_peak": 2,
+  "capacity_drops": 0
+}

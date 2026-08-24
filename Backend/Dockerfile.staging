@@ -1,0 +1,28 @@
+# Multi-stage Dockerfile for ZeroPhish Staging Service
+FROM python:3.13-slim
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    ZEROPHISH_ENV=staging
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python requirements
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Create staging directories
+RUN mkdir -p /app/staging_data
+
+EXPOSE 8000
+
+CMD ["uvicorn", "gateway:app", "--host", "0.0.0.0", "--port", "8000"]

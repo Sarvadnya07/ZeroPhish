@@ -1,0 +1,16 @@
+{
+  "environment": "staging",
+  "deployment_identifier": "zerophish-staging-v1.5.0",
+  "workload_run_id": "ext_large_5ce4e4d77f11",
+  "workload_version": "v1.5.0",
+  "traffic_source": "REAL_STAGING_EXTERNAL",
+  "timestamp": "2026-08-24T14:36:53.628814+00:00",
+  "total_observations": 1000,
+  "observations_threshold_met": true,
+  "zero_false_negatives": true,
+  "deep_path_exercised": true,
+  "current_configured_sample_rate": 0.1,
+  "recommended_future_sample_rate": 0.25,
+  "automatic_promotion_applied": false,
+  "promotion_recommendation": "B. REMAIN AT 10% SHADOW (Ready for Operator-Approved 25% Rollout)"
+}

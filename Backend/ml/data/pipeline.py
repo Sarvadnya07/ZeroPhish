@@ -484,6 +484,14 @@ def main():
             "stage-shadow",
             "real-staging-shadow",
             "external-staging-shadow",
+            "external-staging-check",
+            "external-staging-config-check",
+            "deep-path-shadow",
+            "large-staging-shadow",
+            "rollout-25-shadow",
+            "audit-25-shadow",
+            "rollout-50-shadow",
+            "audit-50-shadow",
         ],
         help="Action to execute",
     )
@@ -493,17 +501,211 @@ def main():
     parser.add_argument(
         "--allow-sample", action="store_true", help="Allow sample fallback for offline testing"
     )
+    parser.add_argument("--count", type=int, default=1000, help="Total requests to dispatch")
+    parser.add_argument("--rate", type=float, default=20.0, help="Request rate in req/sec")
+    parser.add_argument(
+        "--max-runtime", type=float, default=300.0, help="Global runtime deadline in seconds"
+    )
+    parser.add_argument(
+        "--max-errors", type=int, default=10, help="Max error budget before fail-stop"
+    )
+    parser.add_argument("--concurrency", type=int, default=20, help="Max concurrent requests")
+    parser.add_argument("--progress-every", type=int, default=100, help="Progress report interval")
+    parser.add_argument("--base-url", type=str, default=None, help="Staging base URL override")
 
     args = parser.parse_args()
 
-    if args.action == "external-staging-shadow":
-        from ml.data.external_staging_client import ExternalStagingClient
-        print("Executing True External Staging Traffic Verification...")
-        res = asyncio.run(ExternalStagingClient.dispatch_external_workload(count=1000, rate_rps=50.0))
-        print(f"\n--- External Staging Validation Complete ---")
-        print(f"Total Requests Dispatched: {res['requests_sent']}")
-        print(f"Shadow Observations Recorded: {res['shadow_recorded']}")
+    if args.action == "audit-50-shadow":
+        from ml.shadow.rollout_50_audit import Rollout50AuditEngine
+
+        print("Executing Phase 17.1 50% Shadow Rollout Integrity & Freshness Audit...")
+        res = Rollout50AuditEngine.audit_rollout_50()
+        print(f"\n--- Phase 17.1 Audit Complete ---")
+        print(f"Audit Status: {res['audit_status']}")
+        print(f"Classification: {res['classification']}")
+        print(f"Sampling: Realized={res['sampling_audit']['realized_sample_rate']*100}%")
+        print(f"Provenance Status: {res['provenance_audit']['tier_50pct_10k_projection']}")
+        print(f"ONNX 95% CI: {res['stage_distribution_audit']['onnx_95pct_ci']}")
+        print(f"URLBERT 95% CI: {res['stage_distribution_audit']['urlbert_95pct_ci']}")
+        print(f"Critical False Negatives: {res['security_audit']['critical_false_negatives']}")
+
+    elif args.action == "rollout-50-shadow":
+        from ml.shadow.rollout_50_evaluator import Rollout50Evaluator
+
+        print("Executing Operator-Approved 50% Shadow Scaling & Resource Safety Validation...")
+        res = asyncio.run(
+            Rollout50Evaluator.run_50_percent_rollout(
+                canary_target=1000,
+                sample_rate=0.50,
+            )
+        )
+        print(f"\n--- 50% Shadow Scaling Validation Complete ---")
+        print(f"Canary Observations: {res['canary_observations']}")
+        print(f"Total Requests Dispatched: {res['total_requests']}")
+        print(f"ONNX Invocations: {res['onnx_invocations']}")
+        print(f"URLBERT Invocations: {res['urlbert_invocations']}")
+        print(f"Critical False Negatives: {res['critical_false_negatives']}")
+        print(f"Recommendation: {res['recommendation']}")
+
+    elif args.action == "audit-25-shadow":
+        from ml.shadow.rollout_25_audit import Rollout25AuditEngine
+
+        print("Executing Phase 16.1 25% Shadow Rollout Integrity & Measurement Audit...")
+        res = Rollout25AuditEngine.audit_rollout_25()
+        print(f"\n--- Phase 16.1 Audit Complete ---")
+        print(f"Audit Status: {res['audit_status']}")
+        print(f"Classification: {res['classification']}")
+        print(
+            f"Sampling: Canary={res['sampling_audit']['canary_rate']*100}%, Extended={res['sampling_audit']['extended_rate']*100}%"
+        )
+        print(f"ONNX 95% CI: {res['stage_distribution_audit']['onnx_95pct_ci']}")
+        print(f"URLBERT 95% CI: {res['stage_distribution_audit']['urlbert_95pct_ci']}")
+        print(f"Critical False Negatives: {res['security_audit']['critical_false_negatives']}")
+
+    elif args.action == "rollout-25-shadow":
+        from ml.shadow.rollout_25_evaluator import Rollout25Evaluator
+
+        print("Executing Operator-Approved 25% Shadow Rollout & Stability Validation...")
+        res = asyncio.run(
+            Rollout25Evaluator.run_25_percent_rollout(
+                canary_target=500,
+                extended_target=2500,
+                sample_rate=0.25,
+            )
+        )
+        print(f"\n--- 25% Shadow Rollout Validation Complete ---")
+        print(f"Canary Observations: {res['canary_observations']}")
+        print(f"Extended Observations: {res['extended_observations']}")
+        print(f"ONNX Invocations: {res['onnx_invocations']}")
+        print(f"URLBERT Invocations: {res['urlbert_invocations']}")
+        print(f"Critical False Negatives: {res['critical_false_negatives']}")
+        print(f"Recommendation: {res['recommendation']}")
+
+    elif args.action == "large-staging-shadow":
+        from ml.shadow.large_evaluator import LargeStagingShadowEvaluator
+
+        print("Executing Large External Staging Shadow Evaluation (Target: 1,000 observations)...")
+        res = asyncio.run(
+            LargeStagingShadowEvaluator.evaluate_large_shadow_workload(
+                target_observations=1000,
+                sample_rate=0.10,
+            )
+        )
+        print(f"\n--- Large External Staging Shadow Evaluation Complete ---")
+        print(f"Total Observations Evaluated: {res['target_observations']}")
+        print(f"Total Requests Dispatched: {res['total_requests']}")
+        print(f"ONNX Invocations: {res['onnx_invocations']}")
+        print(f"URLBERT Invocations: {res['urlbert_invocations']}")
+        print(f"Critical False Negatives: {res['critical_false_negatives']}")
+        print(f"Recommendation: {res['recommendation']}")
+
+    elif args.action == "deep-path-shadow":
+        from ml.shadow.deep_path import DeepPathValidator
+
+        print("Executing External Staging Performance & Deep-Path Cascade Validation...")
+        res = asyncio.run(DeepPathValidator.evaluate_deep_path(count_per_mode=100))
+        print(f"\n--- Deep-Path Validation Complete ---")
         print(f"Status: {res['status']}")
+        print(f"Confirmed ONNX Invocations: {res['onnx_invocations']}")
+        print(f"Confirmed URLBERT Invocations: {res['urlbert_invocations']}")
+        print(f"Shadow Overhead: +{res['shadow_overhead_ms']} ms")
+
+    elif args.action == "external-staging-config-check":
+        from ml.shadow.staging_config import ExternalStagingConfigValidator
+
+        print("Checking External Staging Configuration (Zero Network Calls)...")
+        is_valid, errors, cfg = ExternalStagingConfigValidator.load_and_validate(
+            base_url_override=args.base_url
+        )
+        if not is_valid:
+            print("\n[FAIL] External staging configuration:")
+            for err in errors:
+                print(f"  - ERROR [EXTERNAL_STAGING_CONFIG]: {err}")
+            sys.exit(1)
+        else:
+            print("\n[PASS] External staging configuration valid:")
+            print(f"  - Environment: {cfg.zerophish_env}")
+            print(f"  - Staging Base URL: {cfg.staging_base_url}")
+            print(f"  - Allowed Hosts: {cfg.staging_allowed_hosts}")
+            print(f"  - Connect Timeout: {cfg.connect_timeout_sec}s")
+            print(f"  - Read Timeout: {cfg.read_timeout_sec}s")
+            print(f"  - Request Deadline: {cfg.request_timeout_sec}s")
+            print(f"  - Max Runtime: {cfg.max_runtime_sec}s")
+            sys.exit(0)
+
+    elif args.action == "external-staging-check":
+        from ml.data.external_staging_client import ExternalStagingRunner
+        from ml.shadow.staging_config import ExternalStagingConfigValidator
+
+        is_valid, errors, cfg = ExternalStagingConfigValidator.load_and_validate(
+            base_url_override=args.base_url
+        )
+        if not is_valid:
+            print("\n[FAIL] External staging configuration invalid:")
+            for err in errors:
+                print(f"  - {err}")
+            sys.exit(1)
+
+        print(f"Executing Single Bounded Connectivity Check to {cfg.staging_base_url}...")
+        res = asyncio.run(ExternalStagingRunner.check_connectivity(cfg))
+        print("\n--- Staging Connectivity Report ---")
+        print(f"Environment: {cfg.zerophish_env}")
+        print(f"Hostname: {res['hostname']}")
+        print(f"TLS Enabled: {res['tls']}")
+        print(f"Latency: {res['latency_ms']} ms")
+        if res["reachable"]:
+            print(f"HTTP Status: {res['status_code']}")
+            print("Result: [PASS] STAGING_REACHABLE")
+            sys.exit(0)
+        else:
+            print(
+                f"Result: [FAIL] STAGING_UNREACHABLE ({res.get('error_type')}: {res.get('error_message')})"
+            )
+            sys.exit(1)
+
+    elif args.action == "external-staging-shadow":
+        from ml.data.external_staging_client import ExternalStagingRunner
+        from ml.shadow.staging_config import ExternalStagingConfigValidator
+
+        is_valid, errors, cfg = ExternalStagingConfigValidator.load_and_validate(
+            base_url_override=args.base_url,
+            max_runtime_override=args.max_runtime,
+            max_errors_override=args.max_errors,
+            concurrency_override=args.concurrency,
+            progress_every_override=args.progress_every,
+        )
+        if not is_valid:
+            print("\n[FAIL] External staging configuration invalid:")
+            for err in errors:
+                print(f"  - ERROR [EXTERNAL_STAGING_CONFIG]: {err}")
+            sys.exit(1)
+
+        print(
+            f"Starting True External Staging Workload Runner (Target: {cfg.staging_base_url}, Count: {args.count}, Rate: {args.rate} rps)..."
+        )
+        runner = ExternalStagingRunner(config=cfg)
+        try:
+            res = asyncio.run(
+                runner.execute_workload(
+                    count=args.count,
+                    rate_rps=args.rate,
+                )
+            )
+            print(f"\n--- External Staging Validation Finished ---")
+            print(f"Run ID: {res['run_id']}")
+            print(f"Execution Status: {res['status']}")
+            print(f"Requests Attempted: {res['accounting']['HTTP_REQUESTS_ATTEMPTED']}")
+            print(f"Requests Successful: {res['accounting']['HTTP_REQUESTS_SUCCESSFUL']}")
+            print(f"Requests Failed: {res['accounting']['HTTP_REQUESTS_FAILED']}")
+            print(f"Shadow Observations: {res['accounting']['SHADOW_OBSERVATIONS_RECORDED']}")
+            print(
+                f"Client Latency: p50={res['p50_ms']}ms, p95={res['p95_ms']}ms, p99={res['p99_ms']}ms"
+            )
+            if res["status"] in ("TIMEOUT", "PARTIAL", "FAILED_ERROR_BUDGET_EXCEEDED"):
+                sys.exit(1)
+        except KeyboardInterrupt:
+            print("\n[External Staging] Execution interrupted by operator (Ctrl+C). Cleaning up.")
+            sys.exit(1)
 
     elif args.action == "real-staging-shadow":
         from ml.shadow.real_staging import RealStagingTelemetryValidator

@@ -1,0 +1,61 @@
+{
+  "audit_status": "PHASE_17_VALID_WITH_CORRECTIONS",
+  "classification": "B. PHASE 17 VALID WITH CORRECTIONS",
+  "sampling_audit": {
+    "http_requests_attempted": 2000,
+    "shadow_observations_recorded": 1000,
+    "realized_sample_rate": 0.5,
+    "target_sample_rate": 0.5,
+    "sampling_deviation": 0.0
+  },
+  "provenance_audit": {
+    "canary_run_provenance": "OBSERVED (2,000 HTTP Requests -> 1,000 Shadow Observations)",
+    "tier_10pct_provenance": "OBSERVED (10,000 HTTP Requests -> 1,000 Shadow Observations)",
+    "tier_25pct_provenance": "OBSERVED (10,000 HTTP Requests -> 2,500 Shadow Observations)",
+    "tier_50pct_10k_projection": "PROJECTION_ONLY (Mathematically extrapolated to 10k requests; not an empirical 10k run)",
+    "empirical_request_volume_confirmed": 2000,
+    "empirical_observation_volume_confirmed": 1000
+  },
+  "stage_distribution_audit": {
+    "hard_rule_pct": 15.0,
+    "heuristic_pct": 70.0,
+    "onnx_pct": 10.0,
+    "onnx_95pct_ci": [
+      8.29,
+      12.02
+    ],
+    "urlbert_pct": 5.0,
+    "urlbert_95pct_ci": [
+      3.81,
+      6.53
+    ]
+  },
+  "latency_audit": {
+    "client_p50_ms": 458.77,
+    "server_p50_ms": 457.25,
+    "cascade_p50_ms": 0.023,
+    "rdap_whois_mean_ms": 448.5,
+    "overhead_at_50pct_ms": 0.02,
+    "static_placeholders_detected": false,
+    "latency_freshness_status": "VALIDATED_FRESH"
+  },
+  "security_audit": {
+    "total_disagreements": 0,
+    "critical_false_negatives": 0,
+    "hard_security_rule_preservation": "100.0% PRESERVED",
+    "production_invariance_pct": 100.0
+  },
+  "restart_audit": {
+    "leaked_tasks_detected": 0,
+    "runtime_warnings_emitted": 0,
+    "post_restart_health": "HTTP_200_OK",
+    "shadow_resumed_safely": true,
+    "status": "PASS"
+  },
+  "privacy_audit": {
+    "url_hashing": "SHA256",
+    "hostname_hashing": "SHA256",
+    "secrets_detected": 0,
+    "status": "PASS"
+  }
+}

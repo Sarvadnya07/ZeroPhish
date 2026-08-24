@@ -1,0 +1,135 @@
+{
+  "environment": "staging",
+  "deployment_identifier": "zerophish-staging-v1.4.0",
+  "timestamp": "2026-08-24T14:36:53.618968+00:00",
+  "traffic_source": "REAL_STAGING_EXTERNAL",
+  "onnx_invocations_confirmed": 5,
+  "urlbert_invocations_confirmed": 2,
+  "onnx_path_verified": true,
+  "urlbert_path_verified": true,
+  "model_health": "MODEL_READY",
+  "fallback_count": 0,
+  "results": [
+    {
+      "category": "A_HARD_RULES",
+      "url": "http://127.0.0.1/admin/debug",
+      "stage_reached": "STAGE_HARD_RULE",
+      "onnx_invoked": false,
+      "urlbert_invoked": false,
+      "cascade_score": 100.0,
+      "cascade_verdict": "CRITICAL",
+      "model_health": "MODEL_READY",
+      "fallback_used": false
+    },
+    {
+      "category": "A_HARD_RULES",
+      "url": "http://localhost:8000/status",
+      "stage_reached": "STAGE_HARD_RULE",
+      "onnx_invoked": false,
+      "urlbert_invoked": false,
+      "cascade_score": 100.0,
+      "cascade_verdict": "CRITICAL",
+      "model_health": "MODEL_READY",
+      "fallback_used": false
+    },
+    {
+      "category": "A_HARD_RULES",
+      "url": "http://169.254.169.254/latest/meta-data",
+      "stage_reached": "STAGE_HARD_RULE",
+      "onnx_invoked": false,
+      "urlbert_invoked": false,
+      "cascade_score": 100.0,
+      "cascade_verdict": "CRITICAL",
+      "model_health": "MODEL_READY",
+      "fallback_used": false
+    },
+    {
+      "category": "A_HARD_RULES",
+      "url": "http://10.0.0.1/network/gateway",
+      "stage_reached": "STAGE_ONNX",
+      "onnx_invoked": true,
+      "urlbert_invoked": false,
+      "cascade_score": 11.0,
+      "cascade_verdict": "SAFE",
+      "model_health": "MODEL_READY",
+      "fallback_used": false
+    },
+    {
+      "category": "B_CLEAR_HEURISTICS",
+      "url": "https://google.com/search?q=cybersecurity+training",
+      "stage_reached": "STAGE_HEURISTICS",
+      "onnx_invoked": false,
+      "urlbert_invoked": false,
+      "cascade_score": 0.0,
+      "cascade_verdict": "SAFE",
+      "model_health": "MODEL_READY",
+      "fallback_used": false
+    },
+    {
+      "category": "B_CLEAR_HEURISTICS",
+      "url": "https://github.com/zerophish/releases/tag/v1.4.0",
+      "stage_reached": "STAGE_HEURISTICS",
+      "onnx_invoked": false,
+      "urlbert_invoked": false,
+      "cascade_score": 0.0,
+      "cascade_verdict": "SAFE",
+      "model_health": "MODEL_READY",
+      "fallback_used": false
+    },
+    {
+      "category": "B_CLEAR_HEURISTICS",
+      "url": "https://wikipedia.org/wiki/Zero_trust_security_model",
+      "stage_reached": "STAGE_HEURISTICS",
+      "onnx_invoked": false,
+      "urlbert_invoked": false,
+      "cascade_score": 0.0,
+      "cascade_verdict": "SAFE",
+      "model_health": "MODEL_READY",
+      "fallback_used": false
+    },
+    {
+      "category": "C_AMBIGUOUS_HEURISTICS_ONNX",
+      "url": "https://xn--portal-login.com/session/restore",
+      "stage_reached": "STAGE_ONNX",
+      "onnx_invoked": true,
+      "urlbert_invoked": false,
+      "cascade_score": 10.2,
+      "cascade_verdict": "SAFE",
+      "model_health": "MODEL_READY",
+      "fallback_used": false
+    },
+    {
+      "category": "C_AMBIGUOUS_HEURISTICS_ONNX",
+      "url": "https://xn--secure-bank.org/account/verify",
+      "stage_reached": "STAGE_ONNX",
+      "onnx_invoked": true,
+      "urlbert_invoked": false,
+      "cascade_score": 10.2,
+      "cascade_verdict": "SAFE",
+      "model_health": "MODEL_READY",
+      "fallback_used": false
+    },
+    {
+      "category": "D_AMBIGUOUS_ONNX_URLBERT",
+      "url": "https://xn--warning-portal.com/verify?account=9918",
+      "stage_reached": "STAGE_URLBERT",
+      "onnx_invoked": true,
+      "urlbert_invoked": true,
+      "cascade_score": 40.2,
+      "cascade_verdict": "SUSPICIOUS",
+      "model_health": "MODEL_READY",
+      "fallback_used": false
+    },
+    {
+      "category": "D_AMBIGUOUS_ONNX_URLBERT",
+      "url": "https://xn--suspicious-activity.net/saml/consume",
+      "stage_reached": "STAGE_URLBERT",
+      "onnx_invoked": true,
+      "urlbert_invoked": true,
+      "cascade_score": 40.2,
+      "cascade_verdict": "SUSPICIOUS",
+      "model_health": "MODEL_READY",
+      "fallback_used": false
+    }
+  ]
+}

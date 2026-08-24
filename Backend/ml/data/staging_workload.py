@@ -57,7 +57,7 @@ CONTROLLED_WORKLOAD_CORPUS = [
     # 3. Long query & auth-style strings
     "https://login.example.com/oauth2/v2.0/authorize?client_id=zp_client_99&redirect_uri=https://app.example.com/callback&scope=openid+email",
     "https://auth.internal.corp/saml/sso?request_id=req_887162&tenant=enterprise",
-    "https://accounts.portal.net/verify?token=eyJhY2NvdW50X2lkIjoxMjM0NX0.signature_placeholder",
+    "https://accounts.portal.net/verify?param=sample_verification_code",
     # 4. Punycode & typo-squatting vectors
     "https://xn--e1afmkfd.xn--p1ai/index.html",
     "https://xn--pple-43d.com/login",

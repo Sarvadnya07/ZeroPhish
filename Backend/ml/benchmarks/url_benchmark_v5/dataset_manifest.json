@@ -1,7 +1,7 @@
 {
   "benchmark_id": "url_benchmark_v5",
   "schema_version": "v5",
-  "generation_timestamp": "2026-08-24T11:22:05.361966+00:00",
+  "generation_timestamp": "2026-08-24T14:36:58.319453+00:00",
   "dataset_sha256": "ddaddfd4c2200f419160ea0ffb014ec9141484f04b30c67f6caebbf321aec682",
   "total_records": 60,
   "unique_registered_domains": 58,

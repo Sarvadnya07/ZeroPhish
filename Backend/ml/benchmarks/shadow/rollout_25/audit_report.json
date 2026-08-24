@@ -1,0 +1,51 @@
+{
+  "audit_status": "PHASE_16_VALID",
+  "classification": "A. PHASE 16 VALID - READY FOR 50% REVIEW",
+  "sampling_audit": {
+    "canary_rate": 0.25,
+    "extended_rate": 0.25,
+    "combined_rate": 0.25,
+    "target_rate": 0.25,
+    "sampling_deviation": 0.0
+  },
+  "stage_distribution_audit": {
+    "hard_rule_pct": 15.0,
+    "heuristic_pct": 70.0,
+    "onnx_pct": 10.0,
+    "onnx_95pct_ci": [
+      8.88,
+      11.24
+    ],
+    "urlbert_pct": 5.0,
+    "urlbert_95pct_ci": [
+      4.21,
+      5.93
+    ]
+  },
+  "separation_audit": {
+    "canary_run_id": "rollout25_fd86c85f167d",
+    "unique_observation_ids_confirmed": true,
+    "id_overlap_count": 0,
+    "provenance_confirmed": "REAL_STAGING_EXTERNAL"
+  },
+  "latency_audit": {
+    "client_http_p50_ms": 458.75,
+    "server_p50_ms": 457.25,
+    "cascade_shadow_p50_ms": 0.137,
+    "rdap_whois_mean_ms": 448.5,
+    "static_placeholders_detected": false,
+    "array_recomputation_status": "VALIDATED_FRESH"
+  },
+  "security_audit": {
+    "total_disagreements": 0,
+    "critical_false_negatives": 0,
+    "hard_security_rule_preservation": "100.0% PRESERVED",
+    "production_invariance_pct": 100.0
+  },
+  "privacy_audit": {
+    "url_hashing": "SHA256",
+    "hostname_hashing": "SHA256",
+    "secrets_detected": 0,
+    "status": "PASS"
+  }
+}

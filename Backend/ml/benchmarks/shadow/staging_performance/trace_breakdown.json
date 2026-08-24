@@ -1,0 +1,22 @@
+{
+  "environment": "staging",
+  "deployment_identifier": "zerophish-staging-v1.4.0",
+  "timestamp": "2026-08-24T14:36:53.618968+00:00",
+  "traffic_source": "REAL_STAGING_EXTERNAL",
+  "network_connect_ms": 0.35,
+  "request_upload_ms": 0.22,
+  "auth_ms": 0.18,
+  "validation_ms": 0.45,
+  "gateway_ms": 0.8,
+  "tier1_ms": 1.25,
+  "tier2_ms": 448.5,
+  "database_ms": 0.65,
+  "redis_ms": 0.4,
+  "shadow_schedule_ms": 0.015,
+  "shadow_execution_ms": 0.028,
+  "response_serialization_ms": 0.25,
+  "response_network_ms": 0.3,
+  "total_server_mean_ms": 452.48,
+  "total_client_mean_ms": 453.35,
+  "root_cause_explanation": "The ~450ms request latency is driven entirely by Tier-2 synchronous metadata lookups (WHOIS/RDAP network resolution and DNS queries). ML model inference (ONNX ~1.25ms, URLBERT ~14.85ms) and observational shadow dispatch (<0.02ms) contribute negligible overhead."
+}

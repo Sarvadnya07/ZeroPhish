@@ -1,0 +1,34 @@
+{
+  "environment": "staging",
+  "deployment_identifier": "zerophish-staging-v1.4.0",
+  "workload_run_id": "ext_run_9d3c278aa12b",
+  "workload_version": "v1.4.0",
+  "staging_base_url": "http://127.0.0.1:8000",
+  "timestamp": "2026-08-24T14:36:53.358542+00:00",
+  "execution_status": "COMPLETE",
+  "HTTP_REQUESTS_ATTEMPTED": 10,
+  "HTTP_REQUESTS_SUCCESSFUL": 10,
+  "HTTP_REQUESTS_FAILED": 0,
+  "HTTP_REQUESTS_RETRIED": 0,
+  "SHADOW_SAMPLE_ELIGIBLE": 10,
+  "SHADOW_OBSERVATIONS_RECORDED": 1,
+  "SHADOW_OBSERVATIONS_SUCCESSFUL": 1,
+  "SHADOW_OBSERVATIONS_TIMEOUT": 0,
+  "SHADOW_OBSERVATIONS_ERROR": 0,
+  "SHADOW_OBSERVATIONS_DROPPED": 0,
+  "retry_metrics": {
+    "retry_total": 0,
+    "retry_by_reason": {
+      "connect_timeout": 0,
+      "read_timeout": 0,
+      "network_error": 0,
+      "rate_limited_429": 0,
+      "server_error_5xx": 0
+    },
+    "retry_exhausted": 0,
+    "rate_limited": 0,
+    "timeout_connect": 0,
+    "timeout_read": 0,
+    "timeout_total": 0
+  }
+}

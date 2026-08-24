@@ -1,0 +1,33 @@
+{
+  "environment": "staging",
+  "deployment_identifier": "zerophish-staging-v1.7.0",
+  "workload_run_id": "rollout50_a8db37905084",
+  "workload_version": "v1.7.0",
+  "traffic_source": "REAL_STAGING_EXTERNAL",
+  "operator_approval": "APPROVED_BY_OPERATOR",
+  "previous_sample_rate": 0.25,
+  "configured_sample_rate": 0.5,
+  "timestamp": "2026-08-24T14:36:53.657617+00:00",
+  "shadow_off": {
+    "client_p50_ms": 458.75,
+    "server_p50_ms": 457.25,
+    "cascade_p50_ms": 0.0
+  },
+  "shadow_10pct": {
+    "client_p50_ms": 458.765,
+    "server_p50_ms": 457.25,
+    "cascade_p50_ms": 0.023
+  },
+  "shadow_25pct": {
+    "client_p50_ms": 458.767,
+    "server_p50_ms": 457.25,
+    "cascade_p50_ms": 0.023
+  },
+  "shadow_50pct": {
+    "client_p50_ms": 458.77,
+    "server_p50_ms": 457.25,
+    "cascade_p50_ms": 0.023
+  },
+  "rdap_whois_mean_ms": 448.5,
+  "overhead_at_50pct_ms": 0.02
+}

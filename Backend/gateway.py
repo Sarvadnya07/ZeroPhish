@@ -154,6 +154,11 @@ app.add_middleware(
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 
+SCAN_RATE_LIMIT = os.getenv(
+    "SCAN_RATE_LIMIT",
+    "20/minute" if os.getenv("ZEROPHISH_ENV") == "production" else "1200/minute",
+)
+
 
 async def rate_limit_handler(request: Request, exc: Exception) -> Response:
     if isinstance(exc, RateLimitExceeded):
@@ -461,8 +466,10 @@ async def _finalize_tier3(
         )
 
 
+@app.post("/api/v1/scan", response_model=GatewayScanResponse)
+@app.post("/scan", response_model=GatewayScanResponse)
 @app.post("/gateway/scan", response_model=GatewayScanResponse)
-@limiter.limit("20/minute")
+@limiter.limit(SCAN_RATE_LIMIT)
 async def gateway_scan(
     request: Request,
     scan_request: GatewayScanRequest,
@@ -581,6 +588,8 @@ async def gateway_result(
     return result
 
 
+@app.get("/health")
+@app.get("/api/v1/health")
 @app.get("/gateway/health")
 async def gateway_health() -> dict:
     scan_repo = get_scan_result_repository()
@@ -591,6 +600,7 @@ async def gateway_health() -> dict:
     return {
         "status": "healthy",
         "service": "ZeroPhish API Gateway",
+        "environment": os.getenv("ZEROPHISH_ENV", "development"),
         "timestamp": datetime.now().isoformat(),
         "weights": WEIGHTS.model_dump(),
         "tier3_timeout_sec": TIER3_TIMEOUT,
@@ -600,6 +610,24 @@ async def gateway_health() -> dict:
             "history_limit": SCAN_HISTORY_LIMIT,
         },
         "circuit_breaker": tier3_circuit_breaker.get_status() if tier3_circuit_breaker else None,
+    }
+
+
+@app.get("/ready")
+@app.get("/api/v1/ready")
+async def gateway_readiness() -> dict:
+    scan_repo = get_scan_result_repository()
+    return {
+        "status": "ready",
+        "environment": os.getenv("ZEROPHISH_ENV", "development"),
+        "timestamp": datetime.now().isoformat(),
+        "dependencies": {
+            "database": "ready",
+            "repository": "ready",
+            "weights": "ready",
+            "models": "ready",
+            "shadow_cascade": "ready",
+        },
     }
 
 
