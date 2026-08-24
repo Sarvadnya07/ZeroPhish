@@ -6,7 +6,7 @@
 - **Total HTTP Requests Dispatched:** **10,000**
 - **Clean HTTP 200 Responses:** **10,000 (100.0%)**
 - **Qualifying Shadow Observations Recorded:** **1,000 (10.0% realized sample rate)**
-- **Workload Run ID:** `ext_large_5ce4e4d77f11`
+- **Workload Run ID:** `ext_large_823359655ec2`
 - **Workload Version:** `v1.5.0`
 
 ---

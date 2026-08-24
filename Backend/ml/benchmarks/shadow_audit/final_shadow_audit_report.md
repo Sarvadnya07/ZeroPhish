@@ -15,10 +15,10 @@
 
 | Metric | Phase 12 Reported | Recomputed from Raw Array | Forensic Status | Diagnosis / Notes |
 | :--- | ---: | ---: | :--- | :--- |
-| **p50 Latency** | `0.20 ms` | **0.0450 ms** | 🟢 **VERIFIED** | Fast heuristic / hard rule resolution |
-| **p95 Latency** | `1.45 ms` | **11.3640 ms** | 🔴 **CORRECTED** | Phase 12 reported theoretical model bound |
-| **p99 Latency** | `15.05 ms` | **669.9791 ms** | 🔴 **CORRECTED** | 15.05 ms was static full-hybrid constant |
-| **Mean Latency** | — | **28.0194 ms** | 🟢 **RECOMPUTED** | Actual average per-URL CPU time |
+| **p50 Latency** | `0.20 ms` | **0.0460 ms** | 🟢 **VERIFIED** | Fast heuristic / hard rule resolution |
+| **p95 Latency** | `1.45 ms` | **11.6954 ms** | 🔴 **CORRECTED** | Phase 12 reported theoretical model bound |
+| **p99 Latency** | `15.05 ms` | **655.7962 ms** | 🔴 **CORRECTED** | 15.05 ms was static full-hybrid constant |
+| **Mean Latency** | — | **27.0536 ms** | 🟢 **RECOMPUTED** | Actual average per-URL CPU time |
 
 > [!CAUTION]
 > **CORRECTION NOTICE:**
@@ -29,8 +29,8 @@
 ## 3. CPU Savings Recomputation
 
 - **Baseline Full Hybrid:** 15.05 ms / URL (15,050.0 ms / 1,000 URLs)
-- **Observed Benchmark Replay:** 28.0194 ms / URL (28019.4 ms / 1,000 URLs)
-- **Reconciled Savings:** -12969.4 ms / 1,000 URLs (--86.2%)
+- **Observed Benchmark Replay:** 27.0536 ms / URL (27053.6 ms / 1,000 URLs)
+- **Reconciled Savings:** -12003.6 ms / 1,000 URLs (--79.8%)
 - **Diagnosis of 13,600 ms claim:** Derived from (15.05 - 1.45) * 1000 ms (theoretical cascade) rather than empirical replay.
 
 ---

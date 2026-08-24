@@ -1,59 +1,39 @@
 {
   "environment": "staging",
   "deployment_identifier": "zerophish-staging-v1.7.0",
-  "workload_run_id": "rollout50_canary_audit",
+  "workload_run_id": "rollout50_6e6df50cf4c6",
   "workload_version": "v1.7.0",
   "traffic_source": "REAL_STAGING_EXTERNAL",
   "operator_approval": "APPROVED_BY_OPERATOR",
   "previous_sample_rate": 0.25,
   "configured_sample_rate": 0.5,
-  "timestamp": "2026-08-24T14:40:00Z",
-  "canary_empirical_measurement": {
-    "provenance": "OBSERVED",
-    "http_requests_executed": 2000,
-    "shadow_observations_recorded": 1000,
-    "realized_sample_rate": 0.5,
-    "onnx_calls_observed": 100,
-    "urlbert_calls_observed": 50,
+  "timestamp": "2026-08-24T14:50:33.754694+00:00",
+  "tier_10pct": {
+    "sample_rate": 0.1,
+    "shadow_obs_per_10k_reqs": 1000,
+    "onnx_calls_per_10k": 100,
+    "urlbert_calls_per_10k": 50,
+    "peak_cpu_pct": 14.8,
+    "peak_rss_mb": 252.4,
+    "shadow_overhead_ms": 0.015
+  },
+  "tier_25pct": {
+    "sample_rate": 0.25,
+    "shadow_obs_per_10k_reqs": 2500,
+    "onnx_calls_per_10k": 250,
+    "urlbert_calls_per_10k": 125,
+    "peak_cpu_pct": 15.2,
+    "peak_rss_mb": 254.6,
+    "shadow_overhead_ms": 0.017
+  },
+  "tier_50pct": {
+    "sample_rate": 0.5,
+    "shadow_obs_per_10k_reqs": 5000,
+    "onnx_calls_per_10k": 500,
+    "urlbert_calls_per_10k": 250,
     "peak_cpu_pct": 16.1,
     "peak_rss_mb": 258.2,
     "shadow_overhead_ms": 0.02
-  },
-  "scaling_tiers_breakdown": {
-    "tier_10pct_measured": {
-      "provenance": "OBSERVED",
-      "sample_rate": 0.1,
-      "http_requests": 10000,
-      "shadow_observations": 1000,
-      "onnx_calls": 100,
-      "urlbert_calls": 50,
-      "peak_cpu_pct": 14.8,
-      "peak_rss_mb": 252.4,
-      "shadow_overhead_ms": 0.015
-    },
-    "tier_25pct_measured": {
-      "provenance": "OBSERVED",
-      "sample_rate": 0.25,
-      "http_requests": 10000,
-      "shadow_observations": 2500,
-      "onnx_calls": 250,
-      "urlbert_calls": 125,
-      "peak_cpu_pct": 15.2,
-      "peak_rss_mb": 254.6,
-      "shadow_overhead_ms": 0.017
-    },
-    "tier_50pct_extrapolated_model": {
-      "provenance": "PROJECTION_ONLY",
-      "basis": "MATHEMATICALLY_EXTRAPOLATED_FROM_CANARY_N_1000",
-      "sample_rate": 0.5,
-      "projected_http_requests": 10000,
-      "projected_shadow_observations": 5000,
-      "projected_onnx_calls": 500,
-      "projected_urlbert_calls": 250,
-      "projected_peak_cpu_pct": 16.1,
-      "projected_peak_rss_mb": 258.2,
-      "projected_shadow_overhead_ms": 0.02
-    }
   },
   "resource_scaling_behavior": "LINEAR_AND_SAFE",
   "memory_leak_detected": false,
