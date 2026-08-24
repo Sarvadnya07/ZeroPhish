@@ -482,6 +482,8 @@ def main():
             "evaluate-shadow",
             "audit-shadow",
             "stage-shadow",
+            "real-staging-shadow",
+            "external-staging-shadow",
         ],
         help="Action to execute",
     )
@@ -494,7 +496,26 @@ def main():
 
     args = parser.parse_args()
 
-    if args.action == "stage-shadow":
+    if args.action == "external-staging-shadow":
+        from ml.data.external_staging_client import ExternalStagingClient
+        print("Executing True External Staging Traffic Verification...")
+        res = asyncio.run(ExternalStagingClient.dispatch_external_workload(count=1000, rate_rps=50.0))
+        print(f"\n--- External Staging Validation Complete ---")
+        print(f"Total Requests Dispatched: {res['requests_sent']}")
+        print(f"Shadow Observations Recorded: {res['shadow_recorded']}")
+        print(f"Status: {res['status']}")
+
+    elif args.action == "real-staging-shadow":
+        from ml.shadow.real_staging import RealStagingTelemetryValidator
+
+        print("Executing Real Staging Shadow Evaluation & Promotion Gate...")
+        res = asyncio.run(RealStagingTelemetryValidator.evaluate_real_staging_corpus())
+        print(f"\n--- Real Staging Shadow Validation Complete ---")
+        print(f"Total Staging Observations: {res['summary']['total_observations']}")
+        print(f"Gate Status: {res['summary']['gate_status']}")
+        print(f"Recommended Action: {res['gate_report']['recommended_action']}")
+
+    elif args.action == "stage-shadow":
         from ml.shadow.staging import StagingShadowEngine
 
         print("Executing Real Staging Shadow Evaluation & Tail-Latency Profiling...")

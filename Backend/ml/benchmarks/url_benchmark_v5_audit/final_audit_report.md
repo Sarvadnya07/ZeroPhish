@@ -7,7 +7,7 @@
 | **URL Preprocessing** | `0.002 ms` | `0.0355 ms` | 🟢 **VERIFIED ACCURATE** (Pure Python string operations) |
 | **URLBERT (Transformer)** | `0.003 ms` | **14.85 ms** | 🔴 **INVALID IN PHASE 9** (`MockURLPredictor` executed instead of real PyTorch BERT forward pass) |
 | **ONNX URL Baseline** | `0.001 ms` | **1.25 ms** | 🔴 **INVALID IN PHASE 9** (`MockURLPredictor` executed instead of real ONNX runtime session) |
-| **Mock Predictor** | `0.003 ms` | `0.0046 ms` | 🟢 **CONFIRMED BENCHMARK ARTIFACT SOURCE** |
+| **Mock Predictor** | `0.003 ms` | `0.0043 ms` | 🟢 **CONFIRMED BENCHMARK ARTIFACT SOURCE** |
 
 ---
 

@@ -4,10 +4,10 @@
 
 | Rollout Stage | Sample Rate | Observations | Gate Status | URLBERT Invocations | Potential FN Count | p95 Latency |
 | :--- | ---: | ---: | :--- | ---: | ---: | ---: |
-| **10% Shadow** | **10.0%** | 60 | 🟢 **PASSED** | 0.0% | **0** | 10.33 ms |
-| **25% Shadow** | **25.0%** | 60 | 🟢 **PASSED** | 0.0% | **0** | 10.58 ms |
-| **50% Shadow** | **50.0%** | 60 | 🟢 **PASSED** | 0.0% | **0** | 12.15 ms |
-| **100% Shadow** | **100.0%** | 60 | 🟢 **PASSED** | 0.0% | **0** | 10.84 ms |
+| **10% Shadow** | **10.0%** | 60 | 🟢 **PASSED** | 0.0% | **0** | 11.02 ms |
+| **25% Shadow** | **25.0%** | 60 | 🟢 **PASSED** | 0.0% | **0** | 10.77 ms |
+| **50% Shadow** | **50.0%** | 60 | 🟢 **PASSED** | 0.0% | **0** | 10.74 ms |
+| **100% Shadow** | **100.0%** | 60 | 🟢 **PASSED** | 0.0% | **0** | 10.96 ms |
 
 ---
 

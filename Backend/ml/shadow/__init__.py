@@ -11,6 +11,7 @@ from ml.shadow.manager import (
 )
 from ml.shadow.metrics import ShadowMetricsAggregator
 from ml.shadow.models import DisagreementTaxonomy, ExtendedShadowObservation, RolloutGateResult
+from ml.shadow.real_staging import RealStagingTelemetryValidator
 from ml.shadow.retention import ShadowRetentionBuffer
 from ml.shadow.service import ExtendedShadowService
 from ml.shadow.staging import StagingShadowEngine
@@ -30,4 +31,5 @@ __all__ = [
     "ShadowCascadeManager",
     "ExtendedShadowService",
     "StagingShadowEngine",
+    "RealStagingTelemetryValidator",
 ]

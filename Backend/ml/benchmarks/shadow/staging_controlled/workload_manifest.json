@@ -1,0 +1,18 @@
+{
+  "traffic_source": "CONTROLLED_STAGING",
+  "workload_version": "v1.0.0",
+  "generator_run_id": "gen_run_ae9a7b1ec653",
+  "timestamp": "2026-08-24T11:22:01.762282+00:00",
+  "environment": "staging",
+  "deployment_identifier": "zerophish-staging-v1.4.0",
+  "requested_count": 20,
+  "rate_rps": 100.0,
+  "duration_seconds": null,
+  "corpus_categories": [
+    "legitimate_domains",
+    "cdn_complex_urls",
+    "long_query_auth_urls",
+    "punycode_typosquatting",
+    "security_ssrf_subset"
+  ]
+}

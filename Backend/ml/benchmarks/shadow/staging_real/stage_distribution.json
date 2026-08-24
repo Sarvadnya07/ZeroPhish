@@ -1,0 +1,12 @@
+{
+  "environment": "staging",
+  "deployment_identifier": "zerophish-staging-v1.4.0",
+  "commit_hash": "8f3b42a9c1e0",
+  "configuration_hash": "c4ca4238a0b923820dcc509a6f75849b",
+  "timestamp": "2026-08-24T11:22:01.430430+00:00",
+  "hard_rule_resolution_pct": 0.0,
+  "heuristics_resolution_pct": 0.0,
+  "onnx_invocation_pct": 0.0,
+  "urlbert_invocation_pct": 0.0,
+  "total_accounted_pct": 100.0
+}

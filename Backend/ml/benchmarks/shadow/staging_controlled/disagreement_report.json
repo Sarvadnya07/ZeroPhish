@@ -1,0 +1,11 @@
+{
+  "traffic_source": "CONTROLLED_STAGING",
+  "workload_version": "v1.0.0",
+  "generator_run_id": "gen_run_ae9a7b1ec653",
+  "timestamp": "2026-08-24T11:22:01.762282+00:00",
+  "environment": "staging",
+  "deployment_identifier": "zerophish-staging-v1.4.0",
+  "total_disagreements": 0,
+  "potential_false_negatives": 0,
+  "status": "ZERO_POTENTIAL_FN_VALIDATED"
+}

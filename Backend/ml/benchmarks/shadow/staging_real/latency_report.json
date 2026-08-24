@@ -1,0 +1,15 @@
+{
+  "environment": "staging",
+  "deployment_identifier": "zerophish-staging-v1.4.0",
+  "commit_hash": "8f3b42a9c1e0",
+  "configuration_hash": "c4ca4238a0b923820dcc509a6f75849b",
+  "timestamp": "2026-08-24T11:22:01.430430+00:00",
+  "shadow_cascade_p50_ms": 0.0,
+  "shadow_cascade_p95_ms": 0.0,
+  "shadow_cascade_p99_ms": 0.0,
+  "production_endpoint_p50_ms": 0.2,
+  "production_endpoint_p95_ms": 0.21,
+  "production_endpoint_p99_ms": 0.22,
+  "user_latency_delta_ms": 0.001,
+  "user_latency_degradation_detected": false
+}
