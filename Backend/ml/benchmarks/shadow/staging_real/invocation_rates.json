@@ -3,7 +3,7 @@
   "deployment_identifier": "zerophish-staging-v1.4.0",
   "commit_hash": "8f3b42a9c1e0",
   "configuration_hash": "c4ca4238a0b923820dcc509a6f75849b",
-  "timestamp": "2026-08-24T14:51:25.197546+00:00",
+  "timestamp": "2026-08-24T14:52:12.289437+00:00",
   "urlbert_calls_per_1000_observations": 0.0,
   "onnx_calls_per_1000_observations": 0.0,
   "heuristics_calls_per_1000_observations": 1000.0

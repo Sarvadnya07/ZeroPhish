@@ -1,10 +1,10 @@
 {
   "environment": "staging",
   "deployment_identifier": "zerophish-staging-v1.5.0",
-  "workload_run_id": "ext_large_8fa8ff49d4a7",
+  "workload_run_id": "ext_large_db55e94f12b4",
   "workload_version": "v1.5.0",
   "traffic_source": "REAL_STAGING_EXTERNAL",
-  "timestamp": "2026-08-24T14:51:27.845590+00:00",
+  "timestamp": "2026-08-24T14:52:14.981413+00:00",
   "temporal_stability_status": "STABLE",
   "buckets": [
     {

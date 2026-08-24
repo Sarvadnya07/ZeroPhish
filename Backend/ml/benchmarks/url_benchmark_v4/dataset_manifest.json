@@ -7,10 +7,10 @@
   "unique_registered_domains": 53,
   "throughput": {
     "total_samples": 55,
-    "preprocessing_records_per_sec": 260540.0,
-    "urlbert_inference_records_per_sec": 212766.0,
-    "onnx_inference_records_per_sec": 1063829.8,
-    "hybrid_pipeline_records_per_sec": 212766.0,
+    "preprocessing_records_per_sec": 301204.8,
+    "urlbert_inference_records_per_sec": 230898.4,
+    "onnx_inference_records_per_sec": 1154492.0,
+    "hybrid_pipeline_records_per_sec": 230898.4,
     "warm_memory_rss_mb": 118.4
   }
 }
