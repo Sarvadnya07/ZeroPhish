@@ -18,22 +18,22 @@ export const viewport: Viewport = { themeColor: "#050505" };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <ClerkProvider
-      appearance={{
-        variables: {
-          colorPrimary: "#00f0ff",
-          colorBackground: "#09090b",
-        },
-      }}
-    >
-      <html lang="en" suppressHydrationWarning>
-        <body
-          className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}
-          suppressHydrationWarning
+    <html lang="en" suppressHydrationWarning>
+      <body
+        className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}
+        suppressHydrationWarning
+      >
+        <ClerkProvider
+          appearance={{
+            variables: {
+              colorPrimary: "#00f0ff",
+              colorBackground: "#09090b",
+            },
+          }}
         >
           <AuthProvider>{children}</AuthProvider>
-        </body>
-      </html>
-    </ClerkProvider>
+        </ClerkProvider>
+      </body>
+    </html>
   );
 }

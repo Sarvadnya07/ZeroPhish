@@ -3,6 +3,7 @@ import React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { UserButton } from "@clerk/nextjs";
 import {
   Shield, LayoutDashboard, AlertTriangle, BookOpen, BarChart3,
   Webhook, Settings, LogOut, ChevronRight, User, Zap, ScanSearch,
@@ -80,11 +81,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {/* User footer */}
         <div className="p-3 border-t border-zinc-800">
           <div className="flex items-center gap-3 px-3 py-2 rounded-xl bg-zinc-800/40">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500/30 to-violet-500/30 flex items-center justify-center text-xs font-bold text-cyan-400">
-              {user?.full_name?.[0] ?? "U"}
-            </div>
+            <UserButton
+              appearance={{
+                elements: {
+                  userButtonAvatarBox: "w-8 h-8",
+                },
+              }}
+            />
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-zinc-200 truncate">{user?.full_name}</div>
+              <div className="text-xs font-medium text-zinc-200 truncate">{user?.full_name || "User"}</div>
               <div className="text-[10px] text-zinc-500 capitalize">{role}</div>
             </div>
             <button

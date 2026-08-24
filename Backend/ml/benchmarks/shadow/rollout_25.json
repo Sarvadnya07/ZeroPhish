@@ -8,7 +8,7 @@
   "heuristic_resolution_pct": 93.33,
   "disagreement_pct": 0.0,
   "potential_fn_count": 0,
-  "p95_latency_ms": 11.0,
+  "p95_latency_ms": 10.75,
   "error_pct": 0.0,
   "reasons": [
     "All safety criteria satisfied: 0 potential false negatives, stable latency, clean error rate."

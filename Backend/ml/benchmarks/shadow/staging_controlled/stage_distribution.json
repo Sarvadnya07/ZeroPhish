@@ -1,8 +1,8 @@
 {
   "traffic_source": "CONTROLLED_STAGING",
   "workload_version": "v1.0.0",
-  "generator_run_id": "gen_run_38f1ed7d7a28",
-  "timestamp": "2026-08-24T17:18:46.788287+00:00",
+  "generator_run_id": "gen_run_64310ef43fd0",
+  "timestamp": "2026-08-24T19:01:30.244116+00:00",
   "environment": "staging",
   "deployment_identifier": "zerophish-staging-v1.4.0",
   "hard_rule_pct": 0.0,
