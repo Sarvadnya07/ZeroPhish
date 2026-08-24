@@ -1,10 +1,10 @@
 {
   "environment": "staging",
   "deployment_identifier": "zerophish-staging-v1.5.0",
-  "workload_run_id": "ext_large_823359655ec2",
+  "workload_run_id": "ext_large_8fa8ff49d4a7",
   "workload_version": "v1.5.0",
   "traffic_source": "REAL_STAGING_EXTERNAL",
-  "timestamp": "2026-08-24T14:50:33.726365+00:00",
+  "timestamp": "2026-08-24T14:51:27.845590+00:00",
   "url_hashing_algorithm": "SHA256",
   "hostname_hashing_algorithm": "SHA256",
   "plaintext_credentials_stored": 0,

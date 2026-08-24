@@ -1,10 +1,10 @@
 {
   "environment": "staging",
   "deployment_identifier": "zerophish-staging-v1.4.0",
-  "workload_run_id": "ext_run_7e662a6dcaff",
+  "workload_run_id": "ext_run_b70fb72f20f1",
   "workload_version": "v1.4.0",
   "staging_base_url": "http://127.0.0.1:8000",
-  "timestamp": "2026-08-24T14:50:33.436161+00:00",
+  "timestamp": "2026-08-24T14:51:27.567726+00:00",
   "execution_status": "COMPLETE",
   "progress_requests": 10,
   "target_requests": 10,
