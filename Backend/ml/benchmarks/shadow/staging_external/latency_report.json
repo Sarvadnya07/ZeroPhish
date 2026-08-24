@@ -1,14 +1,14 @@
 {
   "environment": "staging",
   "deployment_identifier": "zerophish-staging-v1.4.0",
-  "workload_run_id": "ext_run_91e43c459113",
+  "workload_run_id": "ext_run_b4d13aa68f19",
   "workload_version": "v1.4.0",
   "staging_base_url": "http://127.0.0.1:8000",
-  "timestamp": "2026-08-24T17:17:56.512835+00:00",
+  "timestamp": "2026-08-24T17:18:48.936027+00:00",
   "execution_status": "COMPLETE",
-  "client_http_p50_ms": 0.222,
-  "client_http_p95_ms": 0.243,
-  "client_http_p99_ms": 0.246,
-  "client_http_mean_ms": 0.221,
+  "client_http_p50_ms": 0.307,
+  "client_http_p95_ms": 0.376,
+  "client_http_p99_ms": 0.382,
+  "client_http_mean_ms": 0.314,
   "static_constants_eliminated": true
 }
