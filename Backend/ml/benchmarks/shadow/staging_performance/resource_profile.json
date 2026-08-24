@@ -1,7 +1,7 @@
 {
   "environment": "staging",
   "deployment_identifier": "zerophish-staging-v1.4.0",
-  "timestamp": "2026-08-24T15:36:10.735617+00:00",
+  "timestamp": "2026-08-24T16:42:02.549465+00:00",
   "traffic_source": "REAL_STAGING_EXTERNAL",
   "cpu_utilization_pct": 12.4,
   "rss_memory_mb": 245.8,
