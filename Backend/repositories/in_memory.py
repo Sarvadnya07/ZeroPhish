@@ -41,11 +41,16 @@ from .base import (
 class InMemoryUserRepository:
     def __init__(self):
         self._users_by_id: Dict[str, UserInDB] = {}
+        self._users_by_clerk_id: Dict[str, str] = {}
         self._users_by_email: Dict[str, str] = {}
         self._tokens: Dict[str, dict] = {}
 
     def get_by_id(self, user_id: str) -> Optional[UserInDB]:
         return self._users_by_id.get(user_id)
+
+    def get_by_clerk_id(self, clerk_user_id: str) -> Optional[UserInDB]:
+        uid = self._users_by_clerk_id.get(clerk_user_id)
+        return self._users_by_id.get(uid) if uid else None
 
     def get_by_email(self, email: str) -> Optional[UserInDB]:
         uid = self._users_by_email.get(email.lower().strip())
@@ -53,6 +58,8 @@ class InMemoryUserRepository:
 
     def save(self, user: UserInDB) -> UserInDB:
         self._users_by_id[user.id] = user
+        if getattr(user, "clerk_user_id", None):
+            self._users_by_clerk_id[user.clerk_user_id] = user.id
         self._users_by_email[user.email.lower().strip()] = user.id
         return user
 

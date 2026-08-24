@@ -185,3 +185,10 @@ def log_config_error(component: str, message: str) -> None:
 
 def log_startup_warning(component: str, message: str) -> None:
     _evt("config", logging.WARNING, "STARTUP_WARNING", component=component, message=message[:500])
+
+
+class AuditLogger:
+    @staticmethod
+    def log_event(event_type: str, user_id: Optional[str] = None, details: Optional[dict] = None) -> None:
+        safe_details = details or {}
+        _evt("audit", logging.INFO, event_type, user_id=user_id or "[none]", **safe_details)

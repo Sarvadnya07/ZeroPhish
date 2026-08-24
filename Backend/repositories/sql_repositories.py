@@ -48,13 +48,11 @@ class SQLUserRepository:
     def _to_user_in_db(self, u: UserDB) -> UserInDB:
         return UserInDB(
             id=str(u.id),
+            clerk_user_id=str(u.clerk_user_id) if u.clerk_user_id else str(u.id),
             email=str(u.email),
             full_name=str(u.full_name),
-            password_hash=str(u.password_hash),
             role=UserRole(str(u.role)),
             status=UserStatus(str(u.status)),
-            mfa_secret=str(u.mfa_secret) if u.mfa_secret else None,
-            mfa_enabled=bool(u.mfa_enabled),
             scan_count=int(u.scan_count or 0),
             risk_score=float(u.risk_score or 0.0),
             created_at=str(u.created_at),
@@ -66,6 +64,11 @@ class SQLUserRepository:
             u = session.query(UserDB).filter(UserDB.id == user_id).first()
             return self._to_user_in_db(u) if u else None
 
+    def get_by_clerk_id(self, clerk_user_id: str) -> Optional[UserInDB]:
+        with self._session_factory() as session:
+            u = session.query(UserDB).filter(UserDB.clerk_user_id == clerk_user_id).first()
+            return self._to_user_in_db(u) if u else None
+
     def get_by_email(self, email: str) -> Optional[UserInDB]:
         with self._session_factory() as session:
             u = session.query(UserDB).filter(UserDB.email == email.lower().strip()).first()
@@ -75,25 +78,21 @@ class SQLUserRepository:
         with self._session_factory() as session:
             existing = session.query(UserDB).filter(UserDB.id == user.id).first()
             if existing:
+                existing.clerk_user_id = user.clerk_user_id
                 existing.full_name = user.full_name
-                existing.password_hash = user.password_hash
                 existing.role = user.role.value
                 existing.status = user.status.value
-                existing.mfa_secret = user.mfa_secret
-                existing.mfa_enabled = user.mfa_enabled
                 existing.scan_count = user.scan_count
                 existing.risk_score = user.risk_score
                 existing.last_login = user.last_login
             else:
                 db_user = UserDB(
                     id=user.id,
+                    clerk_user_id=user.clerk_user_id,
                     email=user.email.lower().strip(),
                     full_name=user.full_name,
-                    password_hash=user.password_hash,
                     role=user.role.value,
                     status=user.status.value,
-                    mfa_secret=user.mfa_secret,
-                    mfa_enabled=user.mfa_enabled,
                     scan_count=user.scan_count,
                     risk_score=user.risk_score,
                     created_at=user.created_at,

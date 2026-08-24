@@ -18,13 +18,12 @@ class UserDB(Base):
     __tablename__ = "users"
 
     id = Column(String(64), primary_key=True, index=True)
+    clerk_user_id = Column(String(128), unique=True, index=True, nullable=True)
     email = Column(String(320), unique=True, index=True, nullable=False)
     full_name = Column(String(256), nullable=False)
-    password_hash = Column(String(256), nullable=False)
+    password_hash = Column(String(256), nullable=True)
     role = Column(String(32), default="user", nullable=False)
     status = Column(String(32), default="active", nullable=False)
-    mfa_secret = Column(String(128), nullable=True)
-    mfa_enabled = Column(Boolean, default=False)
     scan_count = Column(Integer, default=0)
     risk_score = Column(Float, default=0.0)
     created_at = Column(String(64), nullable=False)

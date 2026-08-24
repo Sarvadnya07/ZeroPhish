@@ -27,19 +27,12 @@ async function request<T>(
 }
 
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
+// ── Auth & Users ─────────────────────────────────────────────────────────────
 export const api = {
   auth: {
-    login:    (email: string, password: string) =>
-      request<{ access_token: string; role: string; user_id: string }>("/auth/login", {
-        method: "POST", body: JSON.stringify({ email, password }),
-      }),
-    register: (email: string, password: string, full_name: string) =>
-      request("/auth/register", {
-        method: "POST", body: JSON.stringify({ email, password, full_name }),
-      }),
-    me:       (token: string) => request<any>("/auth/me", {}, token),
-    logout:   (token: string) => request("/auth/logout", { method: "POST" }, token),
+    me: (token: string) => request<any>("/auth/me", {}, token),
+    updateMe: (data: { full_name: string }, token: string) =>
+      request<any>("/auth/me", { method: "PATCH", body: JSON.stringify(data) }, token),
   },
 
   // ── Gateway scan ──────────────────────────────────────────────────────────

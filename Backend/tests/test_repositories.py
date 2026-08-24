@@ -58,17 +58,18 @@ def test_user_repository_crud_and_tokens(repo_type, sqlite_session_factory):
 
     u = UserInDB(
         id="u-100",
+        clerk_user_id="user_clerk_100",
         email="test@domain.com",
         full_name="Test User",
         role=UserRole.USER,
         status=UserStatus.ACTIVE,
         created_at="2026-01-01T00:00:00Z",
-        password_hash="pbkdf2_sha256$dummy$hash",
     )
     repo.save(u)
 
-    # Fetch by ID & Email
+    # Fetch by ID & Email & Clerk ID
     assert repo.get_by_id("u-100") is not None
+    assert repo.get_by_clerk_id("user_clerk_100") is not None
     assert repo.get_by_email("test@domain.com") is not None
     assert repo.get_by_email("nonexistent@domain.com") is None
 
@@ -76,20 +77,6 @@ def test_user_repository_crud_and_tokens(repo_type, sqlite_session_factory):
     updated = repo.update("u-100", UserUpdate(full_name="Updated Name", role=UserRole.ANALYST))
     assert updated.full_name == "Updated Name"
     assert updated.role == UserRole.ANALYST
-
-    # Token storage and validation
-    repo.store_token("tok-123", "u-100", expires_at=time.time() + 3600)
-    val_user = repo.validate_token("tok-123")
-    assert val_user is not None
-    assert val_user.id == "u-100"
-
-    # Expired token
-    repo.store_token("tok-exp", "u-100", expires_at=time.time() - 10)
-    assert repo.validate_token("tok-exp") is None
-
-    # Revocation
-    repo.revoke_token("tok-123")
-    assert repo.validate_token("tok-123") is None
 
     # Scan count and risk score increment
     repo.increment_scan("u-100", 80.0)

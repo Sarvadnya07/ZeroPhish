@@ -1,7 +1,7 @@
 /**
  * ZeroPhish Sentinel Side Panel Controller
  * Orchestrates Tier 1 (Client), Tier 2 (ML & OSINT), and Tier 3 (Gemini AI)
- * analysis pipeline and visual security checks.
+ * analysis pipeline with Clerk authentication and visual security checks.
  */
 
 import { analyzeTier1 } from './tier1.js';
@@ -9,9 +9,13 @@ import { analyzeTier1 } from './tier1.js';
 // Configuration defaults
 const DEFAULT_GATEWAY_BASE = 'http://127.0.0.1:8001';
 const DEFAULT_BACKEND_BASE = 'http://127.0.0.1:8000';
+const DEFAULT_WEB_URL = 'http://localhost:3000';
 
 let GATEWAY_BASE = DEFAULT_GATEWAY_BASE;
 let BACKEND_BASE = DEFAULT_BACKEND_BASE;
+let WEB_URL = DEFAULT_WEB_URL;
+let currentAuthToken = null;
+let currentAuthUser = null;
 
 function getEndpoints() {
   return {
@@ -21,14 +25,20 @@ function getEndpoints() {
     result: (id) => `${GATEWAY_BASE}/gateway/result/${id}`,
     vision: `${GATEWAY_BASE}/vision/analyze`,
     report: `${BACKEND_BASE}/tier1/report`,
+    me: `${GATEWAY_BASE}/auth/me`,
   };
 }
 
-// Load custom base URLs if configured by user
+// Load custom base URLs & session token from storage
 if (typeof chrome !== 'undefined' && chrome.storage?.sync) {
-  chrome.storage.sync.get(['gatewayBase', 'backendBase'], (cfg) => {
+  chrome.storage.sync.get(['gatewayBase', 'backendBase', 'webUrl', 'clerkSessionToken'], (cfg) => {
     if (cfg?.gatewayBase) GATEWAY_BASE = cfg.gatewayBase.replace(/\/+$/, '');
     if (cfg?.backendBase) BACKEND_BASE = cfg.backendBase.replace(/\/+$/, '');
+    if (cfg?.webUrl) WEB_URL = cfg.webUrl.replace(/\/+$/, '');
+    if (cfg?.clerkSessionToken) {
+      currentAuthToken = cfg.clerkSessionToken;
+      fetchUserProfile(currentAuthToken);
+    }
   });
 }
 
@@ -42,6 +52,13 @@ const visualCheckBtn = document.getElementById('visual-check-btn');
 const threatScoreEl = document.getElementById('threat-score');
 const gaugeProgress = document.getElementById('gauge-progress');
 const scanIndicator = document.getElementById('scan-indicator');
+
+// Auth DOM References
+const userProfileBadge = document.getElementById('user-profile-badge');
+const userNameDisplay = document.getElementById('user-name-display');
+const authLoginCta = document.getElementById('auth-login-cta');
+const signinBtn = document.getElementById('signin-btn');
+const signoutBtn = document.getElementById('signout-btn');
 
 // Status Pill Elements
 const statusPill = document.getElementById('status-pill');
@@ -70,6 +87,58 @@ let activePollInterval = null;
 let activeRunId = 0;
 
 const GAUGE_MAX_OFFSET = 220; // Circumference of semicircle (r=70)
+
+/**
+ * Updates the authentication UI state
+ */
+function updateAuthUI(user) {
+  if (user) {
+    currentAuthUser = user;
+    if (userProfileBadge) userProfileBadge.classList.remove('hidden');
+    if (userNameDisplay) userNameDisplay.innerText = user.full_name || user.email || 'Protected';
+    if (authLoginCta) authLoginCta.classList.add('hidden');
+  } else {
+    currentAuthUser = null;
+    currentAuthToken = null;
+    if (userProfileBadge) userProfileBadge.classList.add('hidden');
+    if (authLoginCta) authLoginCta.classList.remove('hidden');
+  }
+}
+
+async function fetchUserProfile(token) {
+  try {
+    const res = await fetch(getEndpoints().me, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) {
+      const user = await res.json();
+      updateAuthUI(user);
+    } else {
+      updateAuthUI(null);
+    }
+  } catch {
+    updateAuthUI(null);
+  }
+}
+
+if (signinBtn) {
+  signinBtn.addEventListener('click', () => {
+    if (typeof chrome !== 'undefined' && chrome.tabs) {
+      chrome.tabs.create({ url: `${WEB_URL}/login` });
+    }
+  });
+}
+
+if (signoutBtn) {
+  signoutBtn.addEventListener('click', () => {
+    currentAuthToken = null;
+    if (typeof chrome !== 'undefined' && chrome.storage?.sync) {
+      chrome.storage.sync.remove('clerkSessionToken');
+    }
+    updateAuthUI(null);
+    setAnalysisSummary('Signed Out', 'Sign in via ZeroPhish Combat Centre to access personalized defense feeds.', '');
+  });
+}
 
 /**
  * Updates the SVG circular threat gauge
@@ -373,9 +442,14 @@ if (scanButton) {
         timestamp: new Date().toISOString(),
       };
 
+      const headers = { 'Content-Type': 'application/json' };
+      if (currentAuthToken) {
+        headers['Authorization'] = `Bearer ${currentAuthToken}`;
+      }
+
       const gResponse = await fetch(getEndpoints().scan, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(gatewayPayload),
       });
 
@@ -516,9 +590,14 @@ if (visualCheckBtn) {
         title: tab.title || '',
       };
 
+      const headers = { 'Content-Type': 'application/json' };
+      if (currentAuthToken) {
+        headers['Authorization'] = `Bearer ${currentAuthToken}`;
+      }
+
       const res = await fetch(getEndpoints().vision, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(payload),
       });
 

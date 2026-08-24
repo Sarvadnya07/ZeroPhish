@@ -16,9 +16,20 @@
       <div class="brand">
         <span class="logo-text">ZeroPhish</span>
       </div>
-      <div id="scan-indicator" class="scan-indicator hidden">
-        <span class="pulse-dot red"></span>
-        <span class="indicator-text">SCAN IN PROGRESS</span>
+      <div class="header-right">
+        <div id="auth-controls" class="auth-controls">
+          <div id="user-profile-badge" class="user-profile-badge hidden">
+            <span id="user-name-display" class="user-name-display">Protected</span>
+            <button id="signout-btn" class="btn-text-sm" title="Sign Out">Sign Out</button>
+          </div>
+          <div id="auth-login-cta" class="auth-login-cta">
+            <button id="signin-btn" class="btn-cyan-sm">Sign In</button>
+          </div>
+        </div>
+        <div id="scan-indicator" class="scan-indicator hidden">
+          <span class="pulse-dot red"></span>
+          <span class="indicator-text">SCANNING</span>
+        </div>
       </div>
     </header>
 

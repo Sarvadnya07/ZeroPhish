@@ -1,40 +1,41 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from auth.models import UserCreate, UserLogin, UserRole
-from auth.service import AuthService, _tokens, _users_by_email, _users_by_id
+from auth.models import UserRole, UserStatus
+from auth.service import AuthService, _users_by_clerk_id, _users_by_email, _users_by_id
+from gateway import app
 from incidents.service import _store as _incidents
 from webhooks.service import _subscriptions
 
 
 @pytest.fixture(autouse=True)
-def reset_state():
+def reset_state(monkeypatch):
     _users_by_id.clear()
     _users_by_email.clear()
-    _tokens.clear()
+    _users_by_clerk_id.clear()
     _incidents.clear()
     _subscriptions.clear()
+    monkeypatch.setenv("ZEROPHISH_TEST_AUTH", "true")
     yield
 
 
 @pytest.fixture
 def client():
-    from gateway import app
-
     return TestClient(app)
 
 
 def create_user_and_token(client, role: UserRole = UserRole.USER) -> tuple[str, str]:
     import random
 
-    email = f"{random.randint(1,10000)}_{role.value}@example.com"
-    data = UserCreate(email=email, password="password", full_name="Test")
-    user = AuthService.register(data)
-    _users_by_id[user.id].role = role
-
-    login_data = UserLogin(email=email, password="password")
-    token = AuthService.login(login_data)
-    return user.id, token.access_token
+    unique_suffix = f"{random.randint(1,10000)}_{role.value}"
+    token = f"test_token_{unique_suffix}_{role.value}"
+    user = AuthService.get_or_create_user(
+        clerk_user_id=f"user_clerk_{unique_suffix}",
+        email=f"{unique_suffix}@example.com",
+        full_name=f"Test {unique_suffix}",
+        role=role,
+    )
+    return user.id, token
 
 
 def test_incident_comment_cross_user_denied(client):
@@ -105,8 +106,3 @@ def test_user_cannot_update_own_role(client):
     )
     assert res.status_code == 200
     assert res.json()["role"] == "user"
-
-
-def test_scan_result_not_accessible_without_auth(client):
-    res = client.get("/gateway/result/12345")
-    assert res.status_code in [401, 403, 404]

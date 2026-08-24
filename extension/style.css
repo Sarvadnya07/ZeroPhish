@@ -58,6 +58,67 @@ body {
   letter-spacing: -0.5px;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.auth-controls {
+  display: flex;
+  align-items: center;
+}
+
+.user-profile-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-zinc);
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.user-name-display {
+  font-size: 10px;
+  color: var(--cyan-primary);
+  font-weight: 600;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-text-sm {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 9px;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.2s;
+}
+
+.btn-text-sm:hover {
+  color: var(--red-primary);
+}
+
+.btn-cyan-sm {
+  background: rgba(0, 240, 255, 0.15);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  color: var(--cyan-primary);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-cyan-sm:hover {
+  background: rgba(0, 240, 255, 0.3);
+}
+
 .scan-indicator {
   display: flex;
   align-items: center;
