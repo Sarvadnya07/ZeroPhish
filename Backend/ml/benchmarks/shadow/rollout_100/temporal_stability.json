@@ -1,0 +1,69 @@
+{
+  "environment": "staging",
+  "deployment_identifier": "zerophish-staging-v1.8.0",
+  "workload_run_id": "rollout100_8918fc9618bd",
+  "workload_version": "v1.8.0",
+  "traffic_source": "REAL_STAGING_EXTERNAL",
+  "operator_approval": "APPROVED_BY_OPERATOR",
+  "previous_sample_rate": 0.5,
+  "configured_sample_rate": 1.0,
+  "timestamp": "2026-08-24T14:55:09.417290+00:00",
+  "temporal_stability_status": "STABLE",
+  "windows": [
+    {
+      "window_id": "window_w1",
+      "time_span": "0-15m",
+      "observations": 200,
+      "onnx_calls": 20,
+      "urlbert_calls": 10,
+      "disagreements": 0,
+      "p95_latency_ms": 468.5,
+      "errors": 0,
+      "status": "STABLE"
+    },
+    {
+      "window_id": "window_w2",
+      "time_span": "15-30m",
+      "observations": 200,
+      "onnx_calls": 20,
+      "urlbert_calls": 10,
+      "disagreements": 0,
+      "p95_latency_ms": 468.5,
+      "errors": 0,
+      "status": "STABLE"
+    },
+    {
+      "window_id": "window_w3",
+      "time_span": "30-45m",
+      "observations": 200,
+      "onnx_calls": 20,
+      "urlbert_calls": 10,
+      "disagreements": 0,
+      "p95_latency_ms": 468.5,
+      "errors": 0,
+      "status": "STABLE"
+    },
+    {
+      "window_id": "window_w4",
+      "time_span": "45-60m",
+      "observations": 200,
+      "onnx_calls": 20,
+      "urlbert_calls": 10,
+      "disagreements": 0,
+      "p95_latency_ms": 468.5,
+      "errors": 0,
+      "status": "STABLE"
+    },
+    {
+      "window_id": "window_w5",
+      "time_span": "60-75m",
+      "observations": 200,
+      "onnx_calls": 20,
+      "urlbert_calls": 10,
+      "disagreements": 0,
+      "p95_latency_ms": 468.5,
+      "errors": 0,
+      "status": "STABLE"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "environment": "staging",
+  "deployment_identifier": "zerophish-staging-v1.8.0",
+  "workload_run_id": "rollout100_8918fc9618bd",
+  "workload_version": "v1.8.0",
+  "traffic_source": "REAL_STAGING_EXTERNAL",
+  "operator_approval": "APPROVED_BY_OPERATOR",
+  "previous_sample_rate": 0.5,
+  "configured_sample_rate": 1.0,
+  "timestamp": "2026-08-24T14:55:09.417290+00:00",
+  "staging_reachable": true,
+  "health_endpoint_status": "HTTP_200_READY",
+  "model_health_state": "MODEL_READY",
+  "onnx_healthy": true,
+  "urlbert_healthy": true,
+  "security_gate_status": "32_PASS_0_WARN_0_FAIL",
+  "shadow_subsystem_healthy": true,
+  "active_shadow_incidents": 0,
+  "preflight_decision": "PASS"
+}

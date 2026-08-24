@@ -492,6 +492,7 @@ def main():
             "audit-25-shadow",
             "rollout-50-shadow",
             "audit-50-shadow",
+            "rollout-100-shadow",
         ],
         help="Action to execute",
     )
@@ -515,7 +516,25 @@ def main():
 
     args = parser.parse_args()
 
-    if args.action == "audit-50-shadow":
+    if args.action == "rollout-100-shadow":
+        from ml.shadow.rollout_100_evaluator import Rollout100Evaluator
+
+        print("Executing Operator-Approved 100% Shadow Review & Scaling Evaluation...")
+        res = asyncio.run(
+            Rollout100Evaluator.run_100_percent_rollout(
+                canary_target=1000,
+                sample_rate=1.00,
+            )
+        )
+        print(f"\n--- 100% Shadow Review Complete ---")
+        print(f"Canary Observations: {res['canary_observations']}")
+        print(f"Total Requests Dispatched: {res['total_requests']}")
+        print(f"ONNX Invocations: {res['onnx_invocations']}")
+        print(f"URLBERT Invocations: {res['urlbert_invocations']}")
+        print(f"Critical False Negatives: {res['critical_false_negatives']}")
+        print(f"Recommendation: {res['recommendation']}")
+
+    elif args.action == "audit-50-shadow":
         from ml.shadow.rollout_50_audit import Rollout50AuditEngine
 
         print("Executing Phase 17.1 50% Shadow Rollout Integrity & Freshness Audit...")

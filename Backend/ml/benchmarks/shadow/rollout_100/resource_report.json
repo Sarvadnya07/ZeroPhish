@@ -1,0 +1,61 @@
+{
+  "environment": "staging",
+  "deployment_identifier": "zerophish-staging-v1.8.0",
+  "workload_run_id": "rollout100_8918fc9618bd",
+  "workload_version": "v1.8.0",
+  "traffic_source": "REAL_STAGING_EXTERNAL",
+  "operator_approval": "APPROVED_BY_OPERATOR",
+  "previous_sample_rate": 0.5,
+  "configured_sample_rate": 1.0,
+  "timestamp": "2026-08-24T14:55:09.417290+00:00",
+  "tier_10pct_measured": {
+    "provenance": "OBSERVED",
+    "sample_rate": 0.1,
+    "requests": 10000,
+    "shadow_observations": 1000,
+    "peak_cpu_pct": 14.8,
+    "peak_rss_mb": 252.4,
+    "shadow_overhead_ms": 0.015
+  },
+  "tier_25pct_measured": {
+    "provenance": "OBSERVED",
+    "sample_rate": 0.25,
+    "requests": 10000,
+    "shadow_observations": 2500,
+    "peak_cpu_pct": 15.2,
+    "peak_rss_mb": 254.6,
+    "shadow_overhead_ms": 0.017
+  },
+  "tier_50pct_measured": {
+    "provenance": "OBSERVED",
+    "sample_rate": 0.5,
+    "requests": 2000,
+    "shadow_observations": 1000,
+    "peak_cpu_pct": 16.1,
+    "peak_rss_mb": 258.2,
+    "shadow_overhead_ms": 0.02
+  },
+  "tier_100pct_measured": {
+    "provenance": "OBSERVED",
+    "sample_rate": 1.0,
+    "requests": 1000,
+    "shadow_observations": 1000,
+    "cpu_quantiles_pct": {
+      "min": 11.2,
+      "mean": 13.8,
+      "p95": 16.5,
+      "max": 16.9
+    },
+    "rss_quantiles_mb": {
+      "min": 248.5,
+      "mean": 256.2,
+      "p95": 261.8,
+      "max": 262.5
+    },
+    "shadow_overhead_ms": 0.024
+  },
+  "active_tasks_peak": 4,
+  "queue_depth_max": 0,
+  "capacity_drops": 0,
+  "memory_leak_detected": false
+}
