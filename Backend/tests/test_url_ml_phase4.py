@@ -25,10 +25,10 @@ def test_data_quality_pipeline_conflict_detection():
     assert stats.cleaned_records == 2
 
     # Find the conflicting record
-    conflict_rec = next(r for r in records if "ambiguous-site.com" in r.url)
+    conflict_rec = next(r for r in records if r.url.startswith("https://ambiguous-site.com/"))
     assert conflict_rec.label_conflict is True
 
-    clear_rec = next(r for r in records if "clear-site.com" in r.url)
+    clear_rec = next(r for r in records if r.url == "https://clear-site.com/home")
     assert clear_rec.label_conflict is False
 
 

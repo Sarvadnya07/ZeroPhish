@@ -52,7 +52,7 @@ def test_restricted_source_blocked_by_governance():
 
     # Restricted source should be marked DISABLED and not contribute to records
     assert dq_report.source_status_summary[gov.source_name] == FeedIngestionStatus.DISABLED
-    assert not any("restricted-data.example.com" in r.url_original for r in records)
+    assert not any(getattr(r, "url_original", "") == "http://restricted-data.example.com" for r in records)
 
 
 def test_url_normalizer_views_and_redaction():

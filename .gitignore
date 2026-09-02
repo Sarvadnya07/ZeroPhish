@@ -1,14 +1,26 @@
-# Environments
-venv/
-env/
+# =============================================================================
+# ZeroPhish Root .gitignore
+# =============================================================================
+
+# Environments & Secrets (CRITICAL: Never commit secrets!)
 .env
+.env.*
 .env.local
 .env.staging
-staging_data/
-*.staging.db
-staging_zerophish.db
+.env.production
+.env.development
+!.env.example
+!.env.*.example
+!.env.staging.example
 
-# Python
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+.env/
+
+# Python Bytecode & Cache
 __pycache__/
 *.py[cod]
 *$py.class
@@ -20,8 +32,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -30,38 +42,74 @@ wheels/
 .installed.cfg
 *.egg
 
-# Testing & Coverage
+# Testing, Linting & Coverage
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
 .coverage
 .coverage.*
-htmlcov/
 coverage.xml
+htmlcov/
 *.cover
 
-# Node & Next.js
+# Node & Next.js Build Outputs
 node_modules/
 .next/
 out/
 Frontend/.next/
 Frontend/out/
 *.tsbuildinfo
-next-env.d.ts
+.turbo/
 
-# OS & IDE
+# Logs & Temporary Files
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+
+# Databases
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.staging.db
+staging_data/
+staging_zerophish.db
+
+# OS & Editor
 .DS_Store
 Thumbs.db
+desktop.ini
+ehthumbs.db
 .vscode/
 .idea/
 
-# Local ML Model Artifacts & Weights (Never commit binaries)
-models/
-Backend/models/
-Backend/ml/models/
+# Local ML Model Artifacts & Weights (Never commit heavy binaries or caches)
+/models/
+Backend/models/.locks/
+Backend/models/models--*/
+Backend/models/*.bin
+Backend/models/*.pt
+Backend/models/*.pth
+Backend/models/*.onnx
+Backend/models/*.safetensors
+Backend/ml/models/*.bin
+Backend/ml/models/*.pt
+Backend/ml/models/*.pth
+Backend/ml/models/*.onnx
+Backend/ml/models/*.safetensors
 Backend/ml/data/raw/
 Backend/ml/data/processed/
 *.onnx
 *.safetensors
 *.bin
 *.pt
-
-
+*.pth

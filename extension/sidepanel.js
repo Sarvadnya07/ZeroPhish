@@ -313,7 +313,17 @@ async function extractActiveTabContext() {
   }
 
   // Check if Gmail is active
-  if (tab.url && tab.url.includes('mail.google.com')) {
+  let isGmail = false;
+  if (tab.url) {
+    try {
+      const parsedTabUrl = new URL(tab.url);
+      isGmail = parsedTabUrl.hostname === 'mail.google.com';
+    } catch {
+      isGmail = false;
+    }
+  }
+
+  if (isGmail) {
     try {
       const response = await new Promise((resolve, reject) => {
         chrome.tabs.sendMessage(tab.id, { action: 'EXTRACT_EMAIL' }, (res) => {

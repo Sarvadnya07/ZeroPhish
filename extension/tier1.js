@@ -236,12 +236,12 @@ function scoreLinks({ bodyText, links }, evidence) {
     }
 
     // Check if the link text itself claims to be a trusted brand
+    const anchorTokens = new Set((anchorText || '').toLowerCase().match(/[a-z0-9]+/g) || []);
     const linkClaimsBrand = [];
     for (const brand of TRUSTED_BRANDS) {
       const brandName = brand.split('.')[0];
       // Match whole word for the brand name to avoid partial matches (e.g., 'pineapple' matching 'apple')
-      const isWordMatch = new RegExp(`\\b${brandName}\\b`, 'i').test(anchorText);
-      if (isWordMatch || anchorLower.includes(brand)) {
+      if (anchorTokens.has(brandName)) {
         linkClaimsBrand.push(brand);
       }
     }
@@ -249,7 +249,7 @@ function scoreLinks({ bodyText, links }, evidence) {
     for (const brand of linkClaimsBrand) {
       // Identity mapping: allow related domains
       if (areRelatedDomains(brand, domain)) continue;
-      if (domain.includes(brand)) continue;
+      if (domain === brand || domain.endsWith(`.${brand}`)) continue;
 
       points += 40;
       evidence.push({
@@ -300,7 +300,7 @@ function scoreSender({ senderEmail, senderName, sender }, evidence) {
     const claimsBrand = rule.keywords.some((k) => nameLower.includes(k));
     if (!claimsBrand) continue;
 
-    const matchesBrandDomain = rule.domains.some((d) => domain.endsWith(d));
+    const matchesBrandDomain = rule.domains.some((d) => domain === d || domain.endsWith(`.${d}`));
     if (!matchesBrandDomain) {
       points += 18;
       evidence.push({

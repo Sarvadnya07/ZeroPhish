@@ -48,7 +48,7 @@ def test_extract_features_punycode():
     features = URLPreprocessor.extract_features("http://xn--pypal-4ve.com/signin")
     assert features["valid"] is True
     assert features["is_punycode"] is True
-    assert "xn--pypal-4ve.com" in features["domain"]
+    assert features["domain"] == "xn--pypal-4ve.com"
 
 
 def test_extract_features_userinfo():

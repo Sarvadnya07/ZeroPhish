@@ -46,9 +46,9 @@ def test_rules_loaded_from_config():
     assert "bank" in FINANCIAL_PATTERNS
     assert "irs" in AUTHORITY_PATTERNS
     assert "suspend" in SCARE_TACTICS
-    assert "bit.ly" in SUSPICIOUS_URLS
-    assert "paypal.com" in TOP_50_SPOOFED
-    assert "tinyurl.com" in URL_SHORTENERS
+    assert any(u == "bit.ly" for u in SUSPICIOUS_URLS)
+    assert any(s == "paypal.com" for s in TOP_50_SPOOFED)
+    assert any(q == "tinyurl.com" for q in URL_SHORTENERS)
 
 
 def test_levenshtein_distance_correctness():

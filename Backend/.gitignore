@@ -1,4 +1,8 @@
-# Python
+# =============================================================================
+# ZeroPhish Backend .gitignore
+# =============================================================================
+
+# Python Bytecode & Cache
 __pycache__/
 *.py[cod]
 *$py.class
@@ -10,8 +14,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -20,17 +24,19 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual Environment
+# Virtual Environments
+.venv/
 venv/
 ENV/
 env/
 
-# Environment variables - CRITICAL: Never commit secrets!
+# Environment Variables & Secrets (CRITICAL: Never commit secrets!)
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.*.example
 
-# IDE
+# IDE & Editor
 .vscode/
 .idea/
 *.swp
@@ -40,24 +46,41 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Logs
+# Logs & Temporary Files
 *.log
 logs/
+*.tmp
+*.bak
 
-# ML Models (large files)
-models/
+# ML Models & Caches (Large Binary Files)
+models/.locks/
+models/models--*/
+models/*.bin
+models/*.pt
+models/*.pth
+models/*.onnx
+models/*.safetensors
 *.bin
 *.pt
 *.pth
 *.onnx
+*.safetensors
 
-# Testing
+# Testing & Coverage
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
+*.cover
 
-# Temporary files
-*.tmp
-*.bak
-*.swp
+# Databases
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3

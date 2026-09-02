@@ -10,7 +10,9 @@ def client():
     """Import gateway inside fixture to avoid module-level FastAPI/Pydantic compat issue."""
     from gateway import app
 
-    return TestClient(app)
+    with patch("gateway.get_domain_age", return_value=365), \
+         patch.dict(os.environ, {"ML_ENABLED": "false"}):
+        yield TestClient(app)
 
 
 @pytest.fixture
