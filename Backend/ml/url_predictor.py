@@ -1,7 +1,10 @@
 """
 URL ML Predictor Implementations.
+
 Provides typed URL predictors for URLBERT (Transformers) and LinearSVM (ONNX),
 with strict fallback handling, bounded latency, and zero network calls during inference.
+
+Includes the URLPredictor protocol, health states, and singleton getters.
 """
 
 from __future__ import annotations
@@ -11,7 +14,9 @@ import logging
 import os
 import sys
 import time
-from typing import Optional, Protocol, runtime_checkable
+from enum import Enum
+from typing import Optional, Protocol, runtime_checkable, Any, cast
+import types
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -20,40 +25,52 @@ from .url_preprocessor import URLPreprocessor
 
 logger = logging.getLogger(__name__)
 
+# ---------- Platform/Import Workarounds ----------
 if sys.platform == "win32":
-    sys.modules.setdefault("torchvision", None)
-    sys.modules.setdefault("torchvision.transforms", None)
+    # mypy/typing: set a dummy module instead of None to satisfy ModuleType expectation
+    sys.modules.setdefault("torchvision", types.ModuleType("torchvision"))
+    sys.modules.setdefault(
+        "torchvision.transforms", types.ModuleType("torchvision.transforms")
+    )
 
+# ---------- Optional Imports ----------
 try:
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
-
     TRANSFORMERS_AVAILABLE = True
-except (ImportError, OSError, RuntimeError, Exception):
+except (ImportError, OSError, RuntimeError) as e:
     torch = None
     AutoModelForSequenceClassification = None
     AutoTokenizer = None
     TRANSFORMERS_AVAILABLE = False
+    logger.warning("Transformers not available: %s", e)
 
 try:
-    import onnxruntime as ort
-
+    import onnxruntime as ort  # type: ignore[import]
     ONNX_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     ort = None
     ONNX_AVAILABLE = False
+    logger.warning("ONNX Runtime not available: %s", e)
 
-from enum import Enum
-from typing import Optional, Protocol, runtime_checkable
+# Cast optional imports to Any to help static analysis (Pylance) understand
+# that we intentionally handle missing modules at runtime.
+torch = cast(Any, globals().get("torch", None))
+AutoTokenizer = cast(Any, globals().get("AutoTokenizer", None))
+AutoModelForSequenceClassification = cast(Any, globals().get("AutoModelForSequenceClassification", None))
+ort = cast(Any, globals().get("ort", None))
 
-import numpy as np
-from pydantic import BaseModel, Field
+# ---------- Constants ----------
+DEFAULT_URLBERT_MODEL = "CrabInHoney/urlbert-tiny-v4-phishing-classifier"
+DEFAULT_ONNX_MODEL_PATH = "./models/pirocheto_onnx/model.onnx"
+DEFAULT_INFERENCE_TIMEOUT = 2.0
+MAX_SEQUENCE_LENGTH = 128
+SAFE_THRESHOLD = 30.0
+PHISHING_THRESHOLD = 70.0
+FALLBACK_SCORE = 50.0
+FALLBACK_PROB = 0.5
 
-from .url_preprocessor import URLPreprocessor
-
-logger = logging.getLogger(__name__)
-
-
+# ---------- Enums ----------
 class ModelHealthState(str, Enum):
     MODEL_READY = "MODEL_READY"
     MODEL_LOADING = "MODEL_LOADING"
@@ -61,10 +78,9 @@ class ModelHealthState(str, Enum):
     MODEL_FALLBACK = "MODEL_FALLBACK"
     MODEL_ERROR = "MODEL_ERROR"
 
-
+# ---------- Pydantic Models ----------
 class URLPredictionResult(BaseModel):
     """Structured result of a URL ML model inference."""
-
     score: float = Field(..., ge=0.0, le=100.0)
     phishing_probability: float = Field(..., ge=0.0, le=1.0)
     label: str  # "safe" | "suspicious" | "phishing" | "unknown"
@@ -75,11 +91,10 @@ class URLPredictionResult(BaseModel):
     fallback_used: bool = False
     error: Optional[str] = None
 
-
+# ---------- Protocol ----------
 @runtime_checkable
 class URLPredictor(Protocol):
     """Protocol for URL ML Predictors."""
-
     async def predict(self, url: str) -> URLPredictionResult:
         """Run ML prediction on a URL string."""
         ...
@@ -92,27 +107,21 @@ class URLPredictor(Protocol):
         """Return explicit health state."""
         ...
 
-    async def predict(self, url: str) -> URLPredictionResult:
-        """Run ML prediction on a URL string."""
-        ...
-
-    def is_loaded(self) -> bool:
-        """Check if model is currently loaded in memory."""
-        ...
-
-
+# ---------- URLBERT Predictor ----------
 class URLBERTPredictor:
     """
-    Primary URL Classifier using URLBERT-tiny (CrabInHoney/urlbert-tiny-v4-phishing-classifier).
-    Lightweight BERT architecture optimized for URL tokens.
+    Primary URL Classifier using URLBERT‑tiny.
+
+    Lightweight BERT architecture optimized for URL tokens. Supports CPU/GPU
+    with automatic fallback on import failure.
     """
 
     def __init__(
         self,
-        model_name: str = "CrabInHoney/urlbert-tiny-v4-phishing-classifier",
+        model_name: str = DEFAULT_URLBERT_MODEL,
         cache_dir: str = "./models",
-        inference_timeout: float = 2.0,
-    ):
+        inference_timeout: float = DEFAULT_INFERENCE_TIMEOUT,
+    ) -> None:
         self.model_name = model_name
         self.cache_dir = cache_dir
         self.inference_timeout = inference_timeout
@@ -129,7 +138,7 @@ class URLBERTPredictor:
             return True
 
         if not TRANSFORMERS_AVAILABLE or not torch or not AutoTokenizer:
-            logger.warning("Transformers / PyTorch not available for URLBERT.")
+            logger.warning("Transformers/PyTorch not available for URLBERT.")
             self._loaded = False
             return False
 
@@ -137,12 +146,14 @@ class URLBERTPredictor:
             logger.info("🤖 Loading URLBERT model: %s on %s", self.model_name, self.device)
 
             def _load():
-                tokenizer = AutoTokenizer.from_pretrained(
+                tokenizer_cls = cast(Any, AutoTokenizer)
+                model_cls = cast(Any, AutoModelForSequenceClassification)
+                tokenizer = tokenizer_cls.from_pretrained(
                     self.model_name,
                     cache_dir=self.cache_dir,
                     trust_remote_code=False,
                 )
-                model = AutoModelForSequenceClassification.from_pretrained(
+                model = model_cls.from_pretrained(
                     self.model_name,
                     cache_dir=self.cache_dir,
                     trust_remote_code=False,
@@ -165,10 +176,10 @@ class URLBERTPredictor:
 
     async def predict(self, url: str) -> URLPredictionResult:
         """Predict phishing probability for a URL string."""
-        start_time = time.perf_counter()
-        cleaned_url = URLPreprocessor.preprocess(url)
+        start = time.perf_counter()
+        cleaned = URLPreprocessor.preprocess(url)
 
-        if not cleaned_url:
+        if not cleaned:
             return URLPredictionResult(
                 score=0.0,
                 phishing_probability=0.0,
@@ -182,93 +193,90 @@ class URLBERTPredictor:
         if not self._loaded:
             loaded = await self.load_model()
             if not loaded:
-                elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+                elapsed = (time.perf_counter() - start) * 1000.0
                 return URLPredictionResult(
-                    score=50.0,
-                    phishing_probability=0.5,
+                    score=FALLBACK_SCORE,
+                    phishing_probability=FALLBACK_PROB,
                     label="unknown",
                     model_id=self.model_name,
-                    confidence=0.5,
-                    latency_ms=round(elapsed_ms, 2),
+                    confidence=FALLBACK_PROB,
+                    latency_ms=round(elapsed, 2),
                     fallback_used=True,
                     error="Model not loaded",
                 )
 
         try:
-
             def _inference():
                 inputs = self.tokenizer(
-                    cleaned_url,
+                    cleaned,
                     return_tensors="pt",
                     truncation=True,
-                    max_length=128,
+                    max_length=MAX_SEQUENCE_LENGTH,
                     padding=True,
                 )
                 if hasattr(inputs, "items"):
                     inputs = {
-                        k: (v.to(self.device) if hasattr(v, "to") else v) for k, v in inputs.items()
+                        k: (v.to(self.device) if hasattr(v, "to") else v)
+                        for k, v in inputs.items()
                     }
-
-                if torch:
-                    with torch.no_grad():
-                        outputs = self.model(**inputs)
-                        logits = outputs.logits
-                        probabilities = torch.softmax(logits, dim=-1)
-                    if hasattr(probabilities, "cpu"):
-                        return probabilities.cpu().numpy()[0]
-                return [0.5, 0.5]
+                torch_local = cast(Any, torch)
+                with torch_local.no_grad():
+                    outputs = self.model(**inputs)
+                    logits = outputs.logits
+                    probs = torch_local.softmax(logits, dim=-1)
+                return probs.cpu().numpy()[0]
 
             probs = await asyncio.wait_for(
-                asyncio.to_thread(_inference), timeout=self.inference_timeout
+                asyncio.to_thread(_inference),
+                timeout=self.inference_timeout
             )
-
             phishing_prob = float(probs[1]) if len(probs) == 2 else float(max(probs))
             score = round(phishing_prob * 100.0, 2)
 
-            if score < 30.0:
+            if score < SAFE_THRESHOLD:
                 label = "safe"
                 conf = 1.0 - (score / 100.0)
-            elif score < 70.0:
+            elif score < PHISHING_THRESHOLD:
                 label = "suspicious"
                 conf = 0.70
             else:
                 label = "phishing"
                 conf = score / 100.0
 
-            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+            elapsed = (time.perf_counter() - start) * 1000.0
             return URLPredictionResult(
                 score=score,
                 phishing_probability=round(phishing_prob, 4),
                 label=label,
                 model_id=self.model_name,
                 confidence=round(conf, 2),
-                latency_ms=round(elapsed_ms, 2),
+                latency_ms=round(elapsed, 2),
                 fallback_used=False,
             )
 
         except asyncio.TimeoutError:
-            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+            elapsed = (time.perf_counter() - start) * 1000.0
             logger.warning("⏱️ URLBERT inference timeout after %ss", self.inference_timeout)
             return URLPredictionResult(
-                score=50.0,
-                phishing_probability=0.5,
+                score=FALLBACK_SCORE,
+                phishing_probability=FALLBACK_PROB,
                 label="unknown",
                 model_id=self.model_name,
-                confidence=0.5,
-                latency_ms=round(elapsed_ms, 2),
+                confidence=FALLBACK_PROB,
+                latency_ms=round(elapsed, 2),
                 fallback_used=True,
                 error="Timeout",
             )
         except Exception as e:
-            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+            elapsed = (time.perf_counter() - start) * 1000.0
             logger.error("❌ URLBERT inference error: %s", e, exc_info=True)
             return URLPredictionResult(
-                score=50.0,
-                phishing_probability=0.5,
+                score=FALLBACK_SCORE,
+                phishing_probability=FALLBACK_PROB,
                 label="unknown",
                 model_id=self.model_name,
-                confidence=0.5,
-                latency_ms=round(elapsed_ms, 2),
+                confidence=FALLBACK_PROB,
+                latency_ms=round(elapsed, 2),
                 fallback_used=True,
                 error=str(e),
             )
@@ -284,18 +292,20 @@ class URLBERTPredictor:
         return ModelHealthState.MODEL_FALLBACK
 
 
+# ---------- ONNX Predictor ----------
 class ONNXURLPredictor:
     """
-    Baseline URL Classifier using pirocheto/phishing-url-detection in ONNX format.
-    LinearSVM with string n-gram features for sub-millisecond CPU inference.
+    Baseline URL Classifier using pirocheto/phishing‑url‑detection in ONNX format.
+
+    LinearSVM with string n‑gram features for sub‑millisecond CPU inference.
     """
 
     def __init__(
         self,
-        model_path: str = "./models/pirocheto_onnx/model.onnx",
+        model_path: str = DEFAULT_ONNX_MODEL_PATH,
         model_name: str = "pirocheto/phishing-url-detection",
         inference_timeout: float = 1.0,
-    ):
+    ) -> None:
         self.model_path = model_path
         self.model_name = model_name
         self.inference_timeout = inference_timeout
@@ -317,9 +327,9 @@ class ONNXURLPredictor:
             return False
 
         try:
-
             def _load():
-                return ort.InferenceSession(self.model_path, providers=["CPUExecutionProvider"])
+                ort_local = cast(Any, ort)
+                return ort_local.InferenceSession(self.model_path, providers=["CPUExecutionProvider"])
 
             self.session = await asyncio.to_thread(_load)
             self._loaded = True
@@ -331,10 +341,10 @@ class ONNXURLPredictor:
             return False
 
     async def predict(self, url: str) -> URLPredictionResult:
-        start_time = time.perf_counter()
-        cleaned_url = URLPreprocessor.preprocess(url)
+        start = time.perf_counter()
+        cleaned = URLPreprocessor.preprocess(url)
 
-        if not cleaned_url:
+        if not cleaned:
             return URLPredictionResult(
                 score=0.0,
                 phishing_probability=0.0,
@@ -348,61 +358,77 @@ class ONNXURLPredictor:
         if not self._loaded:
             loaded = await self.load_model()
             if not loaded:
-                elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+                elapsed = (time.perf_counter() - start) * 1000.0
                 return URLPredictionResult(
-                    score=50.0,
-                    phishing_probability=0.5,
+                    score=FALLBACK_SCORE,
+                    phishing_probability=FALLBACK_PROB,
                     label="unknown",
                     model_id=self.model_name,
-                    confidence=0.5,
-                    latency_ms=round(elapsed_ms, 2),
+                    confidence=FALLBACK_PROB,
+                    latency_ms=round(elapsed, 2),
                     fallback_used=True,
                     error="ONNX model not loaded",
                 )
 
         try:
-
             def _inference():
-                inputs = np.array([cleaned_url], dtype=object)
-                input_name = self.session.get_inputs()[0].name
-                outputs = self.session.run(None, {input_name: inputs})
+                inputs = np.array([cleaned], dtype=object)
+                session_local = cast(Any, self.session)
+                input_name = session_local.get_inputs()[0].name
+                outputs = session_local.run(None, {input_name: inputs})
                 # Output[1] contains list of dict probabilities [{0: prob_safe, 1: prob_phish}]
                 if len(outputs) > 1 and len(outputs[1]) > 0:
                     prob_dict = outputs[1][0]
-                    return float(prob_dict.get(1, 0.5))
-                return 0.5
+                    return float(prob_dict.get(1, FALLBACK_PROB))
+                return FALLBACK_PROB
 
             phishing_prob = await asyncio.wait_for(
-                asyncio.to_thread(_inference), timeout=self.inference_timeout
+                asyncio.to_thread(_inference),
+                timeout=self.inference_timeout
             )
             score = round(phishing_prob * 100.0, 2)
 
-            if score < 30.0:
+            if score < SAFE_THRESHOLD:
                 label = "safe"
-            elif score < 70.0:
+            elif score < PHISHING_THRESHOLD:
                 label = "suspicious"
             else:
                 label = "phishing"
 
-            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+            elapsed = (time.perf_counter() - start) * 1000.0
             return URLPredictionResult(
                 score=score,
                 phishing_probability=round(phishing_prob, 4),
                 label=label,
                 model_id=self.model_name,
                 confidence=0.90,
-                latency_ms=round(elapsed_ms, 2),
+                latency_ms=round(elapsed, 2),
                 fallback_used=False,
             )
-        except Exception as e:
-            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+
+        except asyncio.TimeoutError:
+            elapsed = (time.perf_counter() - start) * 1000.0
+            logger.warning("⏱️ ONNX inference timeout after %ss", self.inference_timeout)
             return URLPredictionResult(
-                score=50.0,
-                phishing_probability=0.5,
+                score=FALLBACK_SCORE,
+                phishing_probability=FALLBACK_PROB,
                 label="unknown",
                 model_id=self.model_name,
-                confidence=0.5,
-                latency_ms=round(elapsed_ms, 2),
+                confidence=FALLBACK_PROB,
+                latency_ms=round(elapsed, 2),
+                fallback_used=True,
+                error="Timeout",
+            )
+        except Exception as e:
+            elapsed = (time.perf_counter() - start) * 1000.0
+            logger.error("❌ ONNX inference error: %s", e)
+            return URLPredictionResult(
+                score=FALLBACK_SCORE,
+                phishing_probability=FALLBACK_PROB,
+                label="unknown",
+                model_id=self.model_name,
+                confidence=FALLBACK_PROB,
+                latency_ms=round(elapsed, 2),
                 fallback_used=True,
                 error=str(e),
             )
@@ -418,10 +444,11 @@ class ONNXURLPredictor:
         return ModelHealthState.MODEL_FALLBACK
 
 
+# ---------- Mock Predictor ----------
 class MockURLPredictor:
-    """Deterministic Mock URL Predictor for testing."""
+    """Deterministic Mock URL Predictor for testing and development."""
 
-    def __init__(self, model_id: str = "mock-url-predictor"):
+    def __init__(self, model_id: str = "mock-url-predictor") -> None:
         self.model_id = model_id
         self._loaded = True
 
@@ -432,6 +459,7 @@ class MockURLPredictor:
         return ModelHealthState.MODEL_READY if self._loaded else ModelHealthState.MODEL_UNAVAILABLE
 
     async def predict(self, url: str) -> URLPredictionResult:
+        start = time.perf_counter()
         if not url:
             return URLPredictionResult(
                 score=0.0,
@@ -444,53 +472,41 @@ class MockURLPredictor:
             )
 
         lowered = url.lower()
-        if (
-            "phish" in lowered
-            or "malicious" in lowered
-            or "paypa1" in lowered
-            or "account-verify" in lowered
-        ):
-            return URLPredictionResult(
-                score=92.0,
-                phishing_probability=0.92,
-                label="phishing",
-                model_id=self.model_id,
-                confidence=0.95,
-                latency_ms=1.2,
-                fallback_used=False,
-            )
+        if "phish" in lowered or "malicious" in lowered or "paypa1" in lowered or "account-verify" in lowered:
+            prob = 0.92
+            label = "phishing"
+            conf = 0.95
         elif "suspicious" in lowered or "warning" in lowered:
-            return URLPredictionResult(
-                score=55.0,
-                phishing_probability=0.55,
-                label="suspicious",
-                model_id=self.model_id,
-                confidence=0.70,
-                latency_ms=1.1,
-                fallback_used=False,
-            )
+            prob = 0.55
+            label = "suspicious"
+            conf = 0.70
+        else:
+            prob = 0.05
+            label = "safe"
+            conf = 0.98
+
+        elapsed = (time.perf_counter() - start) * 1000.0
         return URLPredictionResult(
-            score=5.0,
-            phishing_probability=0.05,
-            label="safe",
+            score=round(prob * 100.0, 2),
+            phishing_probability=prob,
+            label=label,
             model_id=self.model_id,
-            confidence=0.98,
-            latency_ms=0.8,
+            confidence=conf,
+            latency_ms=round(elapsed, 2),
             fallback_used=False,
         )
 
 
-# Global singleton getters
+# ---------- Global Singletons ----------
 _urlbert_instance: Optional[URLBERTPredictor] = None
 _onnx_url_instance: Optional[ONNXURLPredictor] = None
 
 
 async def get_urlbert_predictor() -> URLBERTPredictor:
+    """Get or create the global URLBERT predictor instance (loaded lazily)."""
     global _urlbert_instance
     if _urlbert_instance is None:
-        model_name = os.getenv(
-            "URLBERT_MODEL_NAME", "CrabInHoney/urlbert-tiny-v4-phishing-classifier"
-        )
+        model_name = os.getenv("URLBERT_MODEL_NAME", DEFAULT_URLBERT_MODEL)
         cache_dir = os.getenv("HF_MODEL_CACHE_DIR", "./models")
         _urlbert_instance = URLBERTPredictor(model_name=model_name, cache_dir=cache_dir)
         await _urlbert_instance.load_model()
@@ -498,9 +514,10 @@ async def get_urlbert_predictor() -> URLBERTPredictor:
 
 
 async def get_onnx_url_predictor() -> ONNXURLPredictor:
+    """Get or create the global ONNX predictor instance (loaded lazily)."""
     global _onnx_url_instance
     if _onnx_url_instance is None:
-        model_path = os.getenv("ONNX_URL_MODEL_PATH", "./models/pirocheto_onnx/model.onnx")
+        model_path = os.getenv("ONNX_URL_MODEL_PATH", DEFAULT_ONNX_MODEL_PATH)
         _onnx_url_instance = ONNXURLPredictor(model_path=model_path)
         await _onnx_url_instance.load_model()
     return _onnx_url_instance

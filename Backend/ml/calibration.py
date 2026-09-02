@@ -1,121 +1,152 @@
 """
 Probability Calibration, Statistical Inference, and Cost-Sensitive Optimization Module.
-Implements Platt Scaling (Newton-Raphson MLE), Temperature Scaling, Isotonic Calibration,
+
+Implements Platt Scaling (Newton‑Raphson MLE), Temperature Scaling, Isotonic Calibration,
 Expected Calibration Error (ECE), Brier Score, Bootstrap Confidence Intervals (95% CI),
-Paired McNemar Statistical Significance Tests, and Cost-Sensitive Operating Point Optimization.
+Paired McNemar Significance Test, and Cost‑Sensitive Operating Point Optimization.
+
+All calibrators support NumPy arrays and Python lists, and include safeguards
+against numerical instability.
 """
 
 from __future__ import annotations
 
 import math
-import random
-from typing import Any, Dict, List, Optional, Tuple
+import logging
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
+logger = logging.getLogger(__name__)
 
+# ---------- Constants ----------
+EPSILON = 1e-12
+CLIP_MIN = -20.0
+CLIP_MAX = 20.0
+DEFAULT_N_BINS = 10
+DEFAULT_N_BOOTSTRAPS = 500
+DEFAULT_THRESHOLD = 0.50
+DEFAULT_ALPHA = 0.05
+DEFAULT_SEED = 42
+L2_REGULARIZATION = 1e-4
+GRADIENT_DESCENT_LR = 0.01
+
+
+# ---------- Platt Scaling ----------
 class PlattCalibrator:
     """
-    Platt Scaling (Logistic Sigmoid Calibration via Newton-Raphson MLE).
-    Maps uncalibrated model scores or raw probabilities into calibrated posterior probabilities.
-    P(y=1|s) = 1 / (1 + exp(-(w * s + b)))
+    Platt Scaling (Logistic Sigmoid) via Newton‑Raphson MLE.
+
+    Maps uncalibrated scores (logits or probabilities) to calibrated posterior
+    probabilities: P(y=1 | s) = 1 / (1 + exp(-(w * s + b))).
     """
 
-    def __init__(self):
-        self.w: float = 1.0  # Slope / Weight
-        self.b: float = 0.0  # Intercept
+    def __init__(self) -> None:
+        self.w: float = 1.0
+        self.b: float = 0.0
         self.is_fitted: bool = False
 
     def fit(
         self,
-        y_score: List[float] | np.ndarray,
-        y_true: List[int] | np.ndarray,
+        y_score: Union[List[float], np.ndarray],
+        y_true: Union[List[int], np.ndarray],
         max_iter: int = 50,
         tol: float = 1e-6,
     ) -> PlattCalibrator:
+        """
+        Fit the Platt scaling parameters using Newton‑Raphson with L2 regularization.
+
+        Args:
+            y_score: Uncalibrated scores (or probabilities) – will be clipped.
+            y_true: Binary labels (0/1).
+            max_iter: Maximum Newton‑Raphson iterations.
+            tol: Convergence tolerance.
+
+        Returns:
+            self (fitted calibrator).
+        """
         scores = np.asarray(y_score, dtype=np.float64)
         labels = np.asarray(y_true, dtype=np.float64)
 
         if len(scores) < 2 or len(np.unique(labels)) < 2:
+            logger.warning("PlattCalibrator: insufficient data; using identity mapping.")
             self.w = 1.0
             self.b = 0.0
             self.is_fitted = False
             return self
 
-        # Clip scores to avoid numerical overflow
+        # Clip scores to avoid overflow
         scores = np.clip(scores, -15.0, 15.0)
         n = float(len(labels))
 
-        # Target smoothing (Platt's original prior: Laplace-smoothed targets)
+        # Laplace smoothing of targets (Platt's original prior)
         n_pos = np.sum(labels == 1.0)
         n_neg = np.sum(labels == 0.0)
         t_pos = (n_pos + 1.0) / (n_pos + 2.0)
         t_neg = 1.0 / (n_neg + 2.0)
         t = np.where(labels == 1.0, t_pos, t_neg)
 
-        # Initial parameters: [w, b]
         theta = np.array([1.0, 0.0], dtype=np.float64)
 
-        # Newton-Raphson optimization
         for _ in range(max_iter):
-            # Sigmoid: 1 / (1 + exp(-(w * x + b)))
             z = theta[0] * scores + theta[1]
-            p = 1.0 / (1.0 + np.exp(-np.clip(z, -20.0, 20.0)))
+            p = 1.0 / (1.0 + np.exp(-np.clip(z, CLIP_MIN, CLIP_MAX)))
+            var = np.maximum(p * (1.0 - p), EPSILON)
 
-            # Variance weights: p * (1 - p)
-            var = np.maximum(p * (1.0 - p), 1e-12)
-
-            # Error gradient: g = X^T * (p - t)
+            # Gradient
             diff = p - t
             grad_w = np.sum(diff * scores)
             grad_b = np.sum(diff)
-            grad = np.array([grad_w, grad_b], dtype=np.float64)
+            grad = np.array([grad_w, grad_b])
 
-            # Hessian matrix: H = X^T * W * X
-            h_00 = np.sum(var * scores * scores) + 1e-4  # L2 regularization
+            # Hessian (with L2 regularization)
+            h_00 = np.sum(var * scores * scores) + L2_REGULARIZATION
             h_01 = np.sum(var * scores)
-            h_11 = np.sum(var) + 1e-4
-
-            hessian = np.array([[h_00, h_01], [h_01, h_11]], dtype=np.float64)
+            h_11 = np.sum(var) + L2_REGULARIZATION
+            hessian = np.array([[h_00, h_01], [h_01, h_11]])
 
             try:
                 delta = np.linalg.solve(hessian, grad)
                 theta -= delta
-                if np.sum(delta**2) < tol:
+                if np.sum(delta ** 2) < tol:
                     break
             except np.linalg.LinAlgError:
-                # Gradient step fallback
-                theta -= 0.01 * grad
-                break
+                # Fallback to gradient descent
+                theta -= GRADIENT_DESCENT_LR * grad
+                if np.sum(grad ** 2) < tol:
+                    break
 
         self.w = float(theta[0])
         self.b = float(theta[1])
         self.is_fitted = True
+        logger.debug("PlattCalibrator fitted: w=%.4f, b=%.4f", self.w, self.b)
         return self
 
-    def predict_proba(self, y_score: List[float] | np.ndarray) -> np.ndarray:
+    def predict_proba(self, y_score: Union[List[float], np.ndarray]) -> np.ndarray:
+        """Apply fitted Platt scaling to produce calibrated probabilities."""
         if not self.is_fitted:
             return np.asarray(y_score, dtype=np.float64)
-
         scores = np.asarray(y_score, dtype=np.float64)
         logits = self.w * scores + self.b
-        return 1.0 / (1.0 + np.exp(-np.clip(logits, -20.0, 20.0)))
+        return 1.0 / (1.0 + np.exp(-np.clip(logits, CLIP_MIN, CLIP_MAX)))
 
 
+# ---------- Temperature Scaling ----------
 class TemperatureScalingCalibrator:
     """
-    Temperature Scaling for logit outputs: P(y=1|z) = sigmoid(z / T).
-    Learns a single positive scalar temperature parameter T > 0.
+    Temperature Scaling for logits: P(y=1 | z) = sigmoid(z / T).
+
+    Learns a single positive temperature parameter T > 0 via gradient descent.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.temperature: float = 1.0
         self.is_fitted: bool = False
 
     def fit(
         self,
-        y_logits: List[float] | np.ndarray,
-        y_true: List[int] | np.ndarray,
+        y_logits: Union[List[float], np.ndarray],
+        y_true: Union[List[int], np.ndarray],
         max_iter: int = 100,
         lr: float = 0.05,
     ) -> TemperatureScalingCalibrator:
@@ -123,47 +154,53 @@ class TemperatureScalingCalibrator:
         labels = np.asarray(y_true, dtype=np.float64)
 
         if len(logits) < 2 or len(np.unique(labels)) < 2:
+            logger.warning("TemperatureScaling: insufficient data; keeping T=1.0.")
             self.is_fitted = False
             return self
 
         t = 1.0
         for _ in range(max_iter):
-            scaled = logits / max(t, 1e-4)
-            p = 1.0 / (1.0 + np.exp(-np.clip(scaled, -20.0, 20.0)))
+            scaled = logits / max(t, EPSILON)
+            p = 1.0 / (1.0 + np.exp(-np.clip(scaled, CLIP_MIN, CLIP_MAX)))
             diff = p - labels
-            grad_t = -np.sum(diff * logits / (max(t, 1e-4) ** 2)) / len(labels)
+            grad_t = -np.sum(diff * logits / (max(t, EPSILON) ** 2)) / len(labels)
             t = max(0.01, t - lr * grad_t)
 
         self.temperature = float(t)
         self.is_fitted = True
+        logger.debug("TemperatureScaling: T=%.4f", self.temperature)
         return self
 
-    def predict_proba(self, y_logits: List[float] | np.ndarray) -> np.ndarray:
+    def predict_proba(self, y_logits: Union[List[float], np.ndarray]) -> np.ndarray:
         if not self.is_fitted:
             return np.asarray(y_logits, dtype=np.float64)
         logits = np.asarray(y_logits, dtype=np.float64)
-        scaled = logits / max(self.temperature, 1e-4)
-        return 1.0 / (1.0 + np.exp(-np.clip(scaled, -20.0, 20.0)))
+        scaled = logits / max(self.temperature, EPSILON)
+        return 1.0 / (1.0 + np.exp(-np.clip(scaled, CLIP_MIN, CLIP_MAX)))
 
 
+# ---------- Isotonic Calibration ----------
 class IsotonicCalibrator:
     """
-    Non-parametric Isotonic Regression Calibration using Pool Adjacent Violators Algorithm (PAVA).
-    Fits a monotonic step-wise calibration mapping.
+    Non‑parametric Isotonic Regression via Pool Adjacent Violators Algorithm (PAVA).
+
+    Fits a monotonic step‑wise mapping from scores to calibrated probabilities.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.x_thresholds: List[float] = []
         self.y_calibrated: List[float] = []
         self.is_fitted: bool = False
 
     def fit(
-        self, y_score: List[float] | np.ndarray, y_true: List[int] | np.ndarray
+        self,
+        y_score: Union[List[float], np.ndarray],
+        y_true: Union[List[int], np.ndarray],
     ) -> IsotonicCalibrator:
         scores = np.asarray(y_score, dtype=np.float64)
         labels = np.asarray(y_true, dtype=np.float64)
 
-        if len(scores) == 0:
+        if len(scores) == 0 or len(np.unique(labels)) < 2:
             self.is_fitted = False
             return self
 
@@ -180,22 +217,20 @@ class IsotonicCalibrator:
                 b1 = blocks.pop()
                 new_weight = b1["weight"] + b2["weight"]
                 new_sum = b1["sum"] + b2["sum"]
-                blocks.append(
-                    {
-                        "weight": new_weight,
-                        "sum": new_sum,
-                        "mean": new_sum / new_weight,
-                        "x_min": b1["x_min"],
-                        "x_max": b2["x_max"],
-                    }
-                )
+                blocks.append({
+                    "weight": new_weight,
+                    "sum": new_sum,
+                    "mean": new_sum / new_weight,
+                    "x_min": b1["x_min"],
+                    "x_max": b2["x_max"],
+                })
 
         self.x_thresholds = [b["x_max"] for b in blocks]
         self.y_calibrated = [b["mean"] for b in blocks]
         self.is_fitted = True
         return self
 
-    def predict_proba(self, y_score: List[float] | np.ndarray) -> np.ndarray:
+    def predict_proba(self, y_score: Union[List[float], np.ndarray]) -> np.ndarray:
         if not self.is_fitted or not self.x_thresholds:
             return np.asarray(y_score, dtype=np.float64)
 
@@ -210,10 +245,13 @@ class IsotonicCalibrator:
         return np.asarray(calibrated, dtype=np.float64)
 
 
+# ---------- Evaluation Metrics ----------
 def compute_ece(
-    y_true: List[int] | np.ndarray, y_prob: List[float] | np.ndarray, n_bins: int = 10
+    y_true: Union[List[int], np.ndarray],
+    y_prob: Union[List[float], np.ndarray],
+    n_bins: int = DEFAULT_N_BINS,
 ) -> float:
-    """Compute Expected Calibration Error (ECE)."""
+    """Expected Calibration Error (ECE) – lower is better."""
     labels = np.asarray(y_true, dtype=np.float64)
     probs = np.asarray(y_prob, dtype=np.float64)
 
@@ -222,71 +260,70 @@ def compute_ece(
 
     bins = np.linspace(0.0, 1.0, n_bins + 1)
     ece = 0.0
-    total_samples = len(labels)
+    total = len(labels)
 
     for i in range(n_bins):
-        bin_lower = bins[i]
-        bin_upper = bins[i + 1]
-
-        in_bin = (probs >= bin_lower) & (
-            probs < bin_upper if i < n_bins - 1 else probs <= bin_upper
-        )
-        prop_in_bin = np.sum(in_bin) / total_samples
-
-        if prop_in_bin > 0:
-            accuracy_in_bin = np.mean(labels[in_bin])
-            avg_confidence_in_bin = np.mean(probs[in_bin])
-            ece += prop_in_bin * abs(accuracy_in_bin - avg_confidence_in_bin)
+        lower = bins[i]
+        upper = bins[i + 1]
+        in_bin = (probs >= lower) & (probs < upper if i < n_bins - 1 else probs <= upper)
+        prop = np.sum(in_bin) / total
+        if prop > 0:
+            acc = np.mean(labels[in_bin])
+            conf = np.mean(probs[in_bin])
+            ece += prop * abs(acc - conf)
 
     return float(round(ece, 4))
 
 
-def compute_brier_score(y_true: List[int] | np.ndarray, y_prob: List[float] | np.ndarray) -> float:
-    """Compute Brier score (mean squared error of probabilistic predictions)."""
+def compute_brier_score(
+    y_true: Union[List[int], np.ndarray],
+    y_prob: Union[List[float], np.ndarray],
+) -> float:
+    """Brier score – mean squared error of probabilistic predictions."""
     labels = np.asarray(y_true, dtype=np.float64)
     probs = np.asarray(y_prob, dtype=np.float64)
-
     if len(labels) == 0:
         return 0.0
-
     return float(round(np.mean((probs - labels) ** 2), 4))
 
 
 def _trapz(y: np.ndarray, x: np.ndarray) -> float:
+    """Numerical integration via trapezoidal rule (fallback for old NumPy)."""
     if hasattr(np, "trapezoid"):
         return float(np.trapezoid(y, x))
-    if hasattr(np, "trapz"):
-        return float(np.trapz(y, x))
     return float(np.sum((x[1:] - x[:-1]) * (y[:-1] + y[1:]) / 2.0))
 
 
-def compute_roc_pr_auc(y_true: List[int], y_prob: List[float]) -> Tuple[float, float]:
-    """Compute Area Under ROC curve and Precision-Recall curve."""
+def compute_roc_pr_auc(
+    y_true: Union[List[int], np.ndarray],
+    y_prob: Union[List[float], np.ndarray],
+) -> Tuple[float, float]:
+    """
+    Compute Area Under ROC curve and Area Under Precision‑Recall curve.
+
+    Returns:
+        (roc_auc, pr_auc) as floats between 0 and 1.
+    """
     labels = np.asarray(y_true)
     probs = np.asarray(y_prob)
 
     if len(labels) == 0 or len(np.unique(labels)) < 2:
         return 0.5, 0.5
 
-    # Sort descending by probability
     desc_idx = np.argsort(-probs)
     sorted_labels = labels[desc_idx]
-
     n_pos = np.sum(sorted_labels == 1)
     n_neg = np.sum(sorted_labels == 0)
 
     if n_pos == 0 or n_neg == 0:
         return 0.5, 0.5
 
-    # Calculate ROC-AUC via trapezoidal integration
     tp_cumsum = np.cumsum(sorted_labels == 1)
     fp_cumsum = np.cumsum(sorted_labels == 0)
-
     tpr = np.concatenate([[0], tp_cumsum / n_pos])
     fpr = np.concatenate([[0], fp_cumsum / n_neg])
     roc_auc = _trapz(tpr, fpr)
 
-    # Calculate PR-AUC
     precisions = tp_cumsum / (tp_cumsum + fp_cumsum)
     recalls = tp_cumsum / n_pos
     pr_auc = _trapz(np.concatenate([[1.0], precisions]), np.concatenate([[0.0], recalls]))
@@ -295,21 +332,22 @@ def compute_roc_pr_auc(y_true: List[int], y_prob: List[float]) -> Tuple[float, f
 
 
 def sweep_thresholds(
-    y_true: List[int], y_prob: List[float], step: float = 0.02
+    y_true: Union[List[int], np.ndarray],
+    y_prob: Union[List[float], np.ndarray],
+    step: float = 0.02,
 ) -> List[Dict[str, Any]]:
-    """Evaluate performance across probability thresholds from 0.01 to 0.99."""
+    """Evaluate performance metrics across probability thresholds 0.01–0.99."""
     labels = np.asarray(y_true)
     probs = np.asarray(y_prob)
     thresholds = np.arange(0.02, 0.99, step)
 
-    curve = []
     total_pos = np.sum(labels == 1)
     total_neg = np.sum(labels == 0)
+    curve = []
 
     for th in thresholds:
         th = round(float(th), 2)
         preds = (probs >= th).astype(int)
-
         tp = int(np.sum((labels == 1) & (preds == 1)))
         fp = int(np.sum((labels == 0) & (preds == 1)))
         fn = int(np.sum((labels == 1) & (preds == 0)))
@@ -321,20 +359,18 @@ def sweep_thresholds(
         fpr = fp / total_neg if total_neg > 0 else 0.0
         fnr = fn / total_pos if total_pos > 0 else 0.0
 
-        curve.append(
-            {
-                "threshold": th,
-                "precision": round(precision, 4),
-                "recall": round(recall, 4),
-                "f1": round(f1, 4),
-                "fpr": round(fpr, 4),
-                "fnr": round(fnr, 4),
-                "tp": tp,
-                "fp": fp,
-                "fn": fn,
-                "tn": tn,
-            }
-        )
+        curve.append({
+            "threshold": th,
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1": round(f1, 4),
+            "fpr": round(fpr, 4),
+            "fnr": round(fnr, 4),
+            "tp": tp,
+            "fp": fp,
+            "fn": fn,
+            "tn": tn,
+        })
 
     return curve
 
@@ -342,25 +378,15 @@ def sweep_thresholds(
 def find_optimal_operating_points(
     threshold_curve: List[Dict[str, Any]]
 ) -> Dict[str, Dict[str, Any]]:
-    """Identify operational operating points."""
+    """Identify operational operating points (max F1, high recall, low FPR, balanced)."""
     if not threshold_curve:
         return {}
 
     max_f1_pt = max(threshold_curve, key=lambda x: x["f1"])
-    high_recall_candidates = [pt for pt in threshold_curve if pt["recall"] >= 0.80]
-    high_recall_pt = (
-        max(high_recall_candidates, key=lambda x: x["precision"])
-        if high_recall_candidates
-        else max_f1_pt
-    )
-
-    low_fpr_candidates = [pt for pt in threshold_curve if pt["fpr"] <= 0.05]
-    low_fpr_pt = (
-        max(low_fpr_candidates, key=lambda x: x["recall"])
-        if low_fpr_candidates
-        else min(threshold_curve, key=lambda x: x["fpr"])
-    )
-
+    high_recall = [pt for pt in threshold_curve if pt["recall"] >= 0.80]
+    high_recall_pt = max(high_recall, key=lambda x: x["precision"]) if high_recall else max_f1_pt
+    low_fpr = [pt for pt in threshold_curve if pt["fpr"] <= 0.05]
+    low_fpr_pt = max(low_fpr, key=lambda x: x["recall"]) if low_fpr else min(threshold_curve, key=lambda x: x["fpr"])
     balanced_pt = min(threshold_curve, key=lambda x: abs(x["precision"] - x["recall"]))
 
     return {
@@ -377,34 +403,28 @@ def compute_cost_sensitive_threshold(
     cost_fp: float = 1.0,
 ) -> Dict[str, Any]:
     """
-    Find threshold minimizing expected business loss:
-    Loss = (FN * cost_fn) + (FP * cost_fp)
+    Find threshold that minimises expected cost: Loss = (FN * cost_fn) + (FP * cost_fp).
     """
     if not threshold_curve:
         return {"threshold": 0.5, "expected_cost": 0.0}
 
-    scored_points = []
+    scored = []
     for pt in threshold_curve:
-        fn = pt.get("fn", 0)
-        fp = pt.get("fp", 0)
-        total_cost = (fn * cost_fn) + (fp * cost_fp)
-        scored_points.append({**pt, "expected_cost": total_cost})
+        total_cost = (pt.get("fn", 0) * cost_fn) + (pt.get("fp", 0) * cost_fp)
+        scored.append({**pt, "expected_cost": total_cost})
 
-    best_pt = min(scored_points, key=lambda x: x["expected_cost"])
-    return best_pt
+    return min(scored, key=lambda x: x["expected_cost"])
 
 
 def compute_bootstrap_confidence_intervals(
-    y_true: List[int],
-    y_prob: List[float],
-    threshold: float = 0.50,
-    n_bootstraps: int = 500,
-    alpha: float = 0.05,
-    seed: int = 42,
+    y_true: Union[List[int], np.ndarray],
+    y_prob: Union[List[float], np.ndarray],
+    threshold: float = DEFAULT_THRESHOLD,
+    n_bootstraps: int = DEFAULT_N_BOOTSTRAPS,
+    alpha: float = DEFAULT_ALPHA,
+    seed: int = DEFAULT_SEED,
 ) -> Dict[str, Dict[str, float]]:
-    """
-    Empirical bootstrap estimation of 95% Confidence Intervals for F1, Precision, Recall, and FPR.
-    """
+    """Bootstrap 95% confidence intervals for F1, Precision, Recall, and FPR."""
     labels = np.asarray(y_true)
     probs = np.asarray(y_prob)
     n = len(labels)
@@ -454,14 +474,15 @@ def compute_bootstrap_confidence_intervals(
 
 
 def paired_mcnemar_test(
-    y_true: List[int],
-    y_pred_a: List[int],
-    y_pred_b: List[int],
+    y_true: Union[List[int], np.ndarray],
+    y_pred_a: Union[List[int], np.ndarray],
+    y_pred_b: Union[List[int], np.ndarray],
 ) -> Dict[str, Any]:
     """
-    Paired McNemar's Test for comparing two classifiers on identical test instances.
-    Evaluates discordance matrix: b (A correct, B wrong) vs c (B correct, A wrong).
-    Statistic = (|b - c| - 1)^2 / (b + c) ~ Chi-squared (1 df)
+    Paired McNemar's test comparing two classifiers on identical test instances.
+
+    Statistic = (|b - c| - 1)^2 / (b + c) ~ Chi‑squared (1 df),
+    where b = A correct & B wrong; c = B correct & A wrong.
     """
     labels = np.asarray(y_true)
     pred_a = np.asarray(y_pred_a)
@@ -476,11 +497,8 @@ def paired_mcnemar_test(
     if (b + c) == 0:
         return {"statistic": 0.0, "p_value": 1.0, "significant": False, "b": b, "c": c}
 
-    # Edwards continuity correction
-    stat = ((abs(b - c) - 1.0) ** 2) / float(b + c) if abs(b - c) >= 1.0 else 0.0
-
-    # Asymptotic p-value approximation for 1 degree of freedom Chi-Square
-    # P(X > stat) = erfc(sqrt(stat / 2))
+    # Continuity‑corrected (Edwards) chi‑square statistic
+    stat = ((abs(b - c) - 1.0) ** 2) / float(b + c) if abs(b - c) >= 1 else 0.0
     p_val = math.erfc(math.sqrt(stat / 2.0)) if stat > 0 else 1.0
 
     return {

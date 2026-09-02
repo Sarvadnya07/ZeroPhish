@@ -1,8 +1,11 @@
 """
 URL Detection Cascade Simulation Engine for Phase 10.
-Implements a multi-stage gated evaluation architecture:
-Hard Security Rules -> Heuristics -> Fast ONNX -> Ambiguity Gate -> Deep URLBERT -> Fusion.
+
+Implements a multi‑stage gated evaluation architecture:
+Hard Security Rules → Heuristics → Fast ONNX → Ambiguity Gate → Deep URLBERT → Fusion.
+
 Tracks stage escalation, model skip rates, execution latencies, and telemetry provenance.
+All thresholds are configurable; default values match production settings.
 """
 
 from __future__ import annotations
@@ -27,6 +30,17 @@ from ml.url_predictor import (
 from tier_2.analyzer import ThreatAnalyzer
 
 logger = logging.getLogger(__name__)
+
+# ---------- Constants ----------
+DEFAULT_HEURISTICS_LOWER = 15.0
+DEFAULT_HEURISTICS_UPPER = 85.0
+DEFAULT_ONNX_LOWER = 0.20
+DEFAULT_ONNX_UPPER = 0.80
+HEURISTICS_WEIGHT = 0.40
+URLBERT_WEIGHT = 0.60
+CRITICAL_THRESHOLD = 65.0
+SUSPICIOUS_THRESHOLD = 35.0
+HARD_RULE_HOSTS = {"127.0.0.1", "localhost", "169.254.169.254", "0.0.0.0"}
 
 
 class CascadeStage(str, Enum):
@@ -61,35 +75,44 @@ class CascadePredictionResult(BaseModel):
 
 
 class URLDetectionCascade:
-    """Configurable staged URL detection cascade with deterministic security precedence."""
+    """
+    Configurable staged URL detection cascade with deterministic security precedence.
+
+    Attributes:
+        heuristics_lower_threshold: Score below this => SAFE (Stage 2 termination).
+        heuristics_upper_threshold: Score above this => CRITICAL (Stage 2 termination).
+        onnx_lower_threshold: ONNX prob below this => SAFE (Stage 3 termination).
+        onnx_upper_threshold: ONNX prob above this => CRITICAL (Stage 3 termination).
+        onnx_predictor: Predictor for Stage 3 (ONNX).
+        urlbert_predictor: Predictor for Stage 4 (URLBERT).
+    """
 
     def __init__(
         self,
-        onnx_lower_threshold: float = 0.20,
-        onnx_upper_threshold: float = 0.80,
-        heuristics_lower_threshold: float = 15.0,
-        heuristics_upper_threshold: float = 85.0,
+        heuristics_lower_threshold: float = DEFAULT_HEURISTICS_LOWER,
+        heuristics_upper_threshold: float = DEFAULT_HEURISTICS_UPPER,
+        onnx_lower_threshold: float = DEFAULT_ONNX_LOWER,
+        onnx_upper_threshold: float = DEFAULT_ONNX_UPPER,
         onnx_predictor: Optional[URLPredictor] = None,
         urlbert_predictor: Optional[URLPredictor] = None,
-    ):
-        self.onnx_lower_threshold = onnx_lower_threshold
-        self.onnx_upper_threshold = onnx_upper_threshold
-        self.heuristics_lower_threshold = heuristics_lower_threshold
-        self.heuristics_upper_threshold = heuristics_upper_threshold
-
+    ) -> None:
+        self.heuristics_lower = heuristics_lower_threshold
+        self.heuristics_upper = heuristics_upper_threshold
+        self.onnx_lower = onnx_lower_threshold
+        self.onnx_upper = onnx_upper_threshold
         self.onnx_predictor = onnx_predictor or MockURLPredictor()
         self.urlbert_predictor = urlbert_predictor or MockURLPredictor()
 
     async def predict_cascade(self, url: str) -> CascadePredictionResult:
+        """Execute the cascade and return the prediction result with full telemetry."""
         t0 = time.perf_counter()
         normalized_url = URLNormalizer.to_model_input_form(url)
         host = URLNormalizer.extract_hostname(normalized_url)
 
-        # -------------------------------------------------------------
-        # STAGE 1: Deterministic Hard Security Rules (SSRF / RFC1918 / Strict Blocks)
-        # -------------------------------------------------------------
-        if host in ("127.0.0.1", "localhost", "169.254.169.254", "0.0.0.0"):
+        # ---------- STAGE 1: Hard Security Rules ----------
+        if host in HARD_RULE_HOSTS:
             lat = (time.perf_counter() - t0) * 1000.0
+            logger.debug("Hard rule triggered for %s", normalized_url[:50])
             return CascadePredictionResult(
                 url=normalized_url,
                 final_score=100.0,
@@ -102,13 +125,15 @@ class URLDetectionCascade:
                 hard_override="SSRF_PREVENTION",
             )
 
-        # -------------------------------------------------------------
-        # STAGE 2: Lightweight Lexical Heuristics (ThreatAnalyzer)
-        # -------------------------------------------------------------
-        h_score_val, _ = await ThreatAnalyzer._analyze_links([normalized_url])
-        h_score = float(h_score_val)
+        # ---------- STAGE 2: Heuristics ----------
+        try:
+            h_score_val, _ = await ThreatAnalyzer._analyze_links([normalized_url])
+            h_score = float(h_score_val)
+        except Exception as e:
+            logger.warning("Heuristics failed for %s: %s", url[:50], e)
+            h_score = 50.0  # neutral fallback
 
-        if h_score >= self.heuristics_upper_threshold:
+        if h_score >= self.heuristics_upper:
             lat = (time.perf_counter() - t0) * 1000.0
             return CascadePredictionResult(
                 url=normalized_url,
@@ -121,7 +146,7 @@ class URLDetectionCascade:
                 latency_ms=round(lat, 3),
                 heuristics_score=h_score,
             )
-        elif h_score <= self.heuristics_lower_threshold:
+        elif h_score <= self.heuristics_lower:
             lat = (time.perf_counter() - t0) * 1000.0
             return CascadePredictionResult(
                 url=normalized_url,
@@ -135,14 +160,16 @@ class URLDetectionCascade:
                 heuristics_score=h_score,
             )
 
-        # -------------------------------------------------------------
-        # STAGE 3: Fast ONNX Baseline Model (~1.25 ms CPU)
-        # -------------------------------------------------------------
-        onnx_res = await self.onnx_predictor.predict(normalized_url)
-        onnx_prob = float(onnx_res.phishing_probability)
+        # ---------- STAGE 3: ONNX ----------
+        try:
+            onnx_res = await self.onnx_predictor.predict(normalized_url)
+            onnx_prob = float(onnx_res.phishing_probability)
+        except Exception as e:
+            logger.warning("ONNX failed for %s: %s", url[:50], e)
+            onnx_prob = 0.5
+            # Mark health as error, but continue
 
-        if onnx_prob <= self.onnx_lower_threshold:
-            # ONNX confidently marks safe -> Fuse with heuristics and return without URLBERT
+        if onnx_prob <= self.onnx_lower:
             fusion = RiskFusionEngine.fuse(tier1_score=h_score, tier2_score=onnx_prob * 100.0)
             lat = (time.perf_counter() - t0) * 1000.0
             return CascadePredictionResult(
@@ -157,8 +184,7 @@ class URLDetectionCascade:
                 heuristics_score=h_score,
                 onnx_score=onnx_prob,
             )
-        elif onnx_prob >= self.onnx_upper_threshold:
-            # ONNX confidently marks malicious -> Fuse and return without URLBERT
+        elif onnx_prob >= self.onnx_upper:
             fusion = RiskFusionEngine.fuse(tier1_score=h_score, tier2_score=onnx_prob * 100.0)
             lat = (time.perf_counter() - t0) * 1000.0
             return CascadePredictionResult(
@@ -174,19 +200,23 @@ class URLDetectionCascade:
                 onnx_score=onnx_prob,
             )
 
-        # -------------------------------------------------------------
-        # STAGE 4: Escalation to Deep URLBERT Model (~14.85 ms CPU)
-        # -------------------------------------------------------------
-        bert_res = await self.urlbert_predictor.predict(normalized_url)
-        bert_prob = float(bert_res.phishing_probability)
+        # ---------- STAGE 4: URLBERT ----------
+        try:
+            bert_res = await self.urlbert_predictor.predict(normalized_url)
+            bert_prob = float(bert_res.phishing_probability)
+        except Exception as e:
+            logger.warning("URLBERT failed for %s: %s", url[:50], e)
+            bert_prob = 0.5
 
-        # Fused combination with URLBERT
-        fused_score = (h_score * 0.40) + ((bert_prob * 100.0) * 0.60)
-        verdict = (
-            "CRITICAL" if fused_score >= 65.0 else ("SUSPICIOUS" if fused_score >= 35.0 else "SAFE")
-        )
+        fused_score = (h_score * HEURISTICS_WEIGHT) + ((bert_prob * 100.0) * URLBERT_WEIGHT)
+        if fused_score >= CRITICAL_THRESHOLD:
+            verdict = "CRITICAL"
+        elif fused_score >= SUSPICIOUS_THRESHOLD:
+            verdict = "SUSPICIOUS"
+        else:
+            verdict = "SAFE"
+
         lat = (time.perf_counter() - t0) * 1000.0
-
         return CascadePredictionResult(
             url=normalized_url,
             final_score=round(fused_score, 2),

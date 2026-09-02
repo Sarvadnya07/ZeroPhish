@@ -1,13 +1,22 @@
 """
-Multi-Signal Risk Fusion Engine for ZeroPhish.
+Multi‑Signal Risk Fusion Engine for ZeroPhish.
+
 Combines heuristics, OSINT, ML inferences, and Tier 3 AI with hard security rule overrides.
+Supports custom weights and partial fusions (T1+T2, T1+T2+T3).
 """
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
+
+
+class Verdict(str, Enum):
+    SAFE = "SAFE"
+    SUSPICIOUS = "SUSPICIOUS"
+    CRITICAL = "CRITICAL"
 
 
 class FusionSignal(BaseModel):
@@ -20,7 +29,7 @@ class FusionSignal(BaseModel):
 
 class FusionResult(BaseModel):
     final_score: float = Field(..., ge=0.0, le=100.0)
-    verdict: str  # "SAFE" | "SUSPICIOUS" | "CRITICAL"
+    verdict: Verdict
     confidence: float = Field(..., ge=0.0, le=1.0)
     signals_applied: List[str]
     hard_override_applied: Optional[str] = None
@@ -28,17 +37,22 @@ class FusionResult(BaseModel):
 
 
 class RiskFusionEngine:
-    """Calibrated Multi-Signal Fusion with Hard Security Overrides."""
+    """Calibrated Multi‑Signal Fusion with Hard Security Overrides."""
 
-    # Default weights matching production formula
+    # Default weights matching production formula (T1 20%, T2 30%, T3 50%)
     DEFAULT_WEIGHTS = {
         "tier1_heuristics": 0.20,
         "tier2_metadata_ml": 0.30,
         "tier3_semantic_ai": 0.50,
     }
+    SAFE_THRESHOLD = 30.0
+    CRITICAL_THRESHOLD = 70.0
+    HARD_MALICIOUS_SCORE = 95.0
+    HARD_SAFE_SCORE = 5.0
 
     @staticmethod
     def clamp(val: float) -> float:
+        """Clamp value to [0.0, 100.0]."""
         return max(0.0, min(100.0, float(val)))
 
     @classmethod
@@ -53,69 +67,75 @@ class RiskFusionEngine:
     ) -> FusionResult:
         """
         Execute risk fusion with hard security overrides.
+
+        Args:
+            tier1_score: Heuristics score (0‑100).
+            tier2_score: Metadata/ML score (0‑100).
+            tier3_score: Semantic AI score (0‑100) – optional.
+            hard_malicious_triggers: List of triggers that force CRITICAL.
+            hard_safe_triggers: List of triggers that force SAFE (overridden by malicious).
+            custom_weights: Override default weights (must include all three keys if tier3 provided).
+
+        Returns:
+            FusionResult with final score, verdict, and breakdown.
         """
         weights = custom_weights or cls.DEFAULT_WEIGHTS
-        signals: List[str] = []
-        breakdown: Dict[str, float] = {}
 
-        # 1. Evaluate Hard Security Rule Overrides
+        # 1. Hard overrides take precedence
         if hard_malicious_triggers:
-            override_reason = f"Hard security trigger: {', '.join(hard_malicious_triggers)}"
             return FusionResult(
-                final_score=95.0,
-                verdict="CRITICAL",
+                final_score=cls.HARD_MALICIOUS_SCORE,
+                verdict=Verdict.CRITICAL,
                 confidence=0.99,
                 signals_applied=hard_malicious_triggers,
-                hard_override_applied=override_reason,
-                breakdown={"hard_override": 95.0},
+                hard_override_applied=f"Hard security trigger: {', '.join(hard_malicious_triggers)}",
+                breakdown={"hard_override": cls.HARD_MALICIOUS_SCORE},
             )
 
-        if hard_safe_triggers and not hard_malicious_triggers:
-            override_reason = f"Verified safe allowlist: {', '.join(hard_safe_triggers)}"
+        if hard_safe_triggers:
             return FusionResult(
-                final_score=5.0,
-                verdict="SAFE",
+                final_score=cls.HARD_SAFE_SCORE,
+                verdict=Verdict.SAFE,
                 confidence=0.95,
                 signals_applied=hard_safe_triggers,
-                hard_override_applied=override_reason,
-                breakdown={"hard_override": 5.0},
+                hard_override_applied=f"Verified safe allowlist: {', '.join(hard_safe_triggers)}",
+                breakdown={"hard_override": cls.HARD_SAFE_SCORE},
             )
 
-        # 2. Weighted Score Fusion
+        # 2. Clamp inputs
         t1 = cls.clamp(tier1_score)
         t2 = cls.clamp(tier2_score)
-        breakdown["tier1"] = t1
-        breakdown["tier2"] = t2
-        signals.append(f"Tier 1 Heuristics: {t1:.1f}")
-        signals.append(f"Tier 2 Metadata/ML: {t2:.1f}")
+        breakdown = {"tier1": t1, "tier2": t2}
+        signals = [f"Tier 1 Heuristics: {t1:.1f}", f"Tier 2 Metadata/ML: {t2:.1f}"]
 
+        # 3. Weighted fusion
         if tier3_score is not None:
             t3 = cls.clamp(tier3_score)
             breakdown["tier3"] = t3
             signals.append(f"Tier 3 Semantic AI: {t3:.1f}")
-            w_t1 = weights.get("tier1_heuristics", 0.20)
-            w_t2 = weights.get("tier2_metadata_ml", 0.30)
-            w_t3 = weights.get("tier3_semantic_ai", 0.50)
-            total_w = w_t1 + w_t2 + w_t3
-            raw_score = (t1 * w_t1 + t2 * w_t2 + t3 * w_t3) / total_w
+            w1 = weights.get("tier1_heuristics", 0.20)
+            w2 = weights.get("tier2_metadata_ml", 0.30)
+            w3 = weights.get("tier3_semantic_ai", 0.50)
+            total_w = w1 + w2 + w3
+            raw_score = (t1 * w1 + t2 * w2 + t3 * w3) / total_w
             confidence = 0.92
         else:
             # Partial fusion (T1 + T2)
-            w_t1 = weights.get("tier1_heuristics", 0.20)
-            w_t2 = weights.get("tier2_metadata_ml", 0.30)
-            total_w = w_t1 + w_t2
-            raw_score = (t1 * w_t1 + t2 * w_t2) / total_w
+            w1 = weights.get("tier1_heuristics", 0.20)
+            w2 = weights.get("tier2_metadata_ml", 0.30)
+            total_w = w1 + w2
+            raw_score = (t1 * w1 + t2 * w2) / total_w
             confidence = 0.75
 
         final_score = round(cls.clamp(raw_score), 2)
 
-        # 3. Verdict Categorization
-        if final_score < 30.0:
-            verdict = "SAFE"
-        elif final_score < 70.0:
-            verdict = "SUSPICIOUS"
+        # 4. Verdict categorisation
+        if final_score < cls.SAFE_THRESHOLD:
+            verdict = Verdict.SAFE
+        elif final_score < cls.CRITICAL_THRESHOLD:
+            verdict = Verdict.SUSPICIOUS
         else:
-            verdict = "CRITICAL"
+            verdict = Verdict.CRITICAL
 
         return FusionResult(
             final_score=final_score,
