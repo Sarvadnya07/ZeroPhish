@@ -1,4 +1,9 @@
+import sys
 import pytest
+
+if sys.platform == "win32":
+    sys.modules.setdefault("torchvision", None)
+    sys.modules.setdefault("torchvision.transforms", None)
 
 
 @pytest.fixture(scope="session", autouse=True)

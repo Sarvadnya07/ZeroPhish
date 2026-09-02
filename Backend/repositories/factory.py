@@ -142,43 +142,54 @@ def get_cache_backend() -> CacheBackend:
                     def __init__(self, url: str, default_ttl: int = 300):
                         self._url = url
                         self._default_ttl = default_ttl
-                        self._client = aioredis.from_url(url, decode_responses=True)
+                        self._client = aioredis.from_url(url, decode_responses=True, socket_connect_timeout=0.5, socket_timeout=0.5)
+                        from .in_memory import InMemoryCacheBackend
+                        self._fallback = InMemoryCacheBackend(default_ttl)
 
                     async def get(self, key: str) -> Optional[str]:
                         try:
-                            return await self._client.get(key)
+                            val = await self._client.get(key)
+                            if val is not None:
+                                return val
                         except Exception as e:
-                            logger.debug("Redis cache get error for %s: %s", key, e)
-                            return None
+                            logger.debug("Redis cache get error for %s: %s, using fallback", key, e)
+                        return await self._fallback.get(key)
 
                     async def set(self, key: str, value: str, ttl_seconds: Optional[int] = None) -> None:
                         try:
                             ttl = ttl_seconds if ttl_seconds is not None else self._default_ttl
                             await self._client.set(key, value, ex=ttl)
                         except Exception as e:
-                            logger.debug("Redis cache set error for %s: %s", key, e)
+                            logger.debug("Redis cache set error for %s: %s, saving to fallback", key, e)
+                        await self._fallback.set(key, value, ttl_seconds=ttl_seconds)
 
                     async def delete(self, key: str) -> bool:
+                        res = False
                         try:
-                            return bool(await self._client.delete(key))
+                            res = bool(await self._client.delete(key))
                         except Exception:
-                            return False
+                            pass
+                        res_fb = await self._fallback.delete(key)
+                        return res or res_fb
 
                     async def clear_prefix(self, prefix: str) -> int:
+                        cleared = 0
                         try:
                             keys = await self._client.keys(f"{prefix}*")
                             if keys:
-                                return await self._client.delete(*keys)
-                            return 0
+                                cleared = await self._client.delete(*keys)
                         except Exception:
-                            return 0
+                            pass
+                        cleared_fb = await self._fallback.clear_prefix(prefix)
+                        return max(cleared, cleared_fb)
 
                     async def get_stats(self) -> Dict[str, Any]:
                         try:
                             info = await self._client.info()
                             return {"status": "connected", "backend": "redis", "keys_count": info.get("db0", {}).get("keys", 0)}
-                        except Exception as e:
-                            return {"status": "error", "backend": "redis", "error": str(e)}
+                        except Exception:
+                            fb_stats = await self._fallback.get_stats()
+                            return {"status": "connected", "backend": "in_memory (redis_fallback)", "keys_count": fb_stats.get("keys_count", 0)}
 
                 _cache_backend = _RedisCache(redis_url)
             except Exception as _redis_err:

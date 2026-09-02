@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 import time
 from typing import Optional, Protocol, runtime_checkable
 
@@ -19,12 +20,16 @@ from .url_preprocessor import URLPreprocessor
 
 logger = logging.getLogger(__name__)
 
+if sys.platform == "win32":
+    sys.modules.setdefault("torchvision", None)
+    sys.modules.setdefault("torchvision.transforms", None)
+
 try:
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
     TRANSFORMERS_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError, RuntimeError, Exception):
     torch = None
     AutoModelForSequenceClassification = None
     AutoTokenizer = None

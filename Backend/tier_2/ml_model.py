@@ -9,9 +9,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+if sys.platform == "win32":
+    # Prevent transformers from loading broken torchvision C-extension DLLs on Windows Python 3.13
+    sys.modules.setdefault("torchvision", None)
+    sys.modules.setdefault("torchvision.transforms", None)
 
 try:
     import torch
