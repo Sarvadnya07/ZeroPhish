@@ -16,7 +16,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, cast
 
 import numpy as np
 
@@ -173,7 +173,12 @@ class BenchmarkIntegrityAuditor:
 
         # 3. Load records and audit cohort overlaps
         records, meta = BenchmarkV5DatasetBuilder.load_or_build_v5_candidate()
-        splits, split_manifest = DomainDisjointSplitter.create_4way_split(records, seed=42)
+        # The benchmark record type is structurally compatible with the splitter contract,
+        # but the type checker treats list types as invariant. Cast at the boundary to avoid
+        # a false-positive while preserving runtime behavior.
+        splits, split_manifest = DomainDisjointSplitter.create_4way_split(
+            cast(List[Any], records), seed=42
+        )
 
         train_doms = {r.registered_domain for r in splits["TRAIN"]}
         cal_doms = {r.registered_domain for r in splits["CALIBRATION"]}
@@ -248,8 +253,9 @@ class BenchmarkIntegrityAuditor:
         # 5. Independent Metric Recalculation
         cal_y = [r.label for r in splits["CALIBRATION"]]
         mock_pred = MockURLPredictor()
+        record_model_input = lambda r: getattr(r, "model_input", getattr(r, "url_model_input"))
         cal_scores = [
-            (await mock_pred.predict(r.model_input)).phishing_probability
+            (await mock_pred.predict(record_model_input(r))).phishing_probability
             for r in splits["CALIBRATION"]
         ]
         platt = PlattCalibrator().fit(cal_scores, cal_y)
@@ -257,11 +263,12 @@ class BenchmarkIntegrityAuditor:
         test_recs = splits["FINAL_TEST"]
         test_y = [r.label for r in test_recs]
         test_h = [
-            float((await ThreatAnalyzer._analyze_links([r.model_input]))[0]) / 100.0
+            float((await ThreatAnalyzer._analyze_links([record_model_input(r)]))[0]) / 100.0
             for r in test_recs
         ]
         test_m = [
-            float((await mock_pred.predict(r.model_input)).phishing_probability) for r in test_recs
+            float((await mock_pred.predict(record_model_input(r))).phishing_probability)
+            for r in test_recs
         ]
         test_cal_m = platt.predict_proba(test_m).tolist()
         test_hyb = [(h * 0.4 + m * 0.6) for h, m in zip(test_h, test_cal_m)]
