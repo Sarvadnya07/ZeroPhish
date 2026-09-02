@@ -125,8 +125,9 @@ class URLBERTPredictor:
         self.model_name = model_name
         self.cache_dir = cache_dir
         self.inference_timeout = inference_timeout
-        self.model = None
-        self.tokenizer = None
+        # Annotate as Any to avoid Optional-call diagnostics from static checkers
+        self.model: Any = None
+        self.tokenizer: Any = None
         self.device = (
             "cuda" if (torch and hasattr(torch, "cuda") and torch.cuda.is_available()) else "cpu"
         )
@@ -146,14 +147,16 @@ class URLBERTPredictor:
             logger.info("🤖 Loading URLBERT model: %s on %s", self.model_name, self.device)
 
             def _load():
-                tokenizer_cls = cast(Any, AutoTokenizer)
-                model_cls = cast(Any, AutoModelForSequenceClassification)
-                tokenizer = tokenizer_cls.from_pretrained(
+                # AutoTokenizer/AutoModel may be None at type-check time; guard with assert
+                tokenizer_cls = AutoTokenizer
+                model_cls = AutoModelForSequenceClassification
+                assert tokenizer_cls is not None and model_cls is not None, "Transformers components unavailable"
+                tokenizer = cast(Any, tokenizer_cls).from_pretrained(
                     self.model_name,
                     cache_dir=self.cache_dir,
                     trust_remote_code=False,
                 )
-                model = model_cls.from_pretrained(
+                model = cast(Any, model_cls).from_pretrained(
                     self.model_name,
                     cache_dir=self.cache_dir,
                     trust_remote_code=False,
@@ -206,8 +209,13 @@ class URLBERTPredictor:
                 )
 
         try:
+            # Locals with explicit Any type to satisfy static type checkers
+            tokenizer = cast(Any, self.tokenizer)
+            model = cast(Any, self.model)
+            assert tokenizer is not None and model is not None, "Tokenizer/model not loaded"
+
             def _inference():
-                inputs = self.tokenizer(
+                inputs = tokenizer(
                     cleaned,
                     return_tensors="pt",
                     truncation=True,
@@ -221,7 +229,7 @@ class URLBERTPredictor:
                     }
                 torch_local = cast(Any, torch)
                 with torch_local.no_grad():
-                    outputs = self.model(**inputs)
+                    outputs = model(**inputs)
                     logits = outputs.logits
                     probs = torch_local.softmax(logits, dim=-1)
                 return probs.cpu().numpy()[0]
