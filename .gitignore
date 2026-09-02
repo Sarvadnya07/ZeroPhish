@@ -113,3 +113,16 @@ Backend/ml/data/processed/
 *.bin
 *.pt
 *.pth
+
+# ML Benchmark evaluation outputs, reports, and shadow rollouts
+Backend/ml/benchmarks/shadow/
+Backend/ml/benchmarks/shadow_audit/
+Backend/ml/benchmarks/url_benchmark_v5_audit/
+Backend/ml/benchmarks/url_benchmark_v5_cascade_candidate/
+Backend/ml/data/reports/
+Backend/ml/benchmarks/*/evaluation_results.json
+Backend/ml/benchmarks/*/stage_trace.json
+Backend/ml/benchmarks/*/latency_audit.json
+Backend/ml/benchmarks/*/final_audit_report.md
+Backend/ml/benchmarks/dataset_manifest_v3.json
+
