@@ -84,3 +84,16 @@ htmlcov/
 *.db-journal
 *.sqlite
 *.sqlite3
+
+# ML Benchmark evaluation outputs, reports, and shadow rollouts
+ml/benchmarks/shadow/
+ml/benchmarks/shadow_audit/
+ml/benchmarks/url_benchmark_v5_audit/
+ml/benchmarks/url_benchmark_v5_cascade_candidate/
+ml/data/reports/
+ml/benchmarks/*/evaluation_results.json
+ml/benchmarks/*/stage_trace.json
+ml/benchmarks/*/latency_audit.json
+ml/benchmarks/*/final_audit_report.md
+ml/benchmarks/dataset_manifest_v3.json
+
