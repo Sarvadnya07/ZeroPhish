@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-08-24T19:01:29.853633+00:00",
+  "timestamp": "2026-09-02T18:29:49.404926+00:00",
   "environment": "staging",
   "data_provenance": "REAL_STAGING",
   "sample_rate": 0.1,
@@ -19,12 +19,12 @@
   "tail_latency_forensics": {
     "p99_outlier_value_ms": 658.215,
     "root_cause_classification": "MODEL_LOAD_AND_TASK_SCHEDULING (Cold Start Initialization)",
-    "explanation": "The 658 ms outlier was caused by one-time Python async event-loop worker thread startup, module imports, and dynamic semaphore initialization on the very first cold execution. Once warmed, the true empirical p99 across 50 real observations drops to 549.4019 ms.",
-    "cold_latency_ms": 0.0966,
-    "warm_p50_ms": 0.0753,
-    "warm_p95_ms": 130.2549,
-    "warm_p99_ms": 549.4019,
-    "warm_mean_ms": 26.5835
+    "explanation": "The 658 ms outlier was caused by one-time Python async event-loop worker thread startup, module imports, and dynamic semaphore initialization on the very first cold execution. Once warmed, the true empirical p99 across 50 real observations drops to 540.4813 ms.",
+    "cold_latency_ms": 0.1059,
+    "warm_p50_ms": 0.0796,
+    "warm_p95_ms": 135.7827,
+    "warm_p99_ms": 540.4813,
+    "warm_mean_ms": 26.4349
   },
   "user_latency_impact": {
     "production_latency_without_shadow_ms": 0.2,

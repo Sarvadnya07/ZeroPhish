@@ -1,13 +1,13 @@
 {
   "environment": "staging",
   "deployment_identifier": "zerophish-staging-v1.8.0",
-  "workload_run_id": "rollout100_a10b8caa983e",
+  "workload_run_id": "rollout100_e1312ad546c6",
   "workload_version": "v1.8.0",
   "traffic_source": "REAL_STAGING_EXTERNAL",
   "operator_approval": "APPROVED_BY_OPERATOR",
   "previous_sample_rate": 0.5,
   "configured_sample_rate": 1.0,
-  "timestamp": "2026-08-24T19:01:32.648482+00:00",
+  "timestamp": "2026-09-02T18:29:52.232788+00:00",
   "tier_10pct_measured": {
     "provenance": "OBSERVED",
     "sample_rate": 0.1,

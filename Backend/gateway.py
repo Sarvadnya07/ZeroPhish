@@ -7,6 +7,7 @@ Final Score = (T1 * 0.2) + (T2 * 0.3) + (T3 * 0.5)
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -45,7 +46,7 @@ from models.gateway_models import (
     Tier2Result,
     Tier3Result,
 )
-from repositories.factory import get_scan_result_repository
+from repositories.factory import get_cache_backend, get_scan_result_repository
 from security.middleware import (
     InputValidator,
     RequestSizeLimitMiddleware,
@@ -203,6 +204,18 @@ scan_started_at: Dict[str, float] = {}
 scan_results_lock = asyncio.Lock()
 _latest_tier1_report: Optional[Dict[str, Any]] = None
 _sse_subscribers: Dict[str, asyncio.Queue] = {}
+
+
+def _calculate_scan_cache_key(
+    sender: str, body: str, links: list[str], subject: Optional[str]
+) -> str:
+    """Generate deterministic SHA-256 cache key for identical email payload."""
+    norm_sender = (sender or "").strip().lower()
+    norm_body = (body or "").strip()
+    norm_links = sorted((str(l) or "").strip().lower() for l in links)
+    norm_subject = (subject or "").strip()
+    raw = f"{norm_sender}|{norm_subject}|{norm_body}|{','.join(norm_links)}"
+    return "scan:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _clamp_score(score: float) -> float:
@@ -406,7 +419,11 @@ async def execute_tier2(sender: str, body: str, links: list[str]) -> Tier2Result
 
 
 async def _finalize_tier3(
-    scan_id: str, email_body: str, sender: Optional[str] = None, subject: Optional[str] = None
+    scan_id: str,
+    email_body: str,
+    sender: Optional[str] = None,
+    subject: Optional[str] = None,
+    cache_key: Optional[str] = None,
 ) -> None:
     try:
         tier3_result = await execute_tier3_with_circuit_breaker(
@@ -460,6 +477,15 @@ async def _finalize_tier3(
         )
         scan_repo.save(scan_id, updated)
 
+        # Populate speed layer cache with completed report
+        if cache_key:
+            try:
+                cache = get_cache_backend()
+                ttl = int(os.getenv("SCAN_CACHE_TTL", "300"))
+                await cache.set(cache_key, json.dumps(updated.model_dump()), ttl_seconds=ttl)
+            except Exception as _c_err:
+                logging.getLogger(__name__).debug("Failed to cache completed scan: %s", _c_err)
+
         # Notify dashboard of final result (Level 3)
         asyncio.create_task(_notify_live_dashboard(updated, sender_meta, subject_meta))
 
@@ -507,6 +533,34 @@ async def gateway_scan(
 
     scan_id = str(uuid.uuid4())
     scan_started_at[scan_id] = time.perf_counter()
+
+    # ⚡ Speed Layer: Query cache by SHA-256 payload fingerprint (<10ms fast path)
+    cache_key = _calculate_scan_cache_key(
+        scan_request.sender, scan_request.body, scan_request.links, scan_request.subject
+    )
+    cache = get_cache_backend()
+    cached_json = await cache.get(cache_key)
+    if cached_json:
+        try:
+            cached_data = json.loads(cached_json)
+            cached_res = GatewayScanResponse.model_validate(cached_data)
+            total_ms = (time.perf_counter() - scan_started_at[scan_id]) * 1000
+            cached_res = cached_res.model_copy(
+                update={
+                    "scan_id": scan_id,
+                    "timestamp": datetime.now().isoformat(),
+                    "total_execution_time_ms": round(total_ms, 2),
+                }
+            )
+            scan_repo = get_scan_result_repository()
+            async with scan_results_lock:
+                scan_repo.save(scan_id, cached_res)
+            asyncio.create_task(
+                _notify_live_dashboard(cached_res, scan_request.sender, scan_request.subject or "No Subject")
+            )
+            return cached_res
+        except Exception as _parse_err:
+            logging.getLogger(__name__).debug("Cached response invalid, running fresh scan: %s", _parse_err)
 
     tier1_score = int(round(_clamp_score(scan_request.tier1_score)))
     tier1 = Tier1Result(
@@ -561,9 +615,28 @@ async def gateway_scan(
             )
 
     background_tasks.add_task(
-        _finalize_tier3, scan_id, scan_request.body, scan_request.sender, scan_request.subject
+        _finalize_tier3, scan_id, scan_request.body, scan_request.sender, scan_request.subject, cache_key
     )
     return response
+
+
+@app.get("/cache/stats")
+async def gateway_cache_stats() -> dict:
+    """Return cache statistics from the active cache backend (Redis / In-Memory)."""
+    cache = get_cache_backend()
+    if hasattr(cache, "get_stats"):
+        return await cache.get_stats()
+    return {"status": "connected", "backend": "in_memory"}
+
+
+@app.delete("/cache/clear")
+async def gateway_cache_clear() -> dict:
+    """Clear all cached scan results."""
+    cache = get_cache_backend()
+    if hasattr(cache, "clear_prefix"):
+        deleted = await cache.clear_prefix("scan:")
+        return {"status": "success", "cleared_keys": deleted}
+    return {"status": "success", "cleared_keys": 0}
 
 
 @app.get("/gateway/status/{scan_id}", response_model=ScanStatusResponse)

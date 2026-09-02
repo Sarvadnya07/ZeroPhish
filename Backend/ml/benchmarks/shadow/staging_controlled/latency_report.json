@@ -1,14 +1,14 @@
 {
   "traffic_source": "CONTROLLED_STAGING",
   "workload_version": "v1.0.0",
-  "generator_run_id": "gen_run_64310ef43fd0",
-  "timestamp": "2026-08-24T19:01:30.244116+00:00",
+  "generator_run_id": "gen_run_2361157325bb",
+  "timestamp": "2026-09-02T18:29:49.772701+00:00",
   "environment": "staging",
   "deployment_identifier": "zerophish-staging-v1.4.0",
-  "client_http_p50_ms": 3.677,
-  "client_http_p95_ms": 4.806,
-  "client_http_p99_ms": 5.16,
-  "client_http_mean_ms": 3.681,
+  "client_http_p50_ms": 3.465,
+  "client_http_p95_ms": 4.084,
+  "client_http_p99_ms": 4.363,
+  "client_http_mean_ms": 3.532,
   "server_cascade_p50_ms": 0.021,
   "server_cascade_p95_ms": 0.2
 }

@@ -1,15 +1,15 @@
 {
-  "empirical_mean_ms": 22.3716,
-  "empirical_p50_ms": 0.0435,
-  "empirical_p95_ms": 10.7397,
-  "empirical_p99_ms": 523.2106,
+  "empirical_mean_ms": 27.3356,
+  "empirical_p50_ms": 0.045,
+  "empirical_p95_ms": 11.8111,
+  "empirical_p99_ms": 663.233,
   "discrepancy_diagnosis": {
     "reported_p99_ms": 15.05,
-    "recalculated_empirical_p99_ms": 523.2106,
-    "p99_discrepancy_diagnosis": "INVALID IN PHASE 12 PERFORMANCE REPORT: 15.05 ms was a static full-hybrid constant written into performance_report.json rather than computed from the 60-sample observation array. True empirical p99 on the 60-sample benchmark replay is 523.2106 ms.",
+    "recalculated_empirical_p99_ms": 663.233,
+    "p99_discrepancy_diagnosis": "INVALID IN PHASE 12 PERFORMANCE REPORT: 15.05 ms was a static full-hybrid constant written into performance_report.json rather than computed from the 60-sample observation array. True empirical p99 on the 60-sample benchmark replay is 663.2330 ms.",
     "reported_cpu_savings_ms_per_1000": 13600.0,
-    "recalculated_cpu_savings_ms_per_1000": -7321.6,
-    "savings_discrepancy_diagnosis": "The 13,600 ms figure was computed from theoretical cascade model (15.05 - 1.45 = 13.60 ms/sample). On the actual benchmark replay where URLBERT invocation was 0.0%, true savings are -7321.6 ms / 1,000 URLs.",
+    "recalculated_cpu_savings_ms_per_1000": -12285.6,
+    "savings_discrepancy_diagnosis": "The 13,600 ms figure was computed from theoretical cascade model (15.05 - 1.45 = 13.60 ms/sample). On the actual benchmark replay where URLBERT invocation was 0.0%, true savings are -12285.6 ms / 1,000 URLs.",
     "workload_classification": "B. TELEMETRY VALID \u2014 BENCHMARK REPLAY ONLY (Curated 60-sample candidate suite, NOT live staging traffic)"
   }
 }

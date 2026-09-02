@@ -18,7 +18,8 @@ try:
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
     TRANSFORMERS_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError, RuntimeError, Exception) as _import_err:
+    logger.debug("Torch/Transformers unavailable or failed import: %s", _import_err)
     torch = None
     AutoModelForSequenceClassification = None
     AutoTokenizer = None
@@ -51,6 +52,14 @@ class PhishingMLModel:
         """Load the model and tokenizer asynchronously."""
         if self._loaded:
             return True
+
+        if (
+            os.getenv("ML_ENABLED", "true").lower() != "true"
+            or os.getenv("ZERO_PHISH_DISABLE_ML", "0").lower() in ("1", "true")
+        ):
+            logger.info("ML inference explicitly disabled via environment configuration.")
+            self._loaded = False
+            return False
 
         if not TRANSFORMERS_AVAILABLE or not torch or not AutoTokenizer:
             logger.warning(

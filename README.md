@@ -508,10 +508,12 @@ For complete deployment details, topology maps, and operational guides, see:
 | `GET` | `/gateway/status/{scan_id}` | Poll scan status (Tier 3 pending) |
 | `GET` | `/gateway/result/{scan_id}` | Retrieve completed scan result |
 | `GET` | `/gateway/health` | Gateway health & circuit breaker status |
-| `POST` | `/vision/analyze` | Submit image for CNN heuristic vision scoring |
+| `POST` | `/vision/analyze` | Submit image for visual heuristics and Gemini multimodal scoring |
 | `GET` | `/auth/me` | Fetch active User/RBAC context |
-| `GET` | `/email/scan-eml` | Upload and sanitize raw .eml file traces |
+| `POST` | `/email/scan-eml` | Upload and sanitize raw .eml file traces |
 | `GET` | `/analytics/threat-feed` | Fetch live IOCs and heuristics across the platform |
+| `GET` | `/cache/stats` | Active cache backend statistics (Redis/In-Memory) |
+| `DELETE` | `/cache/clear` | Clear all cached scan reports |
 
 ### Tier 2 Backend (Port 8000)
 

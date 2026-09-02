@@ -22,7 +22,10 @@ export function SentinelPanel() {
     setScanData(LIVE_IDLE_STATE)
     setLogsOpen(false)
 
-    const baseUrl = process.env.NEXT_PUBLIC_ZEROPHISH_BACKEND_URL || "http://127.0.0.1:8000"
+    const baseUrl =
+      process.env.NEXT_PUBLIC_GATEWAY_URL ||
+      process.env.NEXT_PUBLIC_ZEROPHISH_BACKEND_URL ||
+      "http://127.0.0.1:8001"
     let closed = false
     let es: EventSource | null = null
     let latestPollTimer: ReturnType<typeof setInterval> | null = null

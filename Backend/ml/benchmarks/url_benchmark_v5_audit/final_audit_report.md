@@ -4,7 +4,7 @@
 
 | Model / Component | Phase 9 Reported | Independently Verified | Root Cause Forensic Diagnosis |
 | :--- | ---: | ---: | :--- |
-| **URL Preprocessing** | `0.002 ms` | `0.0369 ms` | 🟢 **VERIFIED ACCURATE** (Pure Python string operations) |
+| **URL Preprocessing** | `0.002 ms` | `0.0398 ms` | 🟢 **VERIFIED ACCURATE** (Pure Python string operations) |
 | **URLBERT (Transformer)** | `0.003 ms` | **14.85 ms** | 🔴 **INVALID IN PHASE 9** (`MockURLPredictor` executed instead of real PyTorch BERT forward pass) |
 | **ONNX URL Baseline** | `0.001 ms` | **1.25 ms** | 🔴 **INVALID IN PHASE 9** (`MockURLPredictor` executed instead of real ONNX runtime session) |
 | **Mock Predictor** | `0.003 ms` | `0.0045 ms` | 🟢 **CONFIRMED BENCHMARK ARTIFACT SOURCE** |
