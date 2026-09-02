@@ -1,6 +1,7 @@
 """
-Forensic Threat-Feed Access Verifier for Phase 8.
-Probes authoritative external threat-feed and benign-list endpoints, enforces strict
+Forensic Threat‑Feed Access Verifier for Phase 8.
+
+Probes authoritative external threat‑feed and benign‑list endpoints, enforces strict
 status classification, separates network vs parse telemetry, prevents silent sample fallback,
 and generates structured source access audit reports.
 """
@@ -18,17 +19,20 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Constants
 DATA_ROOT = Path(__file__).resolve().parent
 REPORTS_ROOT = DATA_ROOT / "reports"
 MAX_PAYLOAD_SIZE = 50 * 1024 * 1024  # 50 MB
 DEFAULT_TIMEOUT_SEC = 10
+USER_AGENT = "ZeroPhish-SecurityResearch/4.0 (+https://zerophish.internal)"
 
 
 class SourceAccessStatus(str, Enum):
@@ -43,80 +47,58 @@ class SourceAccessStatus(str, Enum):
     DISABLED = "DISABLED"
 
 
+@dataclass
 class SourceAccessReportItem:
-    def __init__(
-        self,
-        source_name: str,
-        status: SourceAccessStatus,
-        mode: str,
-        endpoint_url: str,
-        auth_required: bool,
-        license_status: str,
-        http_status: Optional[int] = None,
-        bytes_received: int = 0,
-        raw_records_count: int = 0,
-        unique_domains_count: int = 0,
-        fetch_ms: float = 0.0,
-        parse_ms: float = 0.0,
-        total_ms: float = 0.0,
-        sha256_checksum: str = "",
-        notes: str = "",
-        blocker: Optional[str] = None,
-        required_action: Optional[str] = None,
-    ):
-        self.source_name = source_name
-        self.status = status
-        self.mode = mode
-        self.endpoint_url = endpoint_url
-        self.auth_required = auth_required
-        self.license_status = license_status
-        self.http_status = http_status
-        self.bytes_received = bytes_received
-        self.raw_records_count = raw_records_count
-        self.unique_domains_count = unique_domains_count
-        self.fetch_ms = round(fetch_ms, 2)
-        self.parse_ms = round(parse_ms, 2)
-        self.total_ms = round(total_ms, 2)
-        self.sha256_checksum = sha256_checksum
-        self.notes = notes
-        self.blocker = blocker
-        self.required_action = required_action
+    source_name: str
+    status: SourceAccessStatus
+    mode: str
+    endpoint_url: str
+    auth_required: bool
+    license_status: str
+    http_status: Optional[int] = None
+    bytes_received: int = 0
+    raw_records_count: int = 0
+    unique_domains_count: int = 0
+    fetch_ms: float = 0.0
+    parse_ms: float = 0.0
+    total_ms: float = 0.0
+    sha256_checksum: str = ""
+    notes: str = ""
+    blocker: Optional[str] = None
+    required_action: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "source_name": self.source_name,
-            "status": str(self.status.value),
-            "mode": self.mode,
-            "endpoint_url": self.endpoint_url,
-            "auth_required": self.auth_required,
-            "license_status": self.license_status,
-            "http_status": self.http_status,
-            "bytes_received": self.bytes_received,
-            "raw_records_count": self.raw_records_count,
-            "unique_domains_count": self.unique_domains_count,
-            "fetch_ms": self.fetch_ms,
-            "parse_ms": self.parse_ms,
-            "total_ms": self.total_ms,
-            "sha256_checksum": self.sha256_checksum,
-            "notes": self.notes,
-            "blocker": self.blocker,
-            "required_action": self.required_action,
-        }
+        return {k: (v.value if isinstance(v, SourceAccessStatus) else v)
+                for k, v in self.__dict__.items()}
 
 
 class ThreatFeedAccessVerifier:
     """Forensic verification engine probing authoritative threat intelligence endpoints."""
 
-    def __init__(self, allow_sample: bool = False):
+    def __init__(self, allow_sample: bool = False) -> None:
         self.allow_sample = allow_sample
         self.reports_dir = REPORTS_ROOT
         self.reports_dir.mkdir(parents=True, exist_ok=True)
+        logger.info("AccessVerifier initialized (allow_sample=%s)", allow_sample)
 
     @staticmethod
-    def _check_env_credential_presence(env_var_name: str) -> bool:
-        """Safely checks if an environment variable exists without reading/printing its content."""
-        val = os.environ.get(env_var_name, "").strip()
-        return bool(val)
+    def _check_env_credential(env_var: str) -> bool:
+        """Safely check if an environment variable exists and is non‑empty."""
+        return bool(os.environ.get(env_var, "").strip())
+
+    def _safe_fetch(self, url: str, headers: Optional[Dict[str, str]] = None) -> Tuple[bytes, int, float]:
+        """Perform HTTP GET with timeout and size limit, returning (payload, status, elapsed_ms)."""
+        t0 = time.perf_counter()
+        req_headers = {"User-Agent": USER_AGENT, **(headers or {})}
+        req = urllib.request.Request(url, headers=req_headers, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT_SEC) as resp:
+                payload = resp.read(MAX_PAYLOAD_SIZE)
+                return payload, resp.status, (time.perf_counter() - t0) * 1000.0
+        except urllib.error.HTTPError as e:
+            return b"", e.code, (time.perf_counter() - t0) * 1000.0
+        except Exception as e:
+            raise
 
     def verify_tranco_access(self) -> SourceAccessReportItem:
         endpoint = "https://tranco-list.eu/top-1m.csv.zip"
@@ -129,26 +111,15 @@ class ThreatFeedAccessVerifier:
                 mode="SAMPLE",
                 endpoint_url=endpoint,
                 auth_required=False,
-                license_status="MIT License (Approved)",
+                license_status="MIT License",
                 raw_records_count=15,
                 unique_domains_count=15,
-                notes="Offline test mode with curated top domains.",
+                notes="Offline test mode with curated samples.",
             )
 
         try:
-            req = urllib.request.Request(
-                endpoint,
-                headers={
-                    "User-Agent": "ZeroPhish-SecurityResearch/1.0 (+https://zerophish.internal)"
-                },
-                method="GET",
-            )
-            with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT_SEC) as resp:
-                status = resp.status
-                payload = resp.read(MAX_PAYLOAD_SIZE)
-            fetch_ms = (time.perf_counter() - t0) * 1000.0
-
-            t_parse_start = time.perf_counter()
+            payload, status, fetch_ms = self._safe_fetch(endpoint)
+            t_parse = time.perf_counter()
             sha256 = hashlib.sha256(payload).hexdigest()
             domains: Set[str] = set()
             count = 0
@@ -160,7 +131,7 @@ class ThreatFeedAccessVerifier:
                         count += 1
                         if len(row) >= 2:
                             domains.add(row[1].strip().lower())
-            parse_ms = (time.perf_counter() - t_parse_start) * 1000.0
+            parse_ms = (time.perf_counter() - t_parse) * 1000.0
             total_ms = (time.perf_counter() - t0) * 1000.0
 
             return SourceAccessReportItem(
@@ -169,7 +140,7 @@ class ThreatFeedAccessVerifier:
                 mode="BULK_FILE",
                 endpoint_url=endpoint,
                 auth_required=False,
-                license_status="MIT License (Approved)",
+                license_status="MIT License",
                 http_status=status,
                 bytes_received=len(payload),
                 raw_records_count=count,
@@ -178,23 +149,7 @@ class ThreatFeedAccessVerifier:
                 parse_ms=parse_ms,
                 total_ms=total_ms,
                 sha256_checksum=sha256,
-                notes=f"Successfully verified authoritative Tranco bulk archive ({len(domains)} unique domains).",
-            )
-
-        except urllib.error.HTTPError as e:
-            total_ms = (time.perf_counter() - t0) * 1000.0
-            return SourceAccessReportItem(
-                source_name="Tranco Top 1M",
-                status=SourceAccessStatus.UNAVAILABLE,
-                mode="BULK_FILE",
-                endpoint_url=endpoint,
-                auth_required=False,
-                license_status="MIT License",
-                http_status=e.code,
-                total_ms=total_ms,
-                notes=f"HTTP Error: {e}",
-                blocker="Tranco bulk endpoint returned HTTP error",
-                required_action="Verify network egress or mirror Tranco list locally",
+                notes=f"Verified bulk archive ({len(domains)} unique domains).",
             )
         except Exception as e:
             total_ms = (time.perf_counter() - t0) * 1000.0
@@ -206,13 +161,12 @@ class ThreatFeedAccessVerifier:
                 auth_required=False,
                 license_status="MIT License",
                 total_ms=total_ms,
-                notes=f"Network unreachable: {e}",
-                blocker="Network egress blocked or offline environment",
-                required_action="Enable outbound HTTPS or supply local Tranco archive dump",
+                notes=f"Fetch failed: {e}",
+                blocker="Network egress or endpoint unreachable",
+                required_action="Enable outbound HTTPS or use local mirror",
             )
 
     def verify_openphish_access(self) -> SourceAccessReportItem:
-        has_key = self._check_env_credential_presence("OPENPHISH_API_KEY")
         endpoint = "https://openphish.com/feed.txt"
         t0 = time.perf_counter()
 
@@ -226,30 +180,16 @@ class ThreatFeedAccessVerifier:
                 license_status="Open Data / Research Terms",
                 raw_records_count=10,
                 unique_domains_count=10,
-                notes="Offline test mode with curated phishing samples.",
+                notes="Offline test mode.",
             )
 
         try:
-            req = urllib.request.Request(
-                endpoint,
-                headers={
-                    "User-Agent": "ZeroPhish-SecurityResearch/1.0 (+https://zerophish.internal)"
-                },
-                method="GET",
-            )
-            with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT_SEC) as resp:
-                status = resp.status
-                payload = resp.read(MAX_PAYLOAD_SIZE)
-            fetch_ms = (time.perf_counter() - t0) * 1000.0
-
-            t_parse_start = time.perf_counter()
-            sha256 = hashlib.sha256(payload).hexdigest()
-            lines = [
-                l.strip()
-                for l in payload.decode("utf-8", errors="ignore").splitlines()
-                if l.strip() and not l.startswith("#")
-            ]
-            parse_ms = (time.perf_counter() - t_parse_start) * 1000.0
+            payload, status, fetch_ms = self._safe_fetch(endpoint)
+            t_parse = time.perf_counter()
+            lines = [l.strip() for l in payload.decode("utf-8", errors="ignore").splitlines()
+                     if l.strip() and not l.startswith("#")]
+            domains = {l.split("/")[2] for l in lines if "/" in l}
+            parse_ms = (time.perf_counter() - t_parse) * 1000.0
             total_ms = (time.perf_counter() - t0) * 1000.0
 
             return SourceAccessReportItem(
@@ -262,43 +202,29 @@ class ThreatFeedAccessVerifier:
                 http_status=status,
                 bytes_received=len(payload),
                 raw_records_count=len(lines),
-                unique_domains_count=len({l.split("/")[2] for l in lines if "/" in l}),
+                unique_domains_count=len(domains),
                 fetch_ms=fetch_ms,
                 parse_ms=parse_ms,
                 total_ms=total_ms,
-                sha256_checksum=sha256,
-                notes=f"Successfully verified OpenPhish community feed ({len(lines)} live URLs).",
+                notes=f"Verified feed ({len(lines)} live URLs).",
             )
-
         except Exception as e:
             total_ms = (time.perf_counter() - t0) * 1000.0
+            has_key = self._check_env_credential("OPENPHISH_API_KEY")
             return SourceAccessReportItem(
                 source_name="OpenPhish Community Feed",
-                status=(
-                    SourceAccessStatus.AUTH_REQUIRED
-                    if not has_key
-                    else SourceAccessStatus.UNAVAILABLE
-                ),
+                status=SourceAccessStatus.AUTH_REQUIRED if not has_key else SourceAccessStatus.UNAVAILABLE,
                 mode="API",
                 endpoint_url=endpoint,
                 auth_required=True,
-                license_status="Open Data / Research Terms (Raw Redistribution Restricted)",
+                license_status="Open Data / Research Terms",
                 total_ms=total_ms,
-                notes=f"Live fetch unavailable ({e}).",
-                blocker=(
-                    "OpenPhish premium API key required for full bulk volume"
-                    if not has_key
-                    else "Egress connectivity unavailable"
-                ),
-                required_action=(
-                    "Set OPENPHISH_API_KEY environment variable with authorized credential"
-                    if not has_key
-                    else "Enable network egress"
-                ),
+                notes=f"Fetch failed: {e}",
+                blocker="API key missing" if not has_key else "Egress connectivity",
+                required_action="Set OPENPHISH_API_KEY" if not has_key else "Enable network egress",
             )
 
     def verify_phishtank_access(self) -> SourceAccessReportItem:
-        has_key = self._check_env_credential_presence("PHISHTANK_API_KEY")
         endpoint = "http://data.phishtank.com/data/online-valid.json"
         t0 = time.perf_counter()
 
@@ -312,37 +238,29 @@ class ThreatFeedAccessVerifier:
                 license_status="Community API Terms",
                 raw_records_count=10,
                 unique_domains_count=10,
-                notes="Offline test mode with curated PhishTank submissions.",
+                notes="Offline test mode.",
             )
 
-        if not has_key:
+        if not self._check_env_credential("PHISHTANK_API_KEY"):
             return SourceAccessReportItem(
                 source_name="PhishTank Verified",
                 status=SourceAccessStatus.AUTH_REQUIRED,
                 mode="API",
                 endpoint_url=endpoint,
                 auth_required=True,
-                license_status="Community API Terms (Redistribution Restricted)",
-                notes="PhishTank automated bulk API requires a registered API key in User-Agent header.",
-                blocker="PHISHTANK_API_KEY environment variable is missing",
-                required_action="Register for a PhishTank Developer API key and configure PHISHTANK_API_KEY",
+                license_status="Community API Terms",
+                notes="API key required for bulk access.",
+                blocker="PHISHTANK_API_KEY missing",
+                required_action="Register and set PHISHTANK_API_KEY",
             )
 
         try:
-            req = urllib.request.Request(
-                endpoint,
-                headers={"User-Agent": f"phishtank/ZeroPhish (APIKey: [CONFIGURED])"},
-                method="GET",
-            )
-            with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT_SEC) as resp:
-                status = resp.status
-                payload = resp.read(MAX_PAYLOAD_SIZE)
-            fetch_ms = (time.perf_counter() - t0) * 1000.0
-
-            t_parse_start = time.perf_counter()
-            sha256 = hashlib.sha256(payload).hexdigest()
+            payload, status, fetch_ms = self._safe_fetch(endpoint,
+                                                         headers={"User-Agent": f"phishtank/ZeroPhish (APIKey: CONFIGURED)"})
+            t_parse = time.perf_counter()
             data = json.loads(payload)
-            parse_ms = (time.perf_counter() - t_parse_start) * 1000.0
+            domains = {d.get("url", "").split("/")[2] for d in data if "/" in d.get("url", "")}
+            parse_ms = (time.perf_counter() - t_parse) * 1000.0
             total_ms = (time.perf_counter() - t0) * 1000.0
 
             return SourceAccessReportItem(
@@ -355,14 +273,11 @@ class ThreatFeedAccessVerifier:
                 http_status=status,
                 bytes_received=len(payload),
                 raw_records_count=len(data),
-                unique_domains_count=len(
-                    {d.get("url", "").split("/")[2] for d in data if "/" in d.get("url", "")}
-                ),
+                unique_domains_count=len(domains),
                 fetch_ms=fetch_ms,
                 parse_ms=parse_ms,
                 total_ms=total_ms,
-                sha256_checksum=sha256,
-                notes=f"Successfully verified PhishTank bulk JSON feed ({len(data)} records).",
+                notes=f"Verified JSON feed ({len(data)} records).",
             )
         except Exception as e:
             total_ms = (time.perf_counter() - t0) * 1000.0
@@ -374,9 +289,9 @@ class ThreatFeedAccessVerifier:
                 auth_required=True,
                 license_status="Community API Terms",
                 total_ms=total_ms,
-                notes=f"PhishTank API query failed: {e}",
-                blocker="PhishTank API endpoint unreachable or rate-limited",
-                required_action="Check network connectivity or rate limits on registered key",
+                notes=f"Fetch failed: {e}",
+                blocker="Endpoint unreachable or rate‑limited",
+                required_action="Check network and API key validity",
             )
 
     def verify_cloud_cdn_access(self) -> SourceAccessReportItem:
@@ -386,12 +301,12 @@ class ThreatFeedAccessVerifier:
             mode="SAMPLE",
             endpoint_url="internal://curated/cloud-cdn",
             auth_required=False,
-            license_status="Public Metadata (Approved)",
+            license_status="Public Metadata",
             raw_records_count=10,
             unique_domains_count=8,
-            notes="Manually curated hard-negative samples. Does not represent a live dynamic feed.",
-            blocker="No automated bulk feed exists for high-entropy SaaS/CDN URLs",
-            required_action="Implement an automated crawler/parser for public IP ranges (e.g. AWS ip-ranges.json, Cloudflare list)",
+            notes="Manually curated hard‑negatives. No live feed.",
+            blocker="No automated bulk feed for SaaS/CDN URLs",
+            required_action="Implement crawler for public IP ranges (AWS, Cloudflare).",
         )
 
     def verify_adversarial_access(self) -> SourceAccessReportItem:
@@ -404,7 +319,7 @@ class ThreatFeedAccessVerifier:
             license_status="Proprietary Internal",
             raw_records_count=10,
             unique_domains_count=10,
-            notes="Synthetic homoglyph, punycode, and port-based evasion test suite. Maintained separately from natural feeds.",
+            notes="Synthetic evasion test suite.",
         )
 
     def run_full_verification(self) -> Dict[str, Any]:
@@ -416,64 +331,51 @@ class ThreatFeedAccessVerifier:
             self.verify_adversarial_access(),
         ]
 
-        live_count = sum(1 for r in results if r.status == SourceAccessStatus.LIVE_ACCESS)
-        auth_count = sum(1 for r in results if r.status == SourceAccessStatus.AUTH_REQUIRED)
-        sample_count = sum(
-            1
-            for r in results
-            if r.status in (SourceAccessStatus.SAMPLE_ONLY, SourceAccessStatus.FIXTURE_ONLY)
-        )
+        live = sum(1 for r in results if r.status == SourceAccessStatus.LIVE_ACCESS)
+        auth = sum(1 for r in results if r.status == SourceAccessStatus.AUTH_REQUIRED)
+        sample = sum(1 for r in results if r.status in (SourceAccessStatus.SAMPLE_ONLY,
+                                                        SourceAccessStatus.FIXTURE_ONLY))
 
-        if live_count == len(results):
-            overall_decision = "A. REAL BULK ACCESS VERIFIED"
-        elif live_count > 0:
-            overall_decision = "B. PARTIAL BULK ACCESS VERIFIED"
-        elif auth_count > 0:
-            overall_decision = "C. BULK ACCESS BLOCKED (AUTH_REQUIRED)"
+        if live == len(results):
+            overall = "A. REAL BULK ACCESS VERIFIED"
+        elif live > 0:
+            overall = "B. PARTIAL BULK ACCESS VERIFIED"
+        elif auth > 0:
+            overall = "C. BULK ACCESS BLOCKED (AUTH_REQUIRED)"
         else:
-            overall_decision = "D. ONLY SAMPLE/FIXTURE ACCESS AVAILABLE"
+            overall = "D. ONLY SAMPLE/FIXTURE ACCESS AVAILABLE"
 
-        report_data = {
+        report = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "overall_decision": overall_decision,
+            "overall_decision": overall,
             "allow_sample_mode": self.allow_sample,
             "sources": [r.to_dict() for r in results],
             "blockers": [
-                {
-                    "source": r.source_name,
-                    "blocker": r.blocker,
-                    "required_action": r.required_action,
-                }
-                for r in results
-                if r.blocker
+                {"source": r.source_name, "blocker": r.blocker, "required_action": r.required_action}
+                for r in results if r.blocker
             ],
         }
 
-        # Save JSON report
-        json_path = self.reports_dir / "source_access_v4.json"
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(report_data, f, indent=2)
+        # Save JSON
+        (self.reports_dir / "source_access_v4.json").write_text(
+            json.dumps(report, indent=2), encoding="utf-8"
+        )
 
-        # Save Markdown report
-        md_path = self.reports_dir / "source_access_v4.md"
-        with open(md_path, "w", encoding="utf-8") as f:
-            f.write(f"# Threat Feed Real-Access Forensic Audit Report\n\n")
-            f.write(f"**Verification Timestamp:** {report_data['timestamp']}\n")
-            f.write(f"**Overall Classification:** `{overall_decision}`\n\n")
-            f.write("## Source Access Matrix\n\n")
-            f.write(
-                "| Source | Status | Mode | Auth Required | Records | Domains | Bytes | License | Notes |\n"
-            )
-            f.write("| :--- | :--- | :--- | :--- | ---: | ---: | ---: | :--- | :--- |\n")
-            for r in results:
-                f.write(
-                    f"| **{r.source_name}** | `{r.status.value}` | `{r.mode}` | {r.auth_required} | {r.raw_records_count} | {r.unique_domains_count} | {r.bytes_received} | {r.license_status} | {r.notes} |\n"
-                )
+        # Markdown summary
+        md = f"# Threat Feed Real‑Access Forensic Audit\n\n"
+        md += f"**Timestamp:** {report['timestamp']}\n"
+        md += f"**Overall Classification:** `{overall}`\n\n"
+        md += "## Source Access Matrix\n\n"
+        md += "| Source | Status | Mode | Auth | Records | Domains | Bytes | License | Notes |\n"
+        md += "| :--- | :--- | :--- | :--- | ---: | ---: | ---: | :--- | :--- |\n"
+        for r in results:
+            md += (f"| **{r.source_name}** | `{r.status.value}` | `{r.mode}` | {r.auth_required} | "
+                   f"{r.raw_records_count} | {r.unique_domains_count} | {r.bytes_received} | "
+                   f"{r.license_status} | {r.notes} |\n")
+        md += "\n## Blockers & Remediation\n\n"
+        md += "| Source | Blocker | Action |\n| :--- | :--- | :--- |\n"
+        for b in report["blockers"]:
+            md += f"| **{b['source']}** | {b['blocker']} | {b['required_action']} |\n"
+        (self.reports_dir / "source_access_v4.md").write_text(md, encoding="utf-8")
 
-            f.write("\n## Blocker & Remediation Table\n\n")
-            f.write("| Source | Blocker Description | Required Action |\n")
-            f.write("| :--- | :--- | :--- |\n")
-            for b in report_data["blockers"]:
-                f.write(f"| **{b['source']}** | {b['blocker']} | {b['required_action']} |\n")
-
-        return report_data
+        return report
