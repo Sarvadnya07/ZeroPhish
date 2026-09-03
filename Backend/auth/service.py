@@ -123,30 +123,30 @@ class AuthService:
         user_db = None
 
         # 1. Lookup by clerk_user_id
-        if repo:
-            user_db = repo.get_by_clerk_id(clerk_user_id)
-        if not user_db:
-            user_db = _users_by_clerk_id.get(clerk_user_id)
+        if clerk_user_id in _users_by_clerk_id:
+            user_db = _users_by_clerk_id[clerk_user_id]
+        elif repo:
+            user_db = _maybe_await(repo.get_by_clerk_id(clerk_user_id))
 
         # 2. If not found, try by email (legacy migration)
         if not user_db and email:
-            if repo:
-                user_db = repo.get_by_email(email)
-            if not user_db:
-                user_db = _users_by_email.get(email)
+            if email in _users_by_email:
+                user_db = _users_by_email[email]
+            elif repo:
+                user_db = _maybe_await(repo.get_by_email(email))
             if user_db:
                 # Update the existing user with the Clerk ID (migrate)
                 user_db.clerk_user_id = clerk_user_id
                 user_db.last_login = datetime.now(timezone.utc)
                 if repo:
-                    repo.save(user_db)
+                    _maybe_await(repo.save(user_db))
                 _store_user_in_memory(user_db)
 
         if user_db:
             # Update last_login
             user_db.last_login = datetime.now(timezone.utc)
             if repo:
-                repo.save(user_db)
+                _maybe_await(repo.save(user_db))
             _store_user_in_memory(user_db)
             return cls._to_model(user_db)
 
@@ -176,7 +176,7 @@ class AuthService:
         )
 
         if repo:
-            repo.save(user_in_db)
+            _maybe_await(repo.save(user_in_db))
         _store_user_in_memory(user_in_db)
 
         AuditLogger.log_event(
@@ -196,11 +196,9 @@ class AuthService:
     def get_user_by_id(cls, user_id: str) -> Optional[User]:
         """Retrieve a user by internal ID."""
         repo = cls._get_repository()
-        user_db = None
-        if repo:
-            user_db = repo.get_by_id(user_id)
-        if not user_db:
-            user_db = _users_by_id.get(user_id)
+        user_db = _users_by_id.get(user_id)
+        if not user_db and repo:
+            user_db = _maybe_await(repo.get_by_id(user_id))
         if not user_db:
             return None
         return cls._to_model(user_db)
@@ -211,11 +209,9 @@ class AuthService:
         if not clerk_user_id:
             return None
         repo = cls._get_repository()
-        user_db = None
-        if repo:
-            user_db = repo.get_by_clerk_id(clerk_user_id)
-        if not user_db:
-            user_db = _users_by_clerk_id.get(clerk_user_id)
+        user_db = _users_by_clerk_id.get(clerk_user_id)
+        if not user_db and repo:
+            user_db = _maybe_await(repo.get_by_clerk_id(clerk_user_id))
         if not user_db:
             return None
         return cls._to_model(user_db)
@@ -232,24 +228,22 @@ class AuthService:
             raise ValueError("user_id is required")
 
         repo = cls._get_repository()
-        user_db = None
+        user_db = _users_by_id.get(user_id)
+        if not user_db and repo:
+            user_db = _maybe_await(repo.get_by_id(user_id))
 
-        if repo:
-            user_db = repo.update(user_id, update)
-        if not user_db and user_id in _users_by_id:
-            user_db = _users_by_id[user_id]
+        if user_db:
             if update.full_name is not None:
                 user_db.full_name = update.full_name.strip()
             if update.role is not None:
                 user_db.role = update.role
             if update.status is not None:
                 user_db.status = update.status
-            # Persist to repo if available
             if repo:
-                repo.save(user_db)
+                _maybe_await(repo.update(user_id, update))
+                _maybe_await(repo.save(user_db))
             _store_user_in_memory(user_db)
 
-        if user_db:
             # If we're downgrading an admin, log it
             old_role = user_db.role
             if update.role is not None and old_role == UserRole.ADMIN and update.role != UserRole.ADMIN:
@@ -269,8 +263,8 @@ class AuthService:
         repo = cls._get_repository()
         users = []
         if repo:
-            users = repo.list_all(role=role)
-        else:
+            users = _maybe_await(repo.list_all(role=role)) or []
+        if not users:
             users = list(_users_by_id.values())
             if role:
                 users = [u for u in users if u.role == role]
@@ -284,7 +278,7 @@ class AuthService:
         repo = cls._get_repository()
         ok = False
         if repo:
-            ok = repo.delete(user_id)
+            ok = bool(_maybe_await(repo.delete(user_id)))
         if user_id in _users_by_id:
             _remove_user_from_memory(user_id)
             ok = True
