@@ -30,6 +30,22 @@ logger = logging.getLogger(__name__)
 _IN_MEMORY_STORE: Dict[str, Incident] = {}
 _store = _IN_MEMORY_STORE
 
+def _maybe_await(res):
+    import inspect
+    import asyncio
+    if inspect.isawaitable(res):
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(lambda: asyncio.run(res)).result()
+        else:
+            return asyncio.run(res)
+    return res
+
 
 # ---------- Constants ----------
 SEVERITY_SCORE_THRESHOLDS = [
@@ -104,10 +120,10 @@ class IncidentService:
             false_positive=False,
         )
 
+        _IN_MEMORY_STORE[incident_id] = incident
         if repo:
-            saved = repo.save(incident)
+            saved = _maybe_await(repo.save(incident))
         else:
-            _IN_MEMORY_STORE[incident_id] = incident
             saved = incident
 
         logger.info("Incident %s created by %s, severity=%s", incident_id, reporter_id or "system", severity.value)
@@ -119,13 +135,14 @@ class IncidentService:
         if not incident_id:
             return None
 
-        repo = IncidentService._get_repository()
-        if repo:
-            inc = repo.get_by_id(incident_id)
-            if inc:
-                return inc
-
-        return _IN_MEMORY_STORE.get(incident_id)
+        inc = _IN_MEMORY_STORE.get(incident_id)
+        if not inc:
+            repo = IncidentService._get_repository()
+            if repo:
+                inc = _maybe_await(repo.get_by_id(incident_id))
+                if inc:
+                    _IN_MEMORY_STORE[incident_id] = inc
+        return inc
 
     @staticmethod
     def list_all(
@@ -137,12 +154,12 @@ class IncidentService:
         """List incidents with optional filters."""
         repo = IncidentService._get_repository()
         if repo:
-            return repo.list_all(
+            return _maybe_await(repo.list_all(
                 status=status,
                 severity=severity,
                 assignee_id=assignee_id,
                 reporter_id=reporter_id,
-            )
+            )) or []
 
         # Fallback: filter in-memory store
         incidents = list(_IN_MEMORY_STORE.values())
@@ -164,7 +181,7 @@ class IncidentService:
 
         repo = IncidentService._get_repository()
         if repo:
-            inc = repo.update(incident_id, update)
+            inc = _maybe_await(repo.update(incident_id, update))
             if inc:
                 _IN_MEMORY_STORE[incident_id] = inc
                 logger.info("Incident %s updated", incident_id)
@@ -208,7 +225,7 @@ class IncidentService:
 
         repo = IncidentService._get_repository()
         if repo:
-            inc = repo.add_comment(incident_id, comment)
+            inc = _maybe_await(repo.add_comment(incident_id, comment))
             if inc:
                 _IN_MEMORY_STORE[incident_id] = inc
                 logger.info("Comment added to incident %s by %s", incident_id, author_id)
@@ -234,7 +251,7 @@ class IncidentService:
         repo = IncidentService._get_repository()
         deleted = False
         if repo:
-            deleted = repo.delete(incident_id)
+            deleted = bool(_maybe_await(repo.delete(incident_id)))
 
         if incident_id in _IN_MEMORY_STORE:
             del _IN_MEMORY_STORE[incident_id]

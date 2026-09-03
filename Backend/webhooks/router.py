@@ -111,7 +111,7 @@ async def delete_subscription(
 ) -> None:
     """Delete a webhook subscription."""
     owner_id = None if current_user.role == UserRole.ADMIN else current_user.id
-    ok = WebhookService.unsubscribe(sub_id, owner_id=owner_id)
+    ok = await WebhookService.unsubscribe(sub_id, owner_id=owner_id)
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found or access denied")
     logger.info("Subscription %s deleted by user %s", sub_id, current_user.id)

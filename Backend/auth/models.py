@@ -69,7 +69,7 @@ class User(BaseModel):
 
     id: str = Field(..., min_length=1, description="Internal user ID (UUID)")
     clerk_user_id: str = Field(..., min_length=1, description="Clerk user ID from the identity provider")
-    email: EmailStr = Field(..., description="Primary email address")
+    email: str = Field(..., min_length=3, description="Primary email address")
     full_name: str = Field(..., min_length=1, max_length=100, description="User's display name")
     role: UserRole = Field(default=UserRole.USER, description="RBAC role")
     status: UserStatus = Field(default=UserStatus.ACTIVE, description="Account status")
