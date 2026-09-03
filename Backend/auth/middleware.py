@@ -153,7 +153,7 @@ def _validate_csrf(request: Request) -> None:
 
 
 # ---------- Main Authentication Dependency ----------
-def require_auth(request: Request, token_info: tuple[Optional[str], bool] = Depends(_extract_token)) -> User:
+async def require_auth(request: Request, token_info: tuple[Optional[str], bool] = Depends(_extract_token)) -> User:
     """
     Authenticate the request and return the application User.
 
@@ -195,7 +195,7 @@ def require_auth(request: Request, token_info: tuple[Optional[str], bool] = Depe
     full_name = payload["full_name"]
 
     # Get or create the application user
-    user = AuthService.get_or_create_user(
+    user = await AuthService.get_or_create_user(
         clerk_user_id=clerk_user_id,
         email=email,
         full_name=full_name,
@@ -231,7 +231,7 @@ def require_role(*roles: UserRole):
         A FastAPI dependency that returns the authenticated User if authorized.
     """
 
-    def _check(current_user: User = Depends(require_auth)) -> User:
+    async def _check(current_user: User = Depends(require_auth)) -> User:
         if current_user.role not in roles:
             # Log the authorization failure
             AuditLogger.log_event(
@@ -264,6 +264,6 @@ require_readonly = require_role(UserRole.ADMIN, UserRole.ANALYST, _readonly_role
 
 
 # Optional: dependency to attach request user to request state (for logging)
-def attach_user(user: User = Depends(require_auth)) -> User:
+async def attach_user(user: User = Depends(require_auth)) -> User:
     """Dependency that also attaches user to request.state for use in route handlers."""
     return user

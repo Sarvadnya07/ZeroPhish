@@ -113,28 +113,59 @@ class ThreatAnalyzer:
     @classmethod
     async def track_redirects(cls, url: str) -> Tuple[str, List[str]]:
         """
-        Follow redirects for suspicious URLs / shorteners.
+        Follow redirects for suspicious URLs / shorteners with strict hop-by-hop SSRF validation.
+
+        Validates the initial URL and every subsequent redirect destination (up to 3 hops),
+        ensuring that no private, loopback, link-local, cloud metadata, or CGNAT IP addresses
+        are contacted. Uses TLS verification (verify=True).
 
         Returns:
-            (final_url, flags) where flags is a list of issues (e.g., "redirect_timeout").
+            (final_url, flags) where flags is a list of issues (e.g., "ssrf_blocked", "redirect_timeout").
         """
-        if not url.startswith("http"):
+        if not url or not url.startswith("http"):
             return url, []
+
+        import urllib.parse
+        from security.middleware import is_safe_url
+
+        # Validate initial URL
+        if not is_safe_url(url, allow_http=True):
+            logger.warning("SSRF blocked initial URL: %s", url[:50])
+            return url, ["ssrf_blocked"]
+
+        current_url = url
+        flags: List[str] = []
+        max_redirects = 3
+
         try:
             import httpx
             async with httpx.AsyncClient(
                 timeout=2.0,
-                follow_redirects=True,
-                max_redirects=3,
-                verify=False,  # Allow self-signed for staging
+                follow_redirects=False,
+                verify=True,
             ) as client:
-                response = await client.head(url)
-                return str(response.url), []
+                for _ in range(max_redirects):
+                    response = await client.head(current_url)
+                    if response.status_code in (301, 302, 303, 307, 308):
+                        location = response.headers.get("Location")
+                        if not location:
+                            break
+                        # Resolve relative redirect URLs
+                        next_url = urllib.parse.urljoin(current_url, location)
+                        # Validate redirect destination BEFORE connecting
+                        if not is_safe_url(next_url, allow_http=True):
+                            logger.warning("SSRF blocked redirect from %s to %s", current_url[:50], next_url[:50])
+                            flags.append("ssrf_blocked")
+                            return current_url, flags
+                        current_url = next_url
+                    else:
+                        break
+                return current_url, flags
         except httpx.TimeoutException:
-            return url, ["redirect_timeout"]
+            return current_url, ["redirect_timeout"]
         except Exception as e:
-            logger.debug("Redirect tracking failed for %s: %s", url[:50], e)
-            return url, ["redirect_error"]
+            logger.debug("Redirect tracking failed for %s: %s", current_url[:50], e)
+            return current_url, ["redirect_error"]
 
     @classmethod
     def _extract_linguistic_patterns(cls, body_lower: str) -> Tuple[Dict[str, int], List[str]]:

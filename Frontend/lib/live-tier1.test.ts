@@ -363,3 +363,82 @@ describe("tier1ReportToScanResult", () => {
     })
   })
 })
+
+describe("gatewayScanResponseToScanResult (Authoritative Adapter)", () => {
+  it("should parse modern GatewayScanResponse correctly", () => {
+    const modernPayload = {
+      scan_id: "scan_test_123",
+      timestamp: "2026-09-04T00:00:00Z",
+      sender: "attacker@suspicious-domain.com",
+      subject: "Urgent: Reset your account password",
+      final_score: 88,
+      verdict: "CRITICAL",
+      layers_completed: 3,
+      complete: true,
+      evidence: [
+        "Domain is 2 days old",
+        "AI: Phishing intent detected with credential harvesting",
+        "Urgent call-to-action detected",
+      ],
+      threat_analysis: {
+        category: "Credential Harvesting",
+        reasoning: "Impersonates account security portal to steal user passwords.",
+      },
+      tier_details: {
+        tier1: { score: 70 },
+        tier2: { score: 85 },
+        tier3: { score: 95 },
+      },
+    }
+
+    const result = tier1ReportToScanResult(modernPayload as any)
+
+    expect(result.threatScore).toBe(88)
+    expect(result.threatLevel).toBe("threat")
+    expect(result.phase).toBe("complete")
+    expect(result.layersCompleted).toBe(3)
+    expect(result.tier1.regexCheck.status).toBe("fail")
+    expect(result.tier2.domainAge).toContain("Suspicious")
+    expect(result.tier3.active).toBe(true)
+    expect(result.tier3.markers).toEqual([
+      "Impersonates account security portal to steal user passwords.",
+    ])
+    expect(result.tier3.intentProfile).toEqual([
+      { label: "Credential Harvesting", value: 88 },
+    ])
+    expect(result.evidence).toHaveLength(3)
+    expect(result.evidence[0].category).toBe("Domain Intel")
+    expect(result.evidence[1].category).toBe("AI Semantic")
+    expect(result.evidence[1].severity).toBe("high")
+  })
+
+  it("should handle partial_score when scan is still in-flight", () => {
+    const inFlightPayload = {
+      scan_id: "scan_inflight_456",
+      partial_score: 45,
+      verdict: "SUSPICIOUS",
+      layers_completed: 2,
+      complete: false,
+      tier_details: {
+        tier1: { score: 40 },
+        tier2: { score: 50 },
+      },
+    }
+
+    const result = tier1ReportToScanResult(inFlightPayload as any)
+
+    expect(result.threatScore).toBe(45)
+    expect(result.threatLevel).toBe("warning")
+    expect(result.phase).toBe("scanning")
+    expect(result.layersCompleted).toBe(2)
+  })
+
+  it("should handle malformed or empty payloads gracefully", () => {
+    const result = tier1ReportToScanResult({} as any)
+    expect(result.threatScore).toBe(0)
+    expect(result.threatLevel).toBe("safe")
+    expect(result.layersCompleted).toBe(1)
+    expect(result.evidence).toEqual([])
+  })
+})
+

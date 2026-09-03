@@ -47,9 +47,9 @@ def analyze_domain_age(age_days: Optional[int]) -> Tuple[float, str, str]:
         return SCORE_OK, "OK", f"Domain is established ({age_days} days old)."
 
 
-def get_domain_age(domain: str) -> int:
+def get_domain_age(domain: str) -> Optional[int]:
     """
-    Legacy synchronous WHOIS lookup. Returns age in days (0 if unknown/error).
+    Synchronous WHOIS lookup. Returns age in days, or None if unknown/error.
 
     Prefer the async `aget_domain_age()` for production use.
     """
@@ -60,7 +60,7 @@ def get_domain_age(domain: str) -> int:
             creation_date = creation_date[0]
 
         if not creation_date:
-            return 0
+            return None
 
         # Normalise to timezone‑aware UTC
         if creation_date.tzinfo is None:
@@ -70,14 +70,14 @@ def get_domain_age(domain: str) -> int:
         return max(0, age)
     except Exception as e:
         logger.warning("WHOIS lookup failed for %s: %s", domain, e)
-        return 0
+        return None
 
 
 async def aget_domain_age(
     domain: str,
     cache_client: Optional[Any] = None,
     use_enhanced: bool = True,
-) -> int:
+) -> Optional[int]:
     """
     Asynchronously retrieve domain age using the enhanced WHOIS client (if available).
 
@@ -87,7 +87,7 @@ async def aget_domain_age(
         use_enhanced: If True, attempt to use the modern async WHOIS client.
 
     Returns:
-        Age in days, or 0 if unavailable.
+        Age in days, or None if unavailable.
     """
     # Option 1: Use enhanced WHOIS client (if available and requested)
     if use_enhanced:
@@ -111,7 +111,7 @@ async def aget_domain_age(
         return age
     except Exception as e:
         logger.warning("Legacy WHOIS lookup failed for %s: %s", domain, e)
-        return 0
+        return None
 
 
 def get_domain_score(domain: str, age_days: Optional[int] = None) -> Tuple[float, str, str]:

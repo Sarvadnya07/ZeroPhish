@@ -103,6 +103,8 @@ class InMemoryUserRepository:
             user = self._users_by_id.pop(user_id, None)
             if user:
                 self._users_by_email.pop(user.email.lower().strip(), None)
+                if getattr(user, "clerk_user_id", None):
+                    self._users_by_clerk_id.pop(user.clerk_user_id, None)
                 logger.debug("Deleted user %s (in-memory)", user_id)
                 return True
             return False
@@ -313,46 +315,60 @@ class InMemoryAnalyticsRepository:
         )
 
     async def get_threat_heatmap(self) -> List[ThreatHeatmapEntry]:
+        """Generate heatmap efficiently, only creating entries for hours with data."""
         grid: Dict[tuple, List[float]] = defaultdict(list)
         async with self._lock:
             for e in self._scan_events:
                 grid[(e.get("day", 0), e.get("hour", 0))].append(e.get("final_score", 0.0))
+        
         result = []
+        existing = set()
+        
+        # Create entries for hours with data
         for (day, hour), scores in grid.items():
-            result.append(
-                ThreatHeatmapEntry(
-                    day=day,
-                    hour=hour,
-                    count=len(scores),
-                    avg_score=round(sum(scores) / len(scores), 2),
+            if 0 <= day <= 6 and 0 <= hour <= 23:  # Validate ranges
+                result.append(
+                    ThreatHeatmapEntry(
+                        day=day,
+                        hour=hour,
+                        count=len(scores),
+                        avg_score=round(sum(scores) / len(scores), 2),
+                    )
                 )
-            )
-        existing = {(r.day, r.hour) for r in result}
+                existing.add((day, hour))
+        
+        # Fill missing hours with zeros
         for d in range(7):
             for h in range(24):
                 if (d, h) not in existing:
                     result.append(ThreatHeatmapEntry(day=d, hour=h, count=0, avg_score=0.0))
+        
         return sorted(result, key=lambda x: (x.day, x.hour))
 
     async def get_threat_feed(self, limit: int = 50) -> List[ThreatFeedItem]:
+        """Get threat feed items efficiently without reversing entire list."""
         async with self._lock:
-            events = [e for e in self._scan_events if e.get("verdict") in ("CRITICAL", "SUSPICIOUS")]
-            events = list(reversed(events))[:limit]
-            return [
-            ThreatFeedItem(
-                id=e.get("scan_id", ""),
-                timestamp=e.get("timestamp", ""),
-                sender_domain=e.get("sender_domain", ""),
-                subject_snippet=e.get("subject", ""),
-                final_score=e.get("final_score", 0.0),
-                verdict=e.get("verdict", "SAFE"),
-                category=e.get("category", "General"),
-                tier1_score=e.get("tier1_score"),
-                tier2_score=e.get("tier2_score"),
-                tier3_score=e.get("tier3_score"),
-            )
-            for e in events
-        ]
+            # Iterate from end to get most recent events first
+            events = []
+            for e in reversed(self._scan_events):
+                if e.get("verdict") in ("CRITICAL", "SUSPICIOUS"):
+                    events.append(
+                        ThreatFeedItem(
+                            id=e.get("scan_id", ""),
+                            timestamp=e.get("timestamp", ""),
+                            sender_domain=e.get("sender_domain", ""),
+                            subject_snippet=e.get("subject", ""),
+                            final_score=e.get("final_score", 0.0),
+                            verdict=e.get("verdict", "SAFE"),
+                            category=e.get("category", "General"),
+                            tier1_score=e.get("tier1_score"),
+                            tier2_score=e.get("tier2_score"),
+                            tier3_score=e.get("tier3_score"),
+                        )
+                    )
+                    if len(events) >= limit:
+                        break
+            return events
 
     async def get_model_metrics(self) -> ModelMetrics:
         async with self._lock:

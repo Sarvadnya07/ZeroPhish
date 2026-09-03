@@ -54,7 +54,7 @@ AdminUser = Annotated[User, Depends(require_admin)]
 )
 async def admin_dashboard(_: AnalystUser) -> AdminDashboardSummary:
     """Get the admin dashboard summary."""
-    return AnalyticsService.dashboard_summary()
+    return await AnalyticsService.dashboard_summary()
 
 
 @router.get(
@@ -64,7 +64,7 @@ async def admin_dashboard(_: AnalystUser) -> AdminDashboardSummary:
 )
 async def threat_heatmap(_: AnalystUser) -> list[ThreatHeatmapEntry]:
     """Get aggregated threat data for the past week, grouped by hour and day."""
-    return AnalyticsService.threat_heatmap()
+    return await AnalyticsService.threat_heatmap()
 
 
 @router.get(
@@ -78,7 +78,7 @@ async def threat_feed(
     limit: Annotated[int, Query(ge=1, le=500, description="Max number of items")] = 50,
 ) -> list[ThreatFeedItem]:
     """Get the latest threat feed items."""
-    return AnalyticsService.threat_feed(limit=limit)
+    return await AnalyticsService.threat_feed(limit=limit)
 
 
 @router.get(
@@ -88,7 +88,7 @@ async def threat_feed(
 )
 async def model_metrics(_: AnalystUser) -> ModelMetrics:
     """Get the latest performance metrics for the DistilBERT model."""
-    return AnalyticsService.model_metrics()
+    return await AnalyticsService.model_metrics()
 
 
 # ---------- False-Positive Reporting ----------
@@ -105,7 +105,7 @@ async def list_false_positives(
     ] = None,
 ) -> list[FalsePositiveReport]:
     """List all false-positive reports, optionally filtering by review status."""
-    return AnalyticsService.list_false_positives(reviewed=reviewed)
+    return await AnalyticsService.list_false_positives(reviewed=reviewed)
 
 
 @router.post(
@@ -122,7 +122,7 @@ async def report_false_positive(
     original_verdict: Annotated[Verdict, Query(description="Original verdict of the scan")],
 ) -> FalsePositiveReport:
     """Report a false positive for a previous scan."""
-    return AnalyticsService.report_false_positive(
+    return await AnalyticsService.report_false_positive(
         scan_id=scan_id,
         reporter_id=current_user.id,
         reason=reason,
@@ -142,7 +142,7 @@ async def review_false_positive(
     current_user: AnalystUser,
 ) -> FalsePositiveReport:
     """Mark a false-positive report as reviewed, adding a resolution."""
-    fp = AnalyticsService.review_false_positive(
+    fp = await AnalyticsService.review_false_positive(
         fp_id,
         reviewer_id=current_user.id,
         resolution=resolution,
@@ -163,7 +163,7 @@ async def review_false_positive(
 )
 async def list_policies(_: AdminUser) -> list[PolicyRule]:
     """Get all policy rules (admin only)."""
-    return AnalyticsService.list_policies()
+    return await AnalyticsService.list_policies()
 
 
 @router.post(
@@ -177,7 +177,7 @@ async def create_policy(
     current_user: AdminUser,
 ) -> PolicyRule:
     """Create a new security policy rule (admin only)."""
-    return AnalyticsService.create_policy(data, creator_id=current_user.id)
+    return await AnalyticsService.create_policy(data, creator_id=current_user.id)
 
 
 @router.delete(
@@ -190,7 +190,7 @@ async def delete_policy(
     _: AdminUser,
 ) -> None:
     """Delete a security policy rule (admin only)."""
-    deleted = AnalyticsService.delete_policy(rule_id)
+    deleted = await AnalyticsService.delete_policy(rule_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -209,7 +209,7 @@ async def my_scan_history(
     limit: Annotated[int, Query(ge=1, le=500, description="Number of scans to return")] = 100,
 ) -> list[dict]:
     """Get the current user's scan history, most recent first."""
-    return AnalyticsService.user_scan_history(current_user.id, limit=limit)
+    return await AnalyticsService.user_scan_history(current_user.id, limit=limit)
 
 
 @router.get(
@@ -219,4 +219,4 @@ async def my_scan_history(
 )
 async def my_risk_score(current_user: CurrentUser) -> dict[str, float]:
     """Get the current user's aggregated risk score based on their scan history."""
-    return {"risk_score": AnalyticsService.user_risk_score(current_user.id)}
+    return {"risk_score": await AnalyticsService.user_risk_score(current_user.id)}

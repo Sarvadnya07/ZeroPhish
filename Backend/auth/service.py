@@ -22,42 +22,21 @@ from .models import User, UserInDB, UserRole, UserStatus, UserUpdate
 
 logger = logging.getLogger(__name__)
 
-# In-memory fallback / test stores
-_users_by_id: Dict[str, UserInDB] = {}
-_users_by_email: Dict[str, UserInDB] = {}
-_users_by_clerk_id: Dict[str, UserInDB] = {}
-_IN_MEMORY_STORE = _users_by_id
-
-def _store_user_in_memory(u: UserInDB) -> None:
-    _users_by_id[u.id] = u
-    if u.email:
-        _users_by_email[u.email.lower()] = u
-    if u.clerk_user_id:
-        _users_by_clerk_id[u.clerk_user_id] = u
-
-def _remove_user_from_memory(user_id: str) -> None:
-    u = _users_by_id.pop(user_id, None)
-    if u:
-        if u.email:
-            _users_by_email.pop(u.email.lower(), None)
-        if u.clerk_user_id:
-            _users_by_clerk_id.pop(u.clerk_user_id, None)
-
-def _maybe_await(res: Any) -> Any:
-    import inspect
-    import asyncio
-    if inspect.isawaitable(res):
+# In-memory test compatibility proxy
+class _StateProxy(dict):
+    """Proxy dictionary that resets the repository factory on clear() for clean test isolation."""
+    def clear(self) -> None:
+        super().clear()
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        if loop and loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(lambda: asyncio.run(res)).result()
-        else:
-            return asyncio.run(res)
-    return res
+            from repositories.factory import reset_repositories
+            reset_repositories()
+        except Exception:
+            pass
+
+_users_by_id: _StateProxy = _StateProxy()
+_users_by_email: _StateProxy = _StateProxy()
+_users_by_clerk_id: _StateProxy = _StateProxy()
+_IN_MEMORY_STORE = _users_by_id
 
 
 class AuthService:
@@ -65,13 +44,8 @@ class AuthService:
 
     @classmethod
     def _get_repository(cls):
-        """Retrieve the user repository, falling back to in-memory if unavailable."""
-        try:
-            repo = get_user_repository()
-            return repo
-        except Exception as e:
-            logger.warning("Repository unavailable, using in-memory fallback: %s", e)
-            return None
+        """Retrieve the user repository."""
+        return get_user_repository()
 
     @classmethod
     def _to_model(cls, user_db: UserInDB) -> User:
@@ -95,7 +69,7 @@ class AuthService:
         return [cid.strip() for cid in raw.split(",") if cid.strip()]
 
     @classmethod
-    def get_or_create_user(
+    async def get_or_create_user(
         cls,
         clerk_user_id: str,
         email: str,
@@ -106,12 +80,7 @@ class AuthService:
         Load an existing application user by Clerk User ID or safely provision
         a new user profile with least-privilege (USER) role.
 
-        The method performs:
-        1. Lookup by clerk_user_id in repository (and fallback in-memory)
-        2. If not found, try email to migrate legacy users
-        3. If still not found, provision a new user
-
-        Returns the application User model.
+        Single source of truth: UserRepository.
         """
         if not clerk_user_id or not email:
             raise ValueError("clerk_user_id and email are required")
@@ -120,34 +89,21 @@ class AuthService:
         full_name = full_name.strip() or email.split("@")[0]
 
         repo = cls._get_repository()
-        user_db = None
-
-        # 1. Lookup by clerk_user_id
-        if clerk_user_id in _users_by_clerk_id:
-            user_db = _users_by_clerk_id[clerk_user_id]
-        elif repo:
-            user_db = _maybe_await(repo.get_by_clerk_id(clerk_user_id))
+        user_db = await repo.get_by_clerk_id(clerk_user_id)
 
         # 2. If not found, try by email (legacy migration)
         if not user_db and email:
-            if email in _users_by_email:
-                user_db = _users_by_email[email]
-            elif repo:
-                user_db = _maybe_await(repo.get_by_email(email))
+            user_db = await repo.get_by_email(email)
             if user_db:
                 # Update the existing user with the Clerk ID (migrate)
                 user_db.clerk_user_id = clerk_user_id
                 user_db.last_login = datetime.now(timezone.utc)
-                if repo:
-                    _maybe_await(repo.save(user_db))
-                _store_user_in_memory(user_db)
+                await repo.save(user_db)
 
         if user_db:
             # Update last_login
             user_db.last_login = datetime.now(timezone.utc)
-            if repo:
-                _maybe_await(repo.save(user_db))
-            _store_user_in_memory(user_db)
+            await repo.save(user_db)
             return cls._to_model(user_db)
 
         # 3. Provision new user
@@ -175,9 +131,7 @@ class AuthService:
             risk_score=0.0,
         )
 
-        if repo:
-            _maybe_await(repo.save(user_in_db))
-        _store_user_in_memory(user_in_db)
+        await repo.save(user_in_db)
 
         AuditLogger.log_event(
             event_type="USER_PROVISIONED",
@@ -193,93 +147,70 @@ class AuthService:
         return cls._to_model(user_in_db)
 
     @classmethod
-    def get_user_by_id(cls, user_id: str) -> Optional[User]:
+    async def get_user_by_id(cls, user_id: str) -> Optional[User]:
         """Retrieve a user by internal ID."""
+        if not user_id:
+            return None
         repo = cls._get_repository()
-        user_db = _users_by_id.get(user_id)
-        if not user_db and repo:
-            user_db = _maybe_await(repo.get_by_id(user_id))
+        user_db = await repo.get_by_id(user_id)
         if not user_db:
             return None
         return cls._to_model(user_db)
 
     @classmethod
-    def get_user_by_clerk_id(cls, clerk_user_id: str) -> Optional[User]:
+    async def get_user_by_clerk_id(cls, clerk_user_id: str) -> Optional[User]:
         """Retrieve a user by Clerk user ID."""
         if not clerk_user_id:
             return None
         repo = cls._get_repository()
-        user_db = _users_by_clerk_id.get(clerk_user_id)
-        if not user_db and repo:
-            user_db = _maybe_await(repo.get_by_clerk_id(clerk_user_id))
+        user_db = await repo.get_by_clerk_id(clerk_user_id)
         if not user_db:
             return None
         return cls._to_model(user_db)
 
     @classmethod
-    def update_user(cls, user_id: str, update: UserUpdate) -> Optional[User]:
-        """
-        Update a user's profile.
-
-        Only fields present in UserUpdate will be updated. If the update would
-        downgrade the last admin, we log a warning but allow it (enforce via business logic).
-        """
+    async def update_user(cls, user_id: str, update: UserUpdate) -> Optional[User]:
+        """Update a user's profile."""
         if not user_id:
             raise ValueError("user_id is required")
 
         repo = cls._get_repository()
-        user_db = _users_by_id.get(user_id)
-        if not user_db and repo:
-            user_db = _maybe_await(repo.get_by_id(user_id))
+        user_db = await repo.get_by_id(user_id)
+        if not user_db:
+            return None
 
-        if user_db:
-            if update.full_name is not None:
-                user_db.full_name = update.full_name.strip()
-            if update.role is not None:
-                user_db.role = update.role
-            if update.status is not None:
-                user_db.status = update.status
-            if repo:
-                _maybe_await(repo.update(user_id, update))
-                _maybe_await(repo.save(user_db))
-            _store_user_in_memory(user_db)
+        if update.full_name is not None:
+            user_db.full_name = update.full_name.strip()
+        if update.role is not None:
+            user_db.role = update.role
+        if update.status is not None:
+            user_db.status = update.status
 
-            # If we're downgrading an admin, log it
-            old_role = user_db.role
-            if update.role is not None and old_role == UserRole.ADMIN and update.role != UserRole.ADMIN:
-                logger.warning("Admin user %s downgraded to %s", user_id, update.role.value)
-                AuditLogger.log_event(
-                    event_type="ADMIN_DOWNGRADE",
-                    user_id=user_id,
-                    details={"new_role": update.role.value},
-                )
-            return cls._to_model(user_db)
+        await repo.update(user_id, update)
+        await repo.save(user_db)
 
-        return None
+        # If we're downgrading an admin, log it
+        old_role = user_db.role
+        if update.role is not None and old_role == UserRole.ADMIN and update.role != UserRole.ADMIN:
+            logger.warning("Admin user %s downgraded to %s", user_id, update.role.value)
+            AuditLogger.log_event(
+                event_type="ADMIN_DOWNGRADE",
+                user_id=user_id,
+                details={"new_role": update.role.value},
+            )
+        return cls._to_model(user_db)
 
     @classmethod
-    def list_users(cls, role: Optional[UserRole] = None) -> List[User]:
+    async def list_users(cls, role: Optional[UserRole] = None) -> List[User]:
         """List all users, optionally filtered by role."""
         repo = cls._get_repository()
-        users = []
-        if repo:
-            users = _maybe_await(repo.list_all(role=role)) or []
-        if not users:
-            users = list(_users_by_id.values())
-            if role:
-                users = [u for u in users if u.role == role]
+        users = await repo.list_all(role=role)
         return [cls._to_model(u) for u in users]
 
     @classmethod
-    def delete_user(cls, user_id: str) -> bool:
+    async def delete_user(cls, user_id: str) -> bool:
         """Delete a user by ID. Returns True if deleted, False otherwise."""
         if not user_id:
             return False
         repo = cls._get_repository()
-        ok = False
-        if repo:
-            ok = bool(_maybe_await(repo.delete(user_id)))
-        if user_id in _users_by_id:
-            _remove_user_from_memory(user_id)
-            ok = True
-        return ok
+        return await repo.delete(user_id)

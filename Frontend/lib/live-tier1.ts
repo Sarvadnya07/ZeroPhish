@@ -9,6 +9,36 @@ export interface Tier1HeuristicItem {
   kind?: string
 }
 
+/**
+ * Modern canonical API Gateway scan response interface.
+ * Authoritative schema emitted by Backend/gateway.py and received via SSE / polling.
+ */
+export interface GatewayScanResponse {
+  scan_id: string
+  timestamp?: string
+  sender?: string
+  subject?: string
+  final_score?: number | null
+  partial_score?: number | null
+  verdict?: "SAFE" | "SUSPICIOUS" | "CRITICAL" | string
+  layers_completed?: number
+  complete?: boolean
+  evidence?: string[]
+  threat_analysis?: {
+    category?: string
+    reasoning?: string
+  }
+  tier_details?: {
+    tier1?: { score: number; status?: string }
+    tier2?: { score: number; status?: string }
+    tier3?: { score: number; status?: string }
+  }
+  links?: { href: string; text?: string | null }[]
+}
+
+/**
+ * @deprecated Legacy Tier 1 report schema. Retained for backwards compatibility.
+ */
 export interface Tier1Report {
   version: number
   event_id?: string | null
@@ -109,21 +139,90 @@ function urlsFromLinks(links: { href: string; text?: string | null }[], category
     }))
 }
 
-export function tier1ReportToScanResult(report: Tier1Report): ScanResult {
-  const score = Math.max(0, Math.min(100, Math.round(report?.tier1?.score ?? 0)))
-  // Use score-derived category to keep gauge value and severity label consistent.
-  const category = categoryFromScore(score)
-  const threatLevel = threatLevelFromCategory(category)
+/**
+ * Canonical adapter: converts modern GatewayScanResponse (or legacy Tier1Report)
+ * into the frontend ScanResult view model.
+ *
+ * GatewayScanResponse is authoritative.
+ */
+export function gatewayScanResponseToScanResult(report: GatewayScanResponse | Tier1Report): ScanResult {
+  const gw = report as Partial<GatewayScanResponse>
+  const t1 = report as Partial<Tier1Report>
 
-  const evidence = report?.tier1?.evidence ?? []
-  const checks = new Set(evidence.map((e) => e?.check).filter(Boolean))
-  const kinds = new Set(evidence.map((e) => e?.kind).filter(Boolean))
+  // 1. Compute authoritative threat score (0-100)
+  const rawScore =
+    gw.final_score !== undefined && gw.final_score !== null
+      ? gw.final_score
+      : gw.partial_score !== undefined && gw.partial_score !== null
+        ? gw.partial_score
+        : t1.tier1?.score ?? 0
+
+  const score = Math.max(0, Math.min(100, Math.round(rawScore)))
+
+  // 2. Compute threat level
+  let threatLevel: ThreatLevel
+  if (gw.verdict === "CRITICAL") {
+    threatLevel = "threat"
+  } else if (gw.verdict === "SUSPICIOUS") {
+    threatLevel = "warning"
+  } else if (gw.verdict === "SAFE") {
+    threatLevel = "safe"
+  } else {
+    threatLevel = threatLevelFromCategory(categoryFromScore(score))
+  }
+
+  // 3. Process layers and phase
+  const layersCompleted = gw.layers_completed ?? (gw.complete ? 3 : t1.layers_completed ?? 1)
+  const phase: ScanResult["phase"] = layersCompleted < 3 ? "scanning" : "complete"
+
+  // 4. Tier details mapping
+  const t1Score = gw.tier_details?.tier1?.score ?? t1.tier1?.score ?? 0
+  const t2Score = gw.tier_details?.tier2?.score ?? 0
+  const t3Score = gw.tier_details?.tier3?.score ?? 0
+
+  // 5. Evidence mapping
+  let evidenceItems: EvidenceItem[] = []
+  if (Array.isArray(gw.evidence) && gw.evidence.length > 0) {
+    // Modern Gateway string evidence
+    evidenceItems = gw.evidence.slice(0, 12).map((item: string) => {
+      const text = String(item)
+      const lower = text.toLowerCase()
+      const isHigh = lower.includes("phish") || lower.includes("spoof") || lower.includes("punycode") || lower.includes("critical")
+      const isMed = lower.includes("suspicious") || lower.includes("shortener") || lower.includes("urgency") || lower.includes("financial")
+      const category = lower.startsWith("ai:")
+        ? "AI Semantic"
+        : lower.includes("domain")
+          ? "Domain Intel"
+          : lower.includes("link")
+            ? "Link Analysis"
+            : lower.includes("sender")
+              ? "Impersonation"
+              : "Threat Signal"
+      return {
+        category,
+        label: text,
+        severity: isHigh ? "high" : isMed ? "medium" : "low",
+      }
+    })
+  } else if (Array.isArray(t1.tier1?.evidence)) {
+    // Legacy Tier 1 structured evidence
+    evidenceItems = evidenceToItems(t1.tier1?.evidence ?? [])
+  }
+
+  // Heuristic status indicators
+  const legacyEvidence = t1.tier1?.evidence ?? []
+  const checks = new Set(legacyEvidence.map((e) => e?.check).filter(Boolean))
+  const kinds = new Set(legacyEvidence.map((e) => e?.kind).filter(Boolean))
 
   const regexStatus: TierStatus["status"] =
-    kinds.has("credential") ? "fail" : kinds.has("urgency") || kinds.has("financial") ? "warning" : "pass"
+    kinds.has("credential") || t1Score >= 70
+      ? "fail"
+      : kinds.has("urgency") || kinds.has("financial") || t1Score >= 30
+        ? "warning"
+        : "pass"
 
   const linkStatus: TierStatus["status"] =
-    checks.has("brand_mismatch") || checks.has("homograph") || checks.has("punycode") || checks.has("ip_url")
+    checks.has("brand_mismatch") || checks.has("homograph") || checks.has("punycode") || checks.has("ip_url") || t1Score >= 70
       ? "fail"
       : checks.has("shortener") || checks.has("tld")
         ? "warning"
@@ -138,9 +237,6 @@ export function tier1ReportToScanResult(report: Tier1Report): ScanResult {
           ? "warning"
           : "pending"
 
-  const layersCompleted = report?.layers_completed ?? 1
-  const phase: ScanResult["phase"] = layersCompleted < 3 ? "scanning" : "complete"
-
   return {
     threatScore: score,
     threatLevel,
@@ -154,22 +250,39 @@ export function tier1ReportToScanResult(report: Tier1Report): ScanResult {
     },
 
     tier2: {
-      spf: tierStatus("SPF", "pending"),
-      dkim: tierStatus("DKIM", "pending"),
-      dmarc: tierStatus("DMARC", "pending"),
-      domainAge: "Tier 2 disabled",
-      hostingProvider: "Tier 2 disabled",
+      spf: tierStatus("SPF", t2Score >= 50 ? "warning" : "pass"),
+      dkim: tierStatus("DKIM", t2Score >= 50 ? "warning" : "pass"),
+      dmarc: tierStatus("DMARC", t2Score >= 70 ? "fail" : "pass"),
+      domainAge: gw.tier_details?.tier2 ? (t2Score >= 70 ? "Suspicious / New" : "Established") : "Tier 2 disabled",
+      hostingProvider: gw.tier_details?.tier2 ? "Active (Verified)" : "Tier 2 disabled",
     },
 
     tier3: {
-      active: layersCompleted >= 3,
-      markers: report?.tier1?.ml_reasoning ? [report.tier1.ml_reasoning] : [],
-      intentProfile: [],
+      active: layersCompleted >= 3 || t3Score > 0,
+      markers: gw.threat_analysis?.reasoning
+        ? [gw.threat_analysis.reasoning]
+        : t1.tier1?.ml_reasoning
+          ? [t1.tier1.ml_reasoning]
+          : [],
+      intentProfile: gw.threat_analysis?.category
+        ? [{ label: gw.threat_analysis.category, value: Math.round(score) }]
+        : [],
     },
 
-    urls: urlsFromLinks(report?.links ?? [], category),
-    evidence: evidenceToItems(evidence),
-    flaggedExcerpts: report?.tier1?.reasons?.map((r) => `**Reason**: ${r}`) ?? [],
+    urls: urlsFromLinks(gw.links ?? t1.links ?? [], categoryFromScore(score)),
+    evidence: evidenceItems,
+    flaggedExcerpts:
+      Array.isArray(gw.evidence) && gw.evidence.length > 0
+        ? gw.evidence.map((e: string) => `**Evidence**: ${e}`)
+        : t1.tier1?.reasons?.map((r) => `**Reason**: ${r}`) ?? [],
   }
+}
+
+/**
+ * @deprecated Legacy adapter function. Use `gatewayScanResponseToScanResult` instead.
+ * Retained for backwards compatibility with older components and tests.
+ */
+export function tier1ReportToScanResult(report: Tier1Report): ScanResult {
+  return gatewayScanResponseToScanResult(report)
 }
 

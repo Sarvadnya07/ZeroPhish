@@ -26,6 +26,7 @@ class ConditionType(str, Enum):
     SCORE_THRESHOLD = "score_threshold"
     SENDER_DOMAIN = "sender_domain"
     KEYWORD = "keyword"
+    TLD = "tld"
 
 
 class PolicyAction(str, Enum):

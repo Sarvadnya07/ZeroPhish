@@ -9,6 +9,8 @@ validation, and provides a clean interface for the API layer.
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import logging
 import time
 import uuid
@@ -49,7 +51,7 @@ class AnalyticsService:
 
     # ---------- Telemetry Ingestion ----------
     @staticmethod
-    def record_scan(
+    async def record_scan(
         scan_id: str,
         sender: str,
         subject: str,
@@ -63,21 +65,6 @@ class AnalyticsService:
     ) -> None:
         """
         Record a completed scan event for analytics and historical reporting.
-
-        Args:
-            scan_id: Unique identifier for the scan.
-            sender: Sender email address.
-            subject: Email subject line.
-            final_score: Aggregated threat score (0-100).
-            verdict: Final verdict string (SAFE, SUSPICIOUS, CRITICAL).
-            category: Threat category (e.g., BEC, Credential, Safe).
-            tier1: Tier 1 heuristic score.
-            tier2: Tier 2 ML/OSINT score.
-            tier3: Tier 3 Gemini semantic score.
-            user_id: Optional user identifier for per-user tracking.
-
-        Raises:
-            ValueError: If input validation fails (e.g., score out of range).
         """
         # Validate inputs
         if not scan_id or not sender:
@@ -107,80 +94,151 @@ class AnalyticsService:
 
         repo = get_analytics_repository()
         try:
-            repo.record_scan_event(event)
+            res = repo.record_scan_event(event)
+            if inspect.isawaitable(res):
+                await res
         except Exception as e:
             logger.error("Failed to record scan event for scan_id=%s: %s", scan_id, e)
             # Do not re-raise; telemetry should not break the scan flow.
 
-    # ---------- Dashboard Summary ----------
     @staticmethod
-    def dashboard_summary() -> AdminDashboardSummary:
-        """Get high-level dashboard metrics for the current day/week."""
-        repo = get_analytics_repository()
-        summary = repo.get_dashboard_summary()
-
-        # Inject open incidents count from the incidents service
+    async def dashboard_summary() -> AdminDashboardSummary:
+        """Get high-level dashboard metrics for the current day/week with timeout protection."""
         try:
-            from incidents.service import IncidentService
+            repo = get_analytics_repository()
+            res = repo.get_dashboard_summary()
+            summary = await asyncio.wait_for(
+                res if inspect.isawaitable(res) else asyncio.sleep(0),
+                timeout=10.0
+            ) if inspect.isawaitable(res) else res
 
-            inc_stats = IncidentService.stats()
-            summary.open_incidents = inc_stats.get("open", 0)
-        except ImportError:
-            logger.warning("IncidentService not available; open_incidents remains default")
+            # Inject open incidents count from the incidents service
+            try:
+                from incidents.service import IncidentService
+
+                raw_stats = IncidentService.stats()
+                inc_stats = await asyncio.wait_for(
+                    raw_stats if inspect.isawaitable(raw_stats) else asyncio.sleep(0),
+                    timeout=5.0
+                ) if inspect.isawaitable(raw_stats) else raw_stats
+                summary.open_incidents = inc_stats.get("open", 0)
+            except asyncio.TimeoutError:
+                logger.warning("IncidentService timed out; open_incidents remains default")
+            except ImportError:
+                logger.warning("IncidentService not available; open_incidents remains default")
+            except Exception as e:
+                logger.error("Failed to fetch incident stats: %s", e)
+
+            return summary
+        except asyncio.TimeoutError:
+            logger.error("dashboard_summary operation timed out")
+            # Return a safe default
+            from .models import AdminDashboardSummary
+            return AdminDashboardSummary(
+                total_scans_today=0,
+                total_scans_week=0,
+                critical_today=0,
+                suspicious_today=0,
+                safe_today=0,
+                avg_score_today=0.0,
+                false_positives_pending=0,
+                open_incidents=0,
+                circuit_breaker_state="unknown",
+                top_malicious_domains=[],
+                top_senders=[],
+                model_accuracy=0.0,
+            )
         except Exception as e:
-            logger.error("Failed to fetch incident stats: %s", e)
-
-        return summary
+            logger.error("Error in dashboard_summary: %s", e)
+            from .models import AdminDashboardSummary
+            return AdminDashboardSummary(
+                total_scans_today=0,
+                total_scans_week=0,
+                critical_today=0,
+                suspicious_today=0,
+                safe_today=0,
+                avg_score_today=0.0,
+                false_positives_pending=0,
+                open_incidents=0,
+                circuit_breaker_state="unknown",
+                top_malicious_domains=[],
+                top_senders=[],
+                model_accuracy=0.0,
+            )
 
     # ---------- Heatmap ----------
     @staticmethod
-    def threat_heatmap() -> list[ThreatHeatmapEntry]:
-        """Get aggregated threat data by hour/day for the past week."""
-        repo = get_analytics_repository()
-        return repo.get_threat_heatmap()
+    async def threat_heatmap() -> list[ThreatHeatmapEntry]:
+        """Get aggregated threat data by hour/day for the past week with timeout."""
+        try:
+            repo = get_analytics_repository()
+            res = repo.get_threat_heatmap()
+            return await asyncio.wait_for(
+                res if inspect.isawaitable(res) else asyncio.sleep(0),
+                timeout=10.0
+            ) if inspect.isawaitable(res) else res
+        except asyncio.TimeoutError:
+            logger.error("threat_heatmap operation timed out")
+            # Return default empty heatmap
+            result = []
+            for d in range(7):
+                for h in range(24):
+                    result.append(ThreatHeatmapEntry(day=d, hour=h, count=0, avg_score=0.0))
+            return result
+        except Exception as e:
+            logger.error("Error in threat_heatmap: %s", e)
+            result = []
+            for d in range(7):
+                for h in range(24):
+                    result.append(ThreatHeatmapEntry(day=d, hour=h, count=0, avg_score=0.0))
+            return result
 
     # ---------- Threat Feed ----------
     @staticmethod
-    def threat_feed(limit: int = 50) -> list[ThreatFeedItem]:
+    async def threat_feed(limit: int = 50) -> list[ThreatFeedItem]:
         """
-        Get the latest threat feed items, most recent first.
-
-        Args:
-            limit: Maximum number of items to return (capped at MAX_FEED_LIMIT).
-
-        Returns:
-            List of ThreatFeedItem objects sorted by timestamp descending.
+        Get the latest threat feed items, most recent first (with timeout).
         """
         if limit < 1:
             limit = 50
         if limit > AnalyticsService.MAX_FEED_LIMIT:
             limit = AnalyticsService.MAX_FEED_LIMIT
 
-        repo = get_analytics_repository()
-        return repo.get_threat_feed(limit=limit)
+        try:
+            repo = get_analytics_repository()
+            res = repo.get_threat_feed(limit=limit)
+            return await asyncio.wait_for(
+                res if inspect.isawaitable(res) else asyncio.sleep(0),
+                timeout=10.0
+            ) if inspect.isawaitable(res) else res
+        except asyncio.TimeoutError:
+            logger.error("threat_feed operation timed out")
+            return []
+        except Exception as e:
+            logger.error("Error in threat_feed: %s", e)
+            return []
 
     # ---------- Model Metrics ----------
     @staticmethod
-    def model_metrics() -> ModelMetrics:
+    async def model_metrics() -> ModelMetrics:
         """Get the latest ML model performance metrics."""
         repo = get_analytics_repository()
-        return repo.get_model_metrics()
+        res = repo.get_model_metrics()
+        return await res if inspect.isawaitable(res) else res
 
     @staticmethod
-    def update_model_metrics(fp_delta: int = 0, fn_delta: int = 0) -> None:
+    async def update_model_metrics(fp_delta: int = 0, fn_delta: int = 0) -> None:
         """
         Increment the model's false-positive and false-negative counts.
-
-        Args:
-            fp_delta: Number of new false positives (can be negative).
-            fn_delta: Number of new false negatives (can be negative).
         """
         repo = get_analytics_repository()
-        repo.update_model_metrics(fp_delta=fp_delta, fn_delta=fn_delta)
+        res = repo.update_model_metrics(fp_delta=fp_delta, fn_delta=fn_delta)
+        if inspect.isawaitable(res):
+            await res
 
     # ---------- False-Positive Review ----------
     @staticmethod
-    def report_false_positive(
+    async def report_false_positive(
         scan_id: str,
         reporter_id: str,
         reason: str,
@@ -189,19 +247,6 @@ class AnalyticsService:
     ) -> FalsePositiveReport:
         """
         Submit a false-positive report for a previous scan.
-
-        Args:
-            scan_id: ID of the scan being reported.
-            reporter_id: User ID of the reporter.
-            reason: Explanation of why it's a false positive.
-            original_score: The original threat score.
-            original_verdict: The original verdict string.
-
-        Returns:
-            The created FalsePositiveReport object.
-
-        Raises:
-            ValueError: If required fields are missing or invalid.
         """
         if not scan_id or not reporter_id or not reason:
             raise ValueError("scan_id, reporter_id, and reason are required")
@@ -227,47 +272,35 @@ class AnalyticsService:
         )
 
         repo = get_analytics_repository()
-        return repo.save_false_positive(fp)
+        res = repo.save_false_positive(fp)
+        return await res if inspect.isawaitable(res) else res
 
     @staticmethod
-    def list_false_positives(reviewed: Optional[bool] = None) -> list[FalsePositiveReport]:
+    async def list_false_positives(reviewed: Optional[bool] = None) -> list[FalsePositiveReport]:
         """List false-positive reports, optionally filtering by review status."""
         repo = get_analytics_repository()
-        return repo.list_false_positives(reviewed=reviewed)
+        res = repo.list_false_positives(reviewed=reviewed)
+        return await res if inspect.isawaitable(res) else res
 
     @staticmethod
-    def review_false_positive(
+    async def review_false_positive(
         fp_id: str, reviewer_id: str, resolution: str
     ) -> Optional[FalsePositiveReport]:
         """
         Mark a false-positive report as reviewed.
-
-        Args:
-            fp_id: False-positive report ID.
-            reviewer_id: User ID of the reviewer.
-            resolution: Resolution comment.
-
-        Returns:
-            Updated FalsePositiveReport, or None if not found.
         """
         if not fp_id or not reviewer_id or not resolution:
             raise ValueError("fp_id, reviewer_id, and resolution are required")
 
         repo = get_analytics_repository()
-        return repo.review_false_positive(fp_id, reviewer_id, resolution)
+        res = repo.review_false_positive(fp_id, reviewer_id, resolution)
+        return await res if inspect.isawaitable(res) else res
 
     # ---------- Policy Rules ----------
     @staticmethod
-    def create_policy(data: PolicyRuleCreate, creator_id: str) -> PolicyRule:
+    async def create_policy(data: PolicyRuleCreate, creator_id: str) -> PolicyRule:
         """
         Create a new policy rule.
-
-        Args:
-            data: PolicyRuleCreate payload.
-            creator_id: User ID of the creator.
-
-        Returns:
-            The created PolicyRule object.
         """
         if not data.name or not data.condition_value:
             raise ValueError("name and condition_value are required")
@@ -286,38 +319,30 @@ class AnalyticsService:
         )
 
         repo = get_analytics_repository()
-        return repo.save_policy_rule(rule)
+        res = repo.save_policy_rule(rule)
+        return await res if inspect.isawaitable(res) else res
 
     @staticmethod
-    def list_policies() -> list[PolicyRule]:
+    async def list_policies() -> list[PolicyRule]:
         """List all policy rules."""
         repo = get_analytics_repository()
-        return repo.list_policy_rules()
+        res = repo.list_policy_rules()
+        return await res if inspect.isawaitable(res) else res
 
     @staticmethod
-    def delete_policy(rule_id: str) -> bool:
+    async def delete_policy(rule_id: str) -> bool:
         """Delete a policy rule by ID. Returns True if deleted, False otherwise."""
         if not rule_id:
             return False
         repo = get_analytics_repository()
-        return repo.delete_policy_rule(rule_id)
+        res = repo.delete_policy_rule(rule_id)
+        return await res if inspect.isawaitable(res) else res
 
     # ---------- User-Specific Queries ----------
     @staticmethod
-    def user_scan_history(user_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    async def user_scan_history(user_id: str, limit: int = 100) -> list[dict[str, Any]]:
         """
-        Get the scan history for a specific user.
-
-        NOTE: This implementation currently fetches all events and filters in-memory.
-        For production scalability, the repository should support a 'user_id' filter
-        at the data store level. This is a temporary workaround.
-
-        Args:
-            user_id: User identifier.
-            limit: Maximum number of events to return.
-
-        Returns:
-            List of scan events (dicts), most recent first.
+        Get the scan history for a specific user (optimized with early filtering).
         """
         if not user_id:
             return []
@@ -327,37 +352,61 @@ class AnalyticsService:
         if limit > AnalyticsService.MAX_FEED_LIMIT:
             limit = AnalyticsService.MAX_FEED_LIMIT
 
-        repo = get_analytics_repository()
-        all_events = repo.get_scan_events()
-        user_events = [
-            event for event in all_events
-            if event.get("user_id") == user_id
-        ]
-        # Sort by timestamp descending (most recent first)
-        user_events.sort(key=lambda e: e.get("ts", 0), reverse=True)
-        return user_events[:limit]
+        try:
+            repo = get_analytics_repository()
+            res = repo.get_scan_events(limit=limit * 5)  # Request only what we might need
+            all_events = await asyncio.wait_for(
+                res if inspect.isawaitable(res) else asyncio.sleep(0), 
+                timeout=5.0
+            ) if inspect.isawaitable(res) else res
+            
+            # Filter and sort with early exit
+            user_events = []
+            for event in reversed(all_events):  # Iterate in reverse for most recent first
+                if event.get("user_id") == user_id:
+                    user_events.append(event)
+                    if len(user_events) >= limit:
+                        break
+            return user_events
+        except asyncio.TimeoutError:
+            logger.warning("user_scan_history timed out for user_id=%s", user_id)
+            return []
+        except Exception as e:
+            logger.error("Error fetching user_scan_history: %s", e)
+            return []
 
     @staticmethod
-    def user_risk_score(user_id: str) -> float:
+    async def user_risk_score(user_id: str) -> float:
         """
-        Calculate the average threat score for a user's scan history.
-
-        Returns:
-            Float between 0 and 100, or 0.0 if no scans exist.
+        Calculate the average threat score for a user's scan history (optimized).
         """
         if not user_id:
             return AnalyticsService.DEFAULT_RISK_SCORE
 
-        repo = get_analytics_repository()
-        all_events = repo.get_scan_events()
-        user_scores = [
-            e.get("final_score", 0.0)
-            for e in all_events
-            if e.get("user_id") == user_id
-        ]
+        try:
+            repo = get_analytics_repository()
+            res = repo.get_scan_events(limit=1000)  # Limit to prevent loading entire dataset
+            all_events = await asyncio.wait_for(
+                res if inspect.isawaitable(res) else asyncio.sleep(0),
+                timeout=5.0
+            ) if inspect.isawaitable(res) else res
+            
+            # Calculate average in single pass
+            total_score = 0.0
+            count = 0
+            for e in all_events:
+                if e.get("user_id") == user_id:
+                    total_score += e.get("final_score", 0.0)
+                    count += 1
 
-        if not user_scores:
+            if count == 0:
+                return AnalyticsService.DEFAULT_RISK_SCORE
+            
+            avg_score = total_score / count
+            return round(avg_score, 2)
+        except asyncio.TimeoutError:
+            logger.warning("user_risk_score timed out for user_id=%s", user_id)
             return AnalyticsService.DEFAULT_RISK_SCORE
-
-        avg_score = sum(user_scores) / len(user_scores)
-        return round(avg_score, 2)
+        except Exception as e:
+            logger.error("Error calculating user_risk_score: %s", e)
+            return AnalyticsService.DEFAULT_RISK_SCORE

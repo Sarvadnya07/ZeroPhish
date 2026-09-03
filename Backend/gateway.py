@@ -246,10 +246,81 @@ if EXTENSIONS_AVAILABLE:
 
 # ---------- Internal State ----------
 # In‑process scan time tracking and SSE subscribers
-scan_started_at: Dict[str, float] = {}
+class BoundedScanTracker(dict):
+    """
+    Thread-safe / bounded dictionary for tracking scan start timestamps.
+    Automatically prunes entries older than max_age_seconds or when size exceeds max_entries.
+    """
+    def __init__(self, max_entries: int = 5000, max_age_seconds: float = 600.0):
+        super().__init__()
+        self.max_entries = max_entries
+        self.max_age_seconds = max_age_seconds
+
+    def __setitem__(self, key: str, value: float) -> None:
+        self._prune_if_needed()
+        super().__setitem__(key, value)
+
+    def _prune_if_needed(self) -> None:
+        if len(self) >= self.max_entries:
+            now = time.perf_counter()
+            expired = [k for k, v in self.items() if (now - v) > self.max_age_seconds]
+            for k in expired:
+                super().pop(k, None)
+            if len(self) >= self.max_entries:
+                # Remove oldest 20%
+                sorted_keys = sorted(self.keys(), key=lambda k: self[k])
+                for k in sorted_keys[: max(1, self.max_entries // 5)]:
+                    super().pop(k, None)
+
+
+scan_started_at: BoundedScanTracker = BoundedScanTracker()
 scan_results_lock = asyncio.Lock()
 _latest_tier1_report: Optional[Dict[str, Any]] = None
 _sse_subscribers: Dict[str, asyncio.Queue] = {}
+
+# SSE Observability & Backpressure
+sse_metrics: Dict[str, int] = {
+    "sse_queue_full_total": 0,
+    "sse_events_dropped_total": 0,
+    "sse_subscriber_evictions_total": 0,
+}
+_sse_subscriber_overflows: Dict[str, int] = {}
+MAX_OVERFLOW_THRESHOLD = 5
+
+
+def _publish_to_subscriber(sub_id: str, q: asyncio.Queue, payload: Any) -> bool:
+    """
+    Publish an event to a subscriber queue using drop-oldest backpressure on QueueFull.
+    Returns True if delivery succeeded; False if subscriber exceeded overflow threshold and should be evicted.
+    """
+    try:
+        q.put_nowait(payload)
+        _sse_subscriber_overflows[sub_id] = 0
+        return True
+    except asyncio.QueueFull:
+        sse_metrics["sse_queue_full_total"] += 1
+        # Backpressure policy: Drop oldest event and enqueue newest to give subscriber fresh state
+        try:
+            _ = q.get_nowait()
+            sse_metrics["sse_events_dropped_total"] += 1
+            q.put_nowait(payload)
+            overflow_count = _sse_subscriber_overflows.get(sub_id, 0) + 1
+            _sse_subscriber_overflows[sub_id] = overflow_count
+            if overflow_count > MAX_OVERFLOW_THRESHOLD:
+                logger.warning(
+                    "SSE subscriber %s exceeded overflow threshold (%d); marking for eviction",
+                    sub_id,
+                    MAX_OVERFLOW_THRESHOLD,
+                )
+                sse_metrics["sse_subscriber_evictions_total"] += 1
+                return False
+            return True
+        except (asyncio.QueueEmpty, asyncio.QueueFull):
+            sse_metrics["sse_subscriber_evictions_total"] += 1
+            return False
+    except (TypeError, ValueError, RuntimeError):
+        sse_metrics["sse_subscriber_evictions_total"] += 1
+        return False
 
 # ---------- Helper Functions ----------
 def _calculate_scan_cache_key(sender: str, body: str, links: List[str], subject: Optional[str]) -> str:
@@ -366,12 +437,11 @@ async def _notify_live_dashboard(res: GatewayScanResponse, sender: str, subject:
     # Broadcast to SSE subscribers
     dead: List[str] = []
     for sub_id, q in list(_sse_subscribers.items()):
-        try:
-            q.put_nowait(payload)
-        except (TypeError, ValueError):
+        if not _publish_to_subscriber(sub_id, q, payload):
             dead.append(sub_id)
     for sub_id in dead:
         _sse_subscribers.pop(sub_id, None)
+        _sse_subscriber_overflows.pop(sub_id, None)
 
     logger.info(
         "Live dashboard notification sent for scan %s (%s / %s)",
@@ -471,101 +541,104 @@ async def _finalize_tier3(
 ) -> None:
     """Background task: complete Tier 3, update scan result, cache, and notify."""
     try:
-        # CircuitBreaker implementation may not strictly match the protocol used
-        # by the wrapper; cast to Any to satisfy type checkers while preserving
-        # runtime behavior.
-        from typing import Any, cast
-
-        tier3_result = await execute_tier3_with_circuit_breaker(
-            body=email_body,
-            circuit_breaker=cast(Any, tier3_circuit_breaker),
-            tier3_timeout=CONFIG.tier3_timeout,
-        )
-    except (ValueError, TypeError, RuntimeError, asyncio.TimeoutError, OSError) as e:
-        logger.error("Tier 3 finalization failed: %s", e, exc_info=True)
-        tier3_result = Tier3Result(
-            score=50,
-            category="Error",
-            reasoning=f"Tier 3 failed: {type(e).__name__}",
-            flagged_phrases=[],
-            status=TierStatus.FAILED,
-            confidence=0.0,
-            execution_time_ms=0.0,
-        )
-
-    scan_repo = get_scan_result_repository()
-    async with scan_results_lock:
-        existing = await scan_repo.get(scan_id)
-        if not existing:
-            logger.warning("Scan %s not found in repository; skipping finalization", scan_id)
-            return
-
-        final_score = _round_score(
-            _calculate_final_score(existing.tier1.score, existing.tier2.score, tier3_result.score)
-        )
-        final_verdict = _determine_verdict(final_score)
-        total_ms = None
-        if scan_id in scan_started_at:
-            total_ms = (time.perf_counter() - scan_started_at[scan_id]) * 1000
-
-        sender_meta = existing.sender or sender or "unknown@unknown.com"
-        subject_meta = existing.subject or subject or "No Subject"
-
-        updated = existing.model_copy(update={
-            "tier3": tier3_result,
-            "tier3_status": tier3_result.status,
-            "complete": True,
-            "layers_completed": 3,
-            "final_score": final_score,
-            "verdict": final_verdict,
-            "combined_evidence": _merge_evidence(
-                existing.tier1.evidence,
-                existing.tier2.evidence,
-                tier3_result.flagged_phrases,
-            ),
-            "total_execution_time_ms": total_ms,
-            "sender": sender_meta,
-            "subject": subject_meta,
-        })
-        await scan_repo.save(scan_id, updated)
-
-        # Cache completed result
-        if cache_key:
-            try:
-                cache = get_cache_backend()
-                await cache.set(cache_key, json.dumps(updated.model_dump()), ttl_seconds=CONFIG.scan_cache_ttl)
-            except (TypeError, ValueError, RuntimeError, OSError) as e:
-                logger.debug("Failed to cache scan %s: %s", scan_id, e)
-
-        # Notify dashboard
         try:
-            asyncio.create_task(_notify_live_dashboard(updated, sender_meta, subject_meta))
-        except RuntimeError as exc:
-            logger.warning("Unable to schedule live dashboard task for scan %s: %s", scan_id, exc)
+            # CircuitBreaker implementation may not strictly match the protocol used
+            # by the wrapper; cast to Any to satisfy type checkers while preserving
+            # runtime behavior.
+            from typing import Any, cast
 
-    # Fire webhooks and record analytics (outside the lock)
-    if EXTENSIONS_AVAILABLE:
-        try:
-            payload = updated.model_dump()
-            await WebhookService.fire(WebhookEventType.SCAN_COMPLETE, payload)
-            if final_verdict == "CRITICAL":
-                await WebhookService.fire(WebhookEventType.SCAN_CRITICAL, payload)
-            elif final_verdict == "SUSPICIOUS":
-                await WebhookService.fire(WebhookEventType.SCAN_SUSPICIOUS, payload)
-
-            AnalyticsService.record_scan(
-                scan_id=scan_id,
-                sender=sender_meta,
-                subject=subject_meta,
-                final_score=final_score,
-                verdict=final_verdict,
-                category=updated.tier2.threat_details.category if updated.tier2 else "Unknown",
-                tier1=float(existing.tier1.score),
-                tier2=float(existing.tier2.score) if existing.tier2 else 0,
-                tier3=float(tier3_result.score),
+            tier3_result = await execute_tier3_with_circuit_breaker(
+                body=email_body,
+                circuit_breaker=cast(Any, tier3_circuit_breaker),
+                tier3_timeout=CONFIG.tier3_timeout,
             )
-        except (TypeError, ValueError, RuntimeError, OSError) as e:
-            logger.error("Webhook/analytics error for scan %s: %s", scan_id, e)
+        except (ValueError, TypeError, RuntimeError, asyncio.TimeoutError, OSError) as e:
+            logger.error("Tier 3 finalization failed: %s", e, exc_info=True)
+            tier3_result = Tier3Result(
+                score=50,
+                category="Error",
+                reasoning=f"Tier 3 failed: {type(e).__name__}",
+                flagged_phrases=[],
+                status=TierStatus.FAILED,
+                confidence=0.0,
+                execution_time_ms=0.0,
+            )
+
+        scan_repo = get_scan_result_repository()
+        async with scan_results_lock:
+            existing = await scan_repo.get(scan_id)
+            if not existing:
+                logger.warning("Scan %s not found in repository; skipping finalization", scan_id)
+                return
+
+            final_score = _round_score(
+                _calculate_final_score(existing.tier1.score, existing.tier2.score, tier3_result.score)
+            )
+            final_verdict = _determine_verdict(final_score)
+            total_ms = None
+            if scan_id in scan_started_at:
+                total_ms = (time.perf_counter() - scan_started_at[scan_id]) * 1000
+
+            sender_meta = existing.sender or sender or "unknown@unknown.com"
+            subject_meta = existing.subject or subject or "No Subject"
+
+            updated = existing.model_copy(update={
+                "tier3": tier3_result,
+                "tier3_status": tier3_result.status,
+                "complete": True,
+                "layers_completed": 3,
+                "final_score": final_score,
+                "verdict": final_verdict,
+                "combined_evidence": _merge_evidence(
+                    existing.tier1.evidence,
+                    existing.tier2.evidence,
+                    tier3_result.flagged_phrases,
+                ),
+                "total_execution_time_ms": total_ms,
+                "sender": sender_meta,
+                "subject": subject_meta,
+            })
+            await scan_repo.save(scan_id, updated)
+
+            # Cache completed result
+            if cache_key:
+                try:
+                    cache = get_cache_backend()
+                    await cache.set(cache_key, json.dumps(updated.model_dump()), ttl_seconds=CONFIG.scan_cache_ttl)
+                except (TypeError, ValueError, RuntimeError, OSError) as e:
+                    logger.debug("Failed to cache scan %s: %s", scan_id, e)
+
+            # Notify dashboard
+            try:
+                asyncio.create_task(_notify_live_dashboard(updated, sender_meta, subject_meta))
+            except RuntimeError as exc:
+                logger.warning("Unable to schedule live dashboard task for scan %s: %s", scan_id, exc)
+
+        # Fire webhooks and record analytics (outside the lock)
+        if EXTENSIONS_AVAILABLE:
+            try:
+                payload = updated.model_dump()
+                await WebhookService.fire(WebhookEventType.SCAN_COMPLETE, payload)
+                if final_verdict == "CRITICAL":
+                    await WebhookService.fire(WebhookEventType.SCAN_CRITICAL, payload)
+                elif final_verdict == "SUSPICIOUS":
+                    await WebhookService.fire(WebhookEventType.SCAN_SUSPICIOUS, payload)
+
+                AnalyticsService.record_scan(
+                    scan_id=scan_id,
+                    sender=sender_meta,
+                    subject=subject_meta,
+                    final_score=final_score,
+                    verdict=final_verdict,
+                    category=updated.tier2.threat_details.category if updated.tier2 else "Unknown",
+                    tier1=float(existing.tier1.score),
+                    tier2=float(existing.tier2.score) if existing.tier2 else 0,
+                    tier3=float(tier3_result.score),
+                )
+            except (TypeError, ValueError, RuntimeError, OSError) as e:
+                logger.error("Webhook/analytics error for scan %s: %s", scan_id, e)
+    finally:
+        scan_started_at.pop(scan_id, None)
 
 # ---------- Endpoints ----------
 @app.post("/api/v1/scan", response_model=GatewayScanResponse)
@@ -609,10 +682,10 @@ async def gateway_scan(
         try:
             cached_data = json.loads(cached_json)
             cached_res = GatewayScanResponse.model_validate(cached_data)
-            total_ms = (time.perf_counter() - scan_started_at[scan_id]) * 1000
+            total_ms = (time.perf_counter() - scan_started_at.pop(scan_id, time.perf_counter())) * 1000
             cached_res = cached_res.model_copy(update={
                 "scan_id": scan_id,
-                "timestamp": datetime.now(),
+                "timestamp": datetime.now(timezone.utc),
                 "total_execution_time_ms": round(total_ms, 2),
             })
             scan_repo = get_scan_result_repository()
@@ -656,7 +729,7 @@ async def gateway_scan(
 
     response = GatewayScanResponse(
         scan_id=scan_id,
-        timestamp=datetime.now(),
+        timestamp=datetime.now(timezone.utc),
         partial_score=partial_score,
         final_score=None,
         verdict=verdict,
@@ -776,6 +849,8 @@ async def gateway_result(
         result = await scan_repo.get(scan_id)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Unknown scan_id: {scan_id}")
+    if result.complete:
+        scan_started_at.pop(scan_id, None)
     return result
 
 # ---------- Health / Readiness ----------
@@ -793,13 +868,17 @@ async def gateway_health() -> dict:
         "status": "healthy",
         "service": "ZeroPhish API Gateway",
         "environment": CONFIG.env,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "weights": CONFIG.weights.model_dump(),
         "tier3_timeout_sec": CONFIG.tier3_timeout,
         "scans": {
             "total_cached": total_scans,
             "pending": pending_scans,
             "history_limit": CONFIG.scan_history_limit,
+        },
+        "sse": {
+            "active_subscribers": len(_sse_subscribers),
+            **sse_metrics,
         },
         "circuit_breaker": tier3_circuit_breaker.get_status() if tier3_circuit_breaker else None,
     }
@@ -850,12 +929,11 @@ async def receive_tier1_report(report: Dict[str, Any]) -> Dict[str, Any]:
 
     dead: List[str] = []
     for sub_id, q in list(_sse_subscribers.items()):
-        try:
-            q.put_nowait(report)
-        except (TypeError, ValueError):
+        if not _publish_to_subscriber(sub_id, q, report):
             dead.append(sub_id)
     for sub_id in dead:
         _sse_subscribers.pop(sub_id, None)
+        _sse_subscriber_overflows.pop(sub_id, None)
 
     return {"status": "success", "message": "Report received"}
 

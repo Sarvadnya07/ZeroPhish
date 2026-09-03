@@ -61,7 +61,7 @@ def update_me(
         role=current_user.role,
         status=current_user.status,
     )
-    user = AuthService.update_user(current_user.id, safe_update)
+    user = await AuthService.update_user(current_user.id, safe_update)
     if not user:
         # This should not happen since the user exists, but safeguard
         raise HTTPException(
@@ -78,12 +78,12 @@ def update_me(
     summary="List all users",
     description="Returns a list of all application users. Admin only.",
 )
-def list_users(
+async def list_users(
     role: Optional[UserRole] = None,
     current_user: User = Depends(require_admin),
 ) -> List[User]:
     """List all application users, optionally filtered by role (Admin only)."""
-    return AuthService.list_users(role=role)
+    return await AuthService.list_users(role=role)
 
 
 @router.get(
@@ -92,12 +92,12 @@ def list_users(
     summary="Get a user by ID",
     description="Returns a specific user's profile. Admin only.",
 )
-def get_user(
+async def get_user(
     user_id: str = Path(..., min_length=1, description="Internal user ID"),
     current_user: User = Depends(require_admin),
 ) -> User:
     """Get a specific application user by ID (Admin only)."""
-    user = AuthService.get_user_by_id(user_id)
+    user = await AuthService.get_user_by_id(user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -112,7 +112,7 @@ def get_user(
     summary="Update a user",
     description="Update a user's role or status. Admin only.",
 )
-def admin_update_user(
+async def admin_update_user(
     user_id: str = Path(..., min_length=1),
     update: UserUpdate = Body(...),
     current_user: User = Depends(require_admin),
@@ -123,7 +123,7 @@ def admin_update_user(
     Admin can update any field except id and clerk_user_id.
     """
     # Prevent self-downgrade of admin privileges? Let the service handle it.
-    user = AuthService.update_user(user_id, update)
+    user = await AuthService.update_user(user_id, update)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -138,7 +138,7 @@ def admin_update_user(
     summary="Delete a user",
     description="Deletes a user account. Admin cannot delete their own account.",
 )
-def admin_delete_user(
+async def admin_delete_user(
     user_id: str = Path(..., min_length=1),
     current_user: User = Depends(require_admin),
 ) -> None:
@@ -148,7 +148,7 @@ def admin_delete_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot delete your own admin account",
         )
-    ok = AuthService.delete_user(user_id)
+    ok = await AuthService.delete_user(user_id)
     if not ok:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
