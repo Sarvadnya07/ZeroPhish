@@ -10,7 +10,10 @@ import time
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy.orm import Session
+try:
+    from sqlalchemy.orm import Session  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - SQLAlchemy is optional in some environments
+    Session = Any  # type: ignore[misc,assignment]
 
 from models.gateway_models import GatewayScanResponse
 
@@ -59,8 +62,8 @@ class SQLUserRepository:
             status=UserStatus(str(u.status)),
             scan_count=int(u.scan_count or 0),
             risk_score=float(u.risk_score or 0.0),
-            created_at=str(u.created_at),
-            last_login=str(u.last_login) if u.last_login else None,
+            created_at=u.created_at,
+            last_login=u.last_login,
         )
 
     def get_by_id(self, user_id: str) -> Optional[UserInDB]:
@@ -192,16 +195,16 @@ class SQLIncidentRepository:
             evidence=json.loads(str(inc.evidence_json) if inc.evidence_json else "[]"),
             tags=json.loads(str(inc.tags_json) if inc.tags_json else "[]"),
             false_positive=bool(inc.false_positive),
-            created_at=str(inc.created_at),
-            updated_at=str(inc.updated_at),
-            resolved_at=str(inc.resolved_at) if inc.resolved_at else None,
+            created_at=inc.created_at,
+            updated_at=inc.updated_at,
+            resolved_at=inc.resolved_at,
             comments=[
                 IncidentComment(
                     id=str(c.id),
                     author_id=str(c.author_id),
                     author_name=str(c.author_name),
                     body=str(c.body),
-                    created_at=str(c.created_at),
+                    created_at=c.created_at,
                 )
                 for c in (inc.comments or [])
             ],
@@ -429,7 +432,7 @@ class SQLAnalyticsRepository:
             avg_latency_ms=320.0,
             false_positive_rate=0.032,
             false_negative_rate=0.025,
-            last_evaluated=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            last_evaluated=_dt.datetime.utcnow(),
         )
 
     def record_scan_event(self, event: Dict[str, Any]) -> None:
@@ -593,7 +596,7 @@ class SQLAnalyticsRepository:
             0.0,
             1.0 - self._model_metrics.false_positive_rate - self._model_metrics.false_negative_rate,
         )
-        self._model_metrics.last_evaluated = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self._model_metrics.last_evaluated = _dt.datetime.utcnow()
 
     def save_false_positive(self, report: FalsePositiveReport) -> FalsePositiveReport:
         with self._session_factory() as session:

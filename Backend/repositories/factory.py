@@ -1,14 +1,15 @@
 """
 Repository Factory & Dependency Injection Provider.
-Routes to SQLAlchemy when DATABASE_URL is configured, and defaults to in-memory for testing/dev.
-Enforces explicit fail-closed error if DATABASE_URL is missing in production.
+
+Routes to SQLAlchemy when DATABASE_URL is configured, and defaults to in‑memory for testing/dev.
+Enforces explicit fail‑closed error if DATABASE_URL is missing in production.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
+from typing import Any, Dict, Optional, cast
 
 from .base import (
     AnalyticsRepository,
@@ -29,13 +30,20 @@ _scan_result_repo: Optional[ScanResultRepository] = None
 _cache_backend: Optional[CacheBackend] = None
 
 
-def _check_production_persistence_requirement():
+def _check_production_persistence_requirement() -> None:
     """Fail closed in production if DATABASE_URL is missing."""
-    if os.getenv("ENV", "development").lower() == "production" and not os.getenv("DATABASE_URL"):
-        logger.critical(
-            "FATAL: DATABASE_URL is not set in production mode. In-memory fallback rejected."
-        )
+    env = os.getenv("ENV", "development").lower()
+    if env == "production" and not os.getenv("DATABASE_URL"):
+        logger.critical("FATAL: DATABASE_URL is not set in production mode.")
         raise RuntimeError("DATABASE_URL must be configured in production environment.")
+
+
+def _get_session_factory():
+    """Lazy import of database session factory."""
+    from infrastructure.database import _SessionFactory, init_db
+
+    init_db()
+    return _SessionFactory
 
 
 def get_user_repository() -> UserRepository:
@@ -44,16 +52,15 @@ def get_user_repository() -> UserRepository:
         _check_production_persistence_requirement()
         db_url = os.getenv("DATABASE_URL")
         if db_url:
-            from infrastructure.database import _SessionFactory, init_db
-
             from .sql_repositories import SQLUserRepository
 
-            init_db()
-            _user_repo = SQLUserRepository(_SessionFactory)
+            _user_repo = SQLUserRepository(_get_session_factory())
         else:
             from .in_memory import InMemoryUserRepository
 
-            _user_repo = InMemoryUserRepository()
+            _user_repo = cast(UserRepository, InMemoryUserRepository())
+            logger.info("Using InMemoryUserRepository (no DATABASE_URL).")
+    assert _user_repo is not None
     return _user_repo
 
 
@@ -63,16 +70,15 @@ def get_incident_repository() -> IncidentRepository:
         _check_production_persistence_requirement()
         db_url = os.getenv("DATABASE_URL")
         if db_url:
-            from infrastructure.database import _SessionFactory, init_db
-
             from .sql_repositories import SQLIncidentRepository
 
-            init_db()
-            _incident_repo = SQLIncidentRepository(_SessionFactory)
+            _incident_repo = SQLIncidentRepository(_get_session_factory())
         else:
             from .in_memory import InMemoryIncidentRepository
 
-            _incident_repo = InMemoryIncidentRepository()
+            _incident_repo = cast(IncidentRepository, InMemoryIncidentRepository())
+            logger.info("Using InMemoryIncidentRepository (no DATABASE_URL).")
+    assert _incident_repo is not None
     return _incident_repo
 
 
@@ -82,15 +88,15 @@ def get_analytics_repository() -> AnalyticsRepository:
         _check_production_persistence_requirement()
         db_url = os.getenv("DATABASE_URL")
         if db_url:
-            from infrastructure.database import _SessionFactory, init_db
             from .sql_repositories import SQLAnalyticsRepository
 
-            init_db()
-            _analytics_repo = SQLAnalyticsRepository(_SessionFactory)
+            _analytics_repo = SQLAnalyticsRepository(_get_session_factory())
         else:
             from .in_memory import InMemoryAnalyticsRepository
 
-            _analytics_repo = InMemoryAnalyticsRepository()
+            _analytics_repo = cast(AnalyticsRepository, InMemoryAnalyticsRepository())
+            logger.info("Using InMemoryAnalyticsRepository (no DATABASE_URL).")
+    assert _analytics_repo is not None
     return _analytics_repo
 
 
@@ -100,15 +106,15 @@ def get_webhook_repository() -> WebhookRepository:
         _check_production_persistence_requirement()
         db_url = os.getenv("DATABASE_URL")
         if db_url:
-            from infrastructure.database import _SessionFactory, init_db
             from .sql_repositories import SQLWebhookRepository
 
-            init_db()
-            _webhook_repo = SQLWebhookRepository(_SessionFactory)
+            _webhook_repo = SQLWebhookRepository(_get_session_factory())
         else:
             from .in_memory import InMemoryWebhookRepository
 
-            _webhook_repo = InMemoryWebhookRepository()
+            _webhook_repo = cast(WebhookRepository, InMemoryWebhookRepository())
+            logger.info("Using InMemoryWebhookRepository (no DATABASE_URL).")
+    assert _webhook_repo is not None
     return _webhook_repo
 
 
@@ -118,15 +124,15 @@ def get_scan_result_repository() -> ScanResultRepository:
         _check_production_persistence_requirement()
         db_url = os.getenv("DATABASE_URL")
         if db_url:
-            from infrastructure.database import _SessionFactory, init_db
             from .sql_repositories import SQLScanResultRepository
 
-            init_db()
-            _scan_result_repo = SQLScanResultRepository(_SessionFactory)
+            _scan_result_repo = SQLScanResultRepository(_get_session_factory())
         else:
             from .in_memory import InMemoryScanResultRepository
 
-            _scan_result_repo = InMemoryScanResultRepository()
+            _scan_result_repo = cast(ScanResultRepository, InMemoryScanResultRepository())
+            logger.info("Using InMemoryScanResultRepository (no DATABASE_URL).")
+    assert _scan_result_repo is not None
     return _scan_result_repo
 
 
@@ -142,8 +148,14 @@ def get_cache_backend() -> CacheBackend:
                     def __init__(self, url: str, default_ttl: int = 300):
                         self._url = url
                         self._default_ttl = default_ttl
-                        self._client = aioredis.from_url(url, decode_responses=True, socket_connect_timeout=0.5, socket_timeout=0.5)
+                        self._client = aioredis.from_url(
+                            url,
+                            decode_responses=True,
+                            socket_connect_timeout=0.5,
+                            socket_timeout=0.5,
+                        )
                         from .in_memory import InMemoryCacheBackend
+
                         self._fallback = InMemoryCacheBackend(default_ttl)
 
                     async def get(self, key: str) -> Optional[str]:
@@ -152,7 +164,7 @@ def get_cache_backend() -> CacheBackend:
                             if val is not None:
                                 return val
                         except Exception as e:
-                            logger.debug("Redis cache get error for %s: %s, using fallback", key, e)
+                            logger.debug("Redis get error for %s: %s", key, e)
                         return await self._fallback.get(key)
 
                     async def set(self, key: str, value: str, ttl_seconds: Optional[int] = None) -> None:
@@ -160,7 +172,7 @@ def get_cache_backend() -> CacheBackend:
                             ttl = ttl_seconds if ttl_seconds is not None else self._default_ttl
                             await self._client.set(key, value, ex=ttl)
                         except Exception as e:
-                            logger.debug("Redis cache set error for %s: %s, saving to fallback", key, e)
+                            logger.debug("Redis set error for %s: %s", key, e)
                         await self._fallback.set(key, value, ttl_seconds=ttl_seconds)
 
                     async def delete(self, key: str) -> bool:
@@ -169,8 +181,8 @@ def get_cache_backend() -> CacheBackend:
                             res = bool(await self._client.delete(key))
                         except Exception:
                             pass
-                        res_fb = await self._fallback.delete(key)
-                        return res or res_fb
+                        fb_res = await self._fallback.delete(key)
+                        return res or fb_res
 
                     async def clear_prefix(self, prefix: str) -> int:
                         cleared = 0
@@ -186,24 +198,32 @@ def get_cache_backend() -> CacheBackend:
                     async def get_stats(self) -> Dict[str, Any]:
                         try:
                             info = await self._client.info()
-                            return {"status": "connected", "backend": "redis", "keys_count": info.get("db0", {}).get("keys", 0)}
+                            return {
+                                "status": "connected",
+                                "backend": "redis",
+                                "keys_count": info.get("db0", {}).get("keys", 0),
+                            }
                         except Exception:
                             fb_stats = await self._fallback.get_stats()
-                            return {"status": "connected", "backend": "in_memory (redis_fallback)", "keys_count": fb_stats.get("keys_count", 0)}
+                            fb_stats["backend"] = "in_memory (redis_fallback)"
+                            return fb_stats
 
                 _cache_backend = _RedisCache(redis_url)
-            except Exception as _redis_err:
-                logger.warning("Failed to initialize Redis cache, falling back to in-memory: %s", _redis_err)
+                logger.info("Redis cache backend initialized.")
+            except Exception as e:
+                logger.warning("Failed to initialize Redis cache: %s. Falling back to in‑memory.", e)
                 from .in_memory import InMemoryCacheBackend
 
                 _cache_backend = InMemoryCacheBackend()
         else:
             from .in_memory import InMemoryCacheBackend
 
-            _cache_backend = InMemoryCacheBackend()
+            _cache_backend = cast(CacheBackend, InMemoryCacheBackend())
+            logger.info("Using InMemoryCacheBackend (no REDIS_URL).")
     return _cache_backend
 
 
+# Setter functions for dependency injection in tests
 def set_user_repository(repo: UserRepository) -> None:
     global _user_repo
     _user_repo = repo
@@ -235,7 +255,7 @@ def set_cache_backend(cache: CacheBackend) -> None:
 
 
 def reset_repositories() -> None:
-    """Reset repository singletons for isolated testing."""
+    """Reset all repository singletons for isolated testing."""
     global _user_repo, _incident_repo, _analytics_repo, _webhook_repo, _scan_result_repo, _cache_backend
     _user_repo = None
     _incident_repo = None
