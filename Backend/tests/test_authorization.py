@@ -25,15 +25,18 @@ def client():
 
 
 def create_user_and_token(client, role: UserRole = UserRole.USER) -> tuple[str, str]:
+    import asyncio
     import random
 
     unique_suffix = f"{random.randint(1,10000)}_{role.value}"
     token = f"test_token_{unique_suffix}_{role.value}"
-    user = AuthService.get_or_create_user(
-        clerk_user_id=f"user_clerk_{unique_suffix}",
-        email=f"{unique_suffix}@example.com",
-        full_name=f"Test {unique_suffix}",
-        role=role,
+    user = asyncio.run(
+        AuthService.get_or_create_user(
+            clerk_user_id=f"user_clerk_{unique_suffix}",
+            email=f"{unique_suffix}@example.com",
+            full_name=f"Test {unique_suffix}",
+            role=role,
+        )
     )
     return user.id, token
 

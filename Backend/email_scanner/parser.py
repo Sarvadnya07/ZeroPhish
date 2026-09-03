@@ -204,13 +204,34 @@ class EmlParser:
         report = AttachmentSandbox.analyse(filename, data)
 
         ext = os.path.splitext(filename.lower())[1]
-        is_exec = ext in EXECUTABLE_EXTS
-        is_arch = ext in ARCHIVE_EXTS
-        is_doc = ext in DOCUMENT_EXTS
+        ct_lower = (content_type or "").lower()
 
-        # Override if sandbox found executable magic but extension is safe
-        if report.risk_level == RiskLevel.DANGEROUS and "Executable binary" in " ".join(report.risk_reasons):
-            is_exec = True
+        is_exec_mime = any(m in ct_lower for m in ("x-msdownload", "x-executable", "x-dosexec"))
+        is_exec_ext = ext in EXECUTABLE_EXTS or any(filename.lower().endswith(e) for e in EXECUTABLE_EXTS)
+        has_rtlo = any(c in filename for c in RTLO_CHARS)
+
+        is_arch = ext in ARCHIVE_EXTS or "zip" in ct_lower or "tar" in ct_lower or "compressed" in ct_lower
+        is_doc = ext in DOCUMENT_EXTS or "document" in ct_lower or "openxmlformats" in ct_lower or "msword" in ct_lower or "pdf" in ct_lower
+
+        is_exec = is_exec_ext or is_exec_mime or (has_rtlo and any(e.lstrip(".") in filename.lower() for e in EXECUTABLE_EXTS)) or (
+            report.risk_level == RiskLevel.DANGEROUS and "Executable binary" in " ".join(report.risk_reasons)
+        )
+
+        reasons = list(report.risk_reasons) if report.risk_reasons else []
+        if is_exec or has_rtlo or is_exec_mime:
+            risk = RiskLevel.DANGEROUS
+            if is_exec and not any("Executable" in r or "Dangerous" in r for r in reasons):
+                reasons.append("Executable file or MIME type detected")
+            if has_rtlo and not any("RTLO" in r for r in reasons):
+                reasons.append("Right-to-Left Override (RTLO) detected in filename")
+        elif is_arch or is_doc:
+            risk = RiskLevel.SUSPICIOUS
+            if is_arch and not any("Archive" in r for r in reasons):
+                reasons.append("Archive attachment flagged as suspicious")
+            if is_doc and not any("Document" in r for r in reasons):
+                reasons.append("Office/Document attachment flagged for inspection")
+        else:
+            risk = report.risk_level
 
         return AttachmentInfo(
             filename=filename,
@@ -220,8 +241,8 @@ class EmlParser:
             is_executable=is_exec,
             is_archive=is_arch,
             is_document=is_doc,
-            risk_level=report.risk_level,
-            risk_reason="; ".join(report.risk_reasons) if report.risk_reasons else None,
+            risk_level=risk,
+            risk_reason="; ".join(reasons) if reasons else None,
         )
 
     @staticmethod
@@ -245,11 +266,11 @@ class EmlParser:
             add_link(m.group(1))
 
         # Flag shorteners for scoring
+        shortener_tags = []
         for link in links:
             if SHORTENERS_RE.match(link):
-                # Mark as shortened for later scoring (we keep original link)
-                # No need to modify the link; scoring will use this list.
-                pass
+                shortener_tags.append(f"[SHORTENER:{link}]")
+        links.extend(shortener_tags)
 
         return links[:MAX_LINKS]
 

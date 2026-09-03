@@ -18,8 +18,8 @@ def reset_service_state():
     yield
 
 
-def test_get_or_create_user_provisions_new_user():
-    user = AuthService.get_or_create_user(
+async def test_get_or_create_user_provisions_new_user():
+    user = await AuthService.get_or_create_user(
         clerk_user_id="user_clerk_1",
         email="alice@example.com",
         full_name="Alice Sentinel",
@@ -32,13 +32,13 @@ def test_get_or_create_user_provisions_new_user():
     assert user.status == UserStatus.ACTIVE
 
 
-def test_get_or_create_user_returns_existing_user():
-    u1 = AuthService.get_or_create_user(
+async def test_get_or_create_user_returns_existing_user():
+    u1 = await AuthService.get_or_create_user(
         clerk_user_id="user_clerk_2",
         email="bob@example.com",
         full_name="Bob Security",
     )
-    u2 = AuthService.get_or_create_user(
+    u2 = await AuthService.get_or_create_user(
         clerk_user_id="user_clerk_2",
         email="bob@example.com",
         full_name="Bob Security",
@@ -47,9 +47,9 @@ def test_get_or_create_user_returns_existing_user():
     assert u1.clerk_user_id == u2.clerk_user_id
 
 
-def test_admin_provisioning_via_admin_email(monkeypatch):
+async def test_admin_provisioning_via_admin_email(monkeypatch):
     monkeypatch.setenv("ADMIN_EMAIL", "admin@zerophish.local")
-    user = AuthService.get_or_create_user(
+    user = await AuthService.get_or_create_user(
         clerk_user_id="user_clerk_admin",
         email="admin@zerophish.local",
         full_name="Global Administrator",
@@ -57,32 +57,32 @@ def test_admin_provisioning_via_admin_email(monkeypatch):
     assert user.role == UserRole.ADMIN
 
 
-def test_user_update_and_lookup():
-    user = AuthService.get_or_create_user(
+async def test_user_update_and_lookup():
+    user = await AuthService.get_or_create_user(
         clerk_user_id="user_clerk_3",
         email="charlie@example.com",
         full_name="Charlie Analyst",
     )
-    updated = AuthService.update_user(user.id, UserUpdate(role=UserRole.ANALYST))
+    updated = await AuthService.update_user(user.id, UserUpdate(role=UserRole.ANALYST))
     assert updated is not None
     assert updated.role == UserRole.ANALYST
 
-    found_by_id = AuthService.get_user_by_id(user.id)
+    found_by_id = await AuthService.get_user_by_id(user.id)
     assert found_by_id is not None
     assert found_by_id.role == UserRole.ANALYST
 
-    found_by_clerk = AuthService.get_user_by_clerk_id("user_clerk_3")
+    found_by_clerk = await AuthService.get_user_by_clerk_id("user_clerk_3")
     assert found_by_clerk is not None
     assert found_by_clerk.id == user.id
 
 
-def test_delete_user():
-    user = AuthService.get_or_create_user(
+async def test_delete_user():
+    user = await AuthService.get_or_create_user(
         clerk_user_id="user_clerk_del",
         email="delete_me@example.com",
         full_name="Delete Me",
     )
-    assert AuthService.get_user_by_id(user.id) is not None
-    ok = AuthService.delete_user(user.id)
+    assert (await AuthService.get_user_by_id(user.id)) is not None
+    ok = await AuthService.delete_user(user.id)
     assert ok is True
-    assert AuthService.get_user_by_id(user.id) is None
+    assert (await AuthService.get_user_by_id(user.id)) is None

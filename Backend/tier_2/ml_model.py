@@ -204,7 +204,7 @@ class PhishingMLModel:
             loaded = await self.load_model()
             if not loaded:
                 logger.warning("Model not loaded; returning fallback prediction.")
-                return 50.0, "unavailable"
+                return 50.0, "unknown"
 
         # Sanitise and truncate input
         if not email_body or not email_body.strip():

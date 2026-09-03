@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import inspect
 import json
 import logging
 import os
@@ -168,58 +169,25 @@ class WebhookService:
         return deleted
 
     @staticmethod
-    def list_subscriptions(owner_id: Optional[str] = None) -> List[WebhookSubscription]:
+    async def list_subscriptions(owner_id: Optional[str] = None) -> List[WebhookSubscription]:
         """List subscriptions, optionally filtered by owner."""
         repo = get_webhook_repository()
         result = repo.list_subscriptions(owner_id=owner_id)
-        if asyncio.iscoroutine(result):
-            try:
-                asyncio.get_running_loop()
-            except RuntimeError:
-                loop = asyncio.get_event_loop()
-                return loop.run_until_complete(result)
-            else:
-                raise RuntimeError("list_subscriptions returned a coroutine; call the async API from an async context")
-        return result
+        return await result if inspect.isawaitable(result) else result
 
     @staticmethod
-    def get_subscription(sub_id: str) -> Optional[WebhookSubscription]:
-        """Retrieve a subscription by ID.
-
-        Repository implementations may be async; handle coroutine results by
-        running them to completion when possible. If called from within an
-        active event loop, raise a RuntimeError to indicate the caller should
-        use an async API.
-        """
+    async def get_subscription(sub_id: str) -> Optional[WebhookSubscription]:
+        """Retrieve a subscription by ID."""
         repo = get_webhook_repository()
         result = repo.get_subscription(sub_id)
-        if asyncio.iscoroutine(result):
-            # If there's no running loop we can run the coroutine synchronously.
-            try:
-                asyncio.get_running_loop()
-            except RuntimeError:
-                # safe to run until complete
-                loop = asyncio.get_event_loop()
-                return loop.run_until_complete(result)
-            else:
-                raise RuntimeError("get_subscription returned a coroutine; call the async API from an async context")
-        return result
+        return await result if inspect.isawaitable(result) else result
 
     @staticmethod
-    def delivery_log(limit: int = 100) -> List[WebhookDelivery]:
+    async def delivery_log(limit: int = 100) -> List[WebhookDelivery]:
         """Get recent delivery log entries."""
         repo = get_webhook_repository()
         result = repo.get_delivery_log(limit=limit)
-        if asyncio.iscoroutine(result):
-            # If there's no running loop we can run the coroutine synchronously.
-            try:
-                asyncio.get_running_loop()
-            except RuntimeError:
-                loop = asyncio.get_event_loop()
-                return loop.run_until_complete(result)
-            else:
-                raise RuntimeError("get_delivery_log returned a coroutine; call the async API from an async context")
-        return result
+        return await result if inspect.isawaitable(result) else result
 
     @staticmethod
     async def fire(event_type: WebhookEventType, payload: Dict[str, Any]) -> None:

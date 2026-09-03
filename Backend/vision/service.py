@@ -36,7 +36,7 @@ BRAND_KEYWORDS = {
     "paypal": ["paypal", "venmo"],
     "amazon": ["amazon", "aws"],
     "facebook": ["facebook", "meta"],
-    "twitter": ["twitter", "x"],
+    "twitter": ["twitter", "x.com"],
     "linkedin": ["linkedin"],
     "github": ["github"],
     "bank": ["bank", "chase", "wells fargo", "bank of america", "hsbc", "barclays"],
@@ -92,7 +92,7 @@ class VisionService:
                 threat_score=DEFAULT_THREAT_SCORE_SAFE,
                 detected_elements=[],
                 matched_brand=None,
-                reasoning="Could not decode image data.",
+                reasoning="Could not parse image data: Could not decode image data.",
                 processing_time_ms=duration_ms,
             ).model_dump()
 

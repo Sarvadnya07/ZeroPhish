@@ -78,7 +78,7 @@ class DnsValidator:
             penalty += PENALTY_NO_SPF
         if not dmarc_rec:
             penalty += PENALTY_NO_DMARC
-        elif dmarc_policy in (None, "none"):
+        if dmarc_policy in (None, "none"):
             penalty += PENALTY_WEAK_DMARC
 
         logger.info("DNS validation for %s: SPF=%s, DMARC=%s, penalty=%d",

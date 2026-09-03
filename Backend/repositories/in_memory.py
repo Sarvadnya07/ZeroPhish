@@ -374,22 +374,25 @@ class InMemoryAnalyticsRepository:
         async with self._lock:
             return self._model_metrics
 
+    def _apply_model_metrics_delta(self, fp_delta: int = 0, fn_delta: int = 0) -> None:
+        n = max(self._model_metrics.total_inferences, 1)
+        if fp_delta:
+            self._model_metrics.false_positive_rate = min(
+                1.0, self._model_metrics.false_positive_rate + fp_delta / n
+            )
+        if fn_delta:
+            self._model_metrics.false_negative_rate = min(
+                1.0, self._model_metrics.false_negative_rate + fn_delta / n
+            )
+        self._model_metrics.accuracy = max(
+            0.0,
+            1.0 - self._model_metrics.false_positive_rate - self._model_metrics.false_negative_rate,
+        )
+        self._model_metrics.last_evaluated = datetime.now(timezone.utc)
+
     async def update_model_metrics(self, fp_delta: int = 0, fn_delta: int = 0) -> None:
         async with self._lock:
-            n = max(self._model_metrics.total_inferences, 1)
-            if fp_delta:
-                self._model_metrics.false_positive_rate = min(
-                    1.0, self._model_metrics.false_positive_rate + fp_delta / n
-                )
-            if fn_delta:
-                self._model_metrics.false_negative_rate = min(
-                    1.0, self._model_metrics.false_negative_rate + fn_delta / n
-                )
-            self._model_metrics.accuracy = max(
-                0.0,
-                1.0 - self._model_metrics.false_positive_rate - self._model_metrics.false_negative_rate,
-            )
-            self._model_metrics.last_evaluated = datetime.now(timezone.utc)
+            self._apply_model_metrics_delta(fp_delta=fp_delta, fn_delta=fn_delta)
 
     async def save_false_positive(self, report: FalsePositiveReport) -> FalsePositiveReport:
         async with self._lock:
@@ -414,7 +417,7 @@ class InMemoryAnalyticsRepository:
             fp.reviewed = True
             fp.reviewer_id = reviewer_id
             fp.resolution = resolution
-            await self.update_model_metrics(fp_delta=1)
+            self._apply_model_metrics_delta(fp_delta=1)
             logger.debug("Reviewed false positive %s (in-memory)", fp_id)
             return fp
 

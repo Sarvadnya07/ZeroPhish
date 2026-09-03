@@ -64,7 +64,8 @@ async def test_analyzer_redirect_tracking():
     mock_resp = MagicMock()
     mock_resp.url = "https://phishing-site.xyz/login"
 
-    with patch("httpx.AsyncClient.head", new_callable=AsyncMock, return_value=mock_resp):
+    with patch("httpx.AsyncClient.head", new_callable=AsyncMock, return_value=mock_resp), \
+         patch("security.middleware.is_safe_url", return_value=True):
         final_url, errs = await ThreatAnalyzer.track_redirects(short_url)
         assert final_url == "https://phishing-site.xyz/login"
         assert len(errs) == 0

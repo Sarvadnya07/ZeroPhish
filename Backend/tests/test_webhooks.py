@@ -122,19 +122,19 @@ def _mock_public_dns():
     return patch("socket.getaddrinfo", return_value=[(None, None, None, None, ("1.1.1.1", 443))])
 
 
-def test_webhook_subscribe_valid_url():
+async def test_webhook_subscribe_valid_url():
     from webhooks.service import WebhookService
 
     data = _make_subscription_data()
     with _mock_public_dns():
-        sub = WebhookService.subscribe(data, owner_id="user-123")
+        sub = await WebhookService.subscribe(data, owner_id="user-123")
 
     assert sub.id
     assert sub.secret  # HMAC secret generated
     assert sub.owner_id == "user-123"
 
 
-def test_webhook_subscribe_invalid_url_raises():
+async def test_webhook_subscribe_invalid_url_raises():
     from webhooks.models import WebhookEventType, WebhookSubscriptionCreate
     from webhooks.service import WebhookService
 
@@ -143,26 +143,26 @@ def test_webhook_subscribe_invalid_url_raises():
         events=[WebhookEventType.INCIDENT_CREATED],
     )
     with pytest.raises(ValueError, match="unsafe"):
-        WebhookService.subscribe(data, owner_id="user-123")
+        await WebhookService.subscribe(data, owner_id="user-123")
 
 
-def test_webhook_unsubscribe():
+async def test_webhook_unsubscribe():
     from webhooks.service import WebhookService
 
     data = _make_subscription_data()
     with _mock_public_dns():
-        sub = WebhookService.subscribe(data, owner_id="delme")
+        sub = await WebhookService.subscribe(data, owner_id="delme")
 
-    assert WebhookService.unsubscribe(sub.id, owner_id="delme") is True
-    assert WebhookService.get_subscription(sub.id) is None
+    assert (await WebhookService.unsubscribe(sub.id, owner_id="delme")) is True
+    assert (await WebhookService.get_subscription(sub.id)) is None
 
 
-def test_webhook_unsubscribe_wrong_owner_fails():
+async def test_webhook_unsubscribe_wrong_owner_fails():
     from webhooks.service import WebhookService
 
     data = _make_subscription_data()
     with _mock_public_dns():
-        sub = WebhookService.subscribe(data, owner_id="owner1")
+        sub = await WebhookService.subscribe(data, owner_id="owner1")
 
-    assert WebhookService.unsubscribe(sub.id, owner_id="not-the-owner") is False
-    assert WebhookService.get_subscription(sub.id) is not None
+    assert (await WebhookService.unsubscribe(sub.id, owner_id="not-the-owner")) is False
+    assert (await WebhookService.get_subscription(sub.id)) is not None

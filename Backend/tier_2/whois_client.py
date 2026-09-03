@@ -92,7 +92,7 @@ class WhoisClient:
         )
 
     @property
-    async def http_client(self) -> httpx.AsyncClient:
+    def http_client(self) -> httpx.AsyncClient:
         """Get or create the HTTP client (lazy)."""
         if self._http_client is None:
             self._http_client = httpx.AsyncClient(
@@ -220,7 +220,7 @@ class WhoisClient:
 
     async def _query_whoisxml(self, domain: str) -> Optional[int]:
         """Query WhoisXML API."""
-        client = await self.http_client
+        client = self.http_client
         url = API_ENDPOINTS["whoisxml"]
         params = {"apiKey": self.api_key, "domainName": domain, "outputFormat": "JSON"}
 
@@ -242,7 +242,7 @@ class WhoisClient:
 
     async def _query_whoisapi(self, domain: str) -> Optional[int]:
         """Query WhoisAPI.com."""
-        client = await self.http_client
+        client = self.http_client
         url = API_ENDPOINTS["whoisapi"]
         params = {"apiKey": self.api_key, "domainName": domain}
 

@@ -60,7 +60,7 @@ async def list_subscriptions(
 ) -> List[WebhookSubscription]:
     """List subscriptions accessible to the current user."""
     owner_id = None if current_user.role == UserRole.ADMIN else current_user.id
-    return WebhookService.list_subscriptions(owner_id=owner_id)
+    return await WebhookService.list_subscriptions(owner_id=owner_id)
 
 
 @router.get(
@@ -74,7 +74,7 @@ async def delivery_log(
     _: User = Depends(require_admin),
 ) -> List[dict]:
     """Get recent webhook delivery logs (admin only)."""
-    deliveries = WebhookService.delivery_log(limit=limit)
+    deliveries = await WebhookService.delivery_log(limit=limit)
     # Convert to dict for safe serialisation
     return [d.model_dump() for d in deliveries]
 
@@ -90,7 +90,7 @@ async def get_subscription(
     current_user: User = Depends(require_auth),
 ) -> WebhookSubscription:
     """Retrieve a single webhook subscription."""
-    sub = WebhookService.get_subscription(sub_id)
+    sub = await WebhookService.get_subscription(sub_id)
     if not sub:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
 

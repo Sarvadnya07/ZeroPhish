@@ -100,7 +100,18 @@ class AttachmentSandbox:
             SandboxReport with findings and risk assessment.
         """
         if not data:
-            raise ValueError("Cannot analyse empty file data")
+            return SandboxReport(
+                filename=filename,
+                sha256=hashlib.sha256(b"").hexdigest(),
+                size_bytes=0,
+                magic_type=None,
+                entropy=0.0,
+                has_macros=False,
+                signatures_matched=[],
+                risk_level=RiskLevel.SAFE,
+                risk_reasons=[],
+                vt_link=None,
+            )
 
         sha = hashlib.sha256(data).hexdigest()
         magic = AttachmentSandbox._detect_magic(data)
@@ -205,7 +216,12 @@ class AttachmentSandbox:
         # Determine final risk level
         risk = RiskLevel.SAFE
         if reasons:
-            if (magic in ("Windows PE (EXE/DLL)", "Linux ELF") or has_macros or "RTLO" in sigs):
+            if (
+                magic in ("Windows PE (EXE/DLL)", "Linux ELF")
+                or has_macros
+                or "RTLO" in sigs
+                or ext in DANGEROUS_EXTS
+            ):
                 risk = RiskLevel.DANGEROUS
             else:
                 risk = RiskLevel.SUSPICIOUS

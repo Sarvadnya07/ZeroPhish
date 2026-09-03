@@ -46,11 +46,20 @@ def sqlite_session_factory():
     return factory
 
 
+import inspect
+
+async def _a(val):
+    if inspect.isawaitable(val):
+        return await val
+    return val
+
+
 # ── User Repository Parity Tests ───────────────────────────────────────────────
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("repo_type", ["in_memory", "sql"])
-def test_user_repository_crud_and_tokens(repo_type, sqlite_session_factory):
+async def test_user_repository_crud_and_tokens(repo_type, sqlite_session_factory):
     if repo_type == "in_memory":
         repo = InMemoryUserRepository()
     else:
@@ -65,35 +74,36 @@ def test_user_repository_crud_and_tokens(repo_type, sqlite_session_factory):
         status=UserStatus.ACTIVE,
         created_at="2026-01-01T00:00:00Z",
     )
-    repo.save(u)
+    await _a(repo.save(u))
 
     # Fetch by ID & Email & Clerk ID
-    assert repo.get_by_id("u-100") is not None
-    assert repo.get_by_clerk_id("user_clerk_100") is not None
-    assert repo.get_by_email("test@domain.com") is not None
-    assert repo.get_by_email("nonexistent@domain.com") is None
+    assert (await _a(repo.get_by_id("u-100"))) is not None
+    assert (await _a(repo.get_by_clerk_id("user_clerk_100"))) is not None
+    assert (await _a(repo.get_by_email("test@domain.com"))) is not None
+    assert (await _a(repo.get_by_email("nonexistent@domain.com"))) is None
 
     # Update
-    updated = repo.update("u-100", UserUpdate(full_name="Updated Name", role=UserRole.ANALYST))
+    updated = await _a(repo.update("u-100", UserUpdate(full_name="Updated Name", role=UserRole.ANALYST)))
     assert updated.full_name == "Updated Name"
     assert updated.role == UserRole.ANALYST
 
     # Scan count and risk score increment
-    repo.increment_scan("u-100", 80.0)
-    u_after = repo.get_by_id("u-100")
+    await _a(repo.increment_scan("u-100", 80.0))
+    u_after = await _a(repo.get_by_id("u-100"))
     assert u_after.scan_count == 1
     assert u_after.risk_score == 80.0
 
     # Delete
-    assert repo.delete("u-100") is True
-    assert repo.get_by_id("u-100") is None
+    assert (await _a(repo.delete("u-100"))) is True
+    assert (await _a(repo.get_by_id("u-100"))) is None
 
 
 # ── Incident Repository Parity Tests ──────────────────────────────────────────
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("repo_type", ["in_memory", "sql"])
-def test_incident_repository_crud(repo_type, sqlite_session_factory):
+async def test_incident_repository_crud(repo_type, sqlite_session_factory):
     if repo_type == "in_memory":
         repo = InMemoryIncidentRepository()
     else:
@@ -108,11 +118,11 @@ def test_incident_repository_crud(repo_type, sqlite_session_factory):
         created_at="2026-01-01T00:00:00Z",
         updated_at="2026-01-01T00:00:00Z",
     )
-    repo.save(inc)
+    await _a(repo.save(inc))
 
-    assert repo.get_by_id("inc-1") is not None
-    assert len(repo.list_all(status=IncidentStatus.OPEN)) == 1
-    assert len(repo.list_all(severity=IncidentSeverity.LOW)) == 0
+    assert (await _a(repo.get_by_id("inc-1"))) is not None
+    assert len(await _a(repo.list_all(status=IncidentStatus.OPEN))) == 1
+    assert len(await _a(repo.list_all(severity=IncidentSeverity.LOW))) == 0
 
     # Add comment
     c = IncidentComment(
@@ -122,60 +132,63 @@ def test_incident_repository_crud(repo_type, sqlite_session_factory):
         body="Triaged and confirmed malicious.",
         created_at="2026-01-01T01:00:00Z",
     )
-    repo.add_comment("inc-1", c)
-    inc_with_comm = repo.get_by_id("inc-1")
+    await _a(repo.add_comment("inc-1", c))
+    inc_with_comm = await _a(repo.get_by_id("inc-1"))
     assert len(inc_with_comm.comments) == 1
     assert inc_with_comm.comments[0].body == "Triaged and confirmed malicious."
 
     # Update status to resolved
-    repo.update("inc-1", IncidentUpdate(status=IncidentStatus.RESOLVED))
-    assert repo.get_by_id("inc-1").status == IncidentStatus.RESOLVED
+    await _a(repo.update("inc-1", IncidentUpdate(status=IncidentStatus.RESOLVED)))
+    assert (await _a(repo.get_by_id("inc-1"))).status == IncidentStatus.RESOLVED
 
     # Stats
-    stats = repo.stats()
+    stats = await _a(repo.stats())
     assert stats["total"] == 1
     assert stats["resolved"] == 1
 
     # Delete
-    assert repo.delete("inc-1") is True
-    assert repo.get_by_id("inc-1") is None
+    assert (await _a(repo.delete("inc-1"))) is True
+    assert (await _a(repo.get_by_id("inc-1"))) is None
 
 
 # ── Analytics Repository Tests ────────────────────────────────────────────────
 
 
-def test_analytics_repository_full_flow():
+@pytest.mark.asyncio
+async def test_analytics_repository_full_flow():
     repo = InMemoryAnalyticsRepository()
 
     # Record scan event
-    repo.record_scan_event(
-        {
-            "scan_id": "s-1",
-            "timestamp": "2026-01-01T12:00:00Z",
-            "ts": time.time(),
-            "hour": 12,
-            "day": 2,
-            "sender_domain": "spoofed.com",
-            "subject": "Urgent payroll",
-            "final_score": 88.0,
-            "verdict": "CRITICAL",
-            "category": "Credential",
-        }
+    await _a(
+        repo.record_scan_event(
+            {
+                "scan_id": "s-1",
+                "timestamp": "2026-01-01T12:00:00Z",
+                "ts": time.time(),
+                "hour": 12,
+                "day": 2,
+                "sender_domain": "spoofed.com",
+                "subject": "Urgent payroll",
+                "final_score": 88.0,
+                "verdict": "CRITICAL",
+                "category": "Credential",
+            }
+        )
     )
 
-    events = repo.get_scan_events()
+    events = await _a(repo.get_scan_events())
     assert len(events) == 1
     assert events[0]["scan_id"] == "s-1"
 
-    summary = repo.get_dashboard_summary()
+    summary = await _a(repo.get_dashboard_summary())
     assert summary.total_scans_today == 1
     assert summary.critical_today == 1
 
-    feed = repo.get_threat_feed()
+    feed = await _a(repo.get_threat_feed())
     assert len(feed) == 1
     assert feed[0].id == "s-1"
 
-    heatmap = repo.get_threat_heatmap()
+    heatmap = await _a(repo.get_threat_heatmap())
     assert len(heatmap) == 7 * 24  # 168 hours total
 
     # False positive reporting and review
@@ -188,12 +201,12 @@ def test_analytics_repository_full_flow():
         original_verdict="CRITICAL",
         created_at="2026-01-01T13:00:00Z",
     )
-    repo.save_false_positive(fp)
-    assert len(repo.list_false_positives(reviewed=False)) == 1
+    await _a(repo.save_false_positive(fp))
+    assert len(await _a(repo.list_false_positives(reviewed=False))) == 1
 
-    reviewed = repo.review_false_positive("fp-1", "admin-1", "Whitelisted partner domain")
+    reviewed = await _a(repo.review_false_positive("fp-1", "admin-1", "Whitelisted partner domain"))
     assert reviewed.reviewed is True
-    assert len(repo.list_false_positives(reviewed=False)) == 0
+    assert len(await _a(repo.list_false_positives(reviewed=False))) == 0
 
     # Policy rules
     rule = PolicyRule(
@@ -207,27 +220,28 @@ def test_analytics_repository_full_flow():
         created_by="admin-1",
         created_at="2026-01-01T00:00:00Z",
     )
-    repo.save_policy_rule(rule)
-    assert len(repo.list_policy_rules()) == 1
-    assert repo.delete_policy_rule("pr-1") is True
+    await _a(repo.save_policy_rule(rule))
+    assert len(await _a(repo.list_policy_rules())) == 1
+    assert (await _a(repo.delete_policy_rule("pr-1"))) is True
 
 
 # ── Webhook Repository Tests ──────────────────────────────────────────────────
 
 
-def test_webhook_repository():
+@pytest.mark.asyncio
+async def test_webhook_repository():
     repo = InMemoryWebhookRepository()
 
     sub = WebhookSubscription(
         id="w-1",
         url="https://siem.corp.internal/hooks",
         events=[WebhookEventType.SCAN_CRITICAL],
-        secret="secret123",
+        secret="secret12345678901234567890123456789012",
         created_at="2026-01-01T00:00:00Z",
     )
-    repo.save_subscription(sub)
-    assert repo.get_subscription("w-1") is not None
-    assert len(repo.list_subscriptions()) == 1
+    await _a(repo.save_subscription(sub))
+    assert (await _a(repo.get_subscription("w-1"))) is not None
+    assert len(await _a(repo.list_subscriptions())) == 1
 
     delivery = WebhookDelivery(
         id="d-1",
@@ -237,11 +251,11 @@ def test_webhook_repository():
         status="success",
         attempted_at="2026-01-01T00:00:01Z",
     )
-    repo.record_delivery(delivery)
-    assert len(repo.get_delivery_log()) == 1
+    await _a(repo.record_delivery(delivery))
+    assert len(await _a(repo.get_delivery_log())) == 1
 
-    assert repo.delete_subscription("w-1") is True
-    assert repo.get_subscription("w-1") is None
+    assert (await _a(repo.delete_subscription("w-1"))) is True
+    assert (await _a(repo.get_subscription("w-1"))) is None
 
 
 # ── Cache Backend Tests ───────────────────────────────────────────────────────

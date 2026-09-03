@@ -25,7 +25,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -624,7 +624,7 @@ async def _finalize_tier3(
                 elif final_verdict == "SUSPICIOUS":
                     await WebhookService.fire(WebhookEventType.SCAN_SUSPICIOUS, payload)
 
-                AnalyticsService.record_scan(
+                await AnalyticsService.record_scan(
                     scan_id=scan_id,
                     sender=sender_meta,
                     subject=subject_meta,

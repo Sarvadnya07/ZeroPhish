@@ -35,7 +35,7 @@ router = APIRouter(tags=["Authentication & Users"])
     summary="Get current user profile",
     description="Returns the authenticated user's application profile.",
 )
-def get_me(current_user: User = Depends(require_auth)) -> User:
+async def get_me(current_user: User = Depends(require_auth)) -> User:
     """Return the authenticated user profile."""
     return current_user
 
@@ -46,7 +46,7 @@ def get_me(current_user: User = Depends(require_auth)) -> User:
     summary="Update current user profile",
     description="Update the authenticated user's profile (only full_name can be changed).",
 )
-def update_me(
+async def update_me(
     update: UserUpdate,
     current_user: User = Depends(require_auth),
 ) -> User:

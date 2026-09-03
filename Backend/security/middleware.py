@@ -30,6 +30,7 @@ MAX_EMAIL_LENGTH = 320  # RFC 5321
 MAX_URL_LENGTH = 2048
 MAX_LINKS_PER_REQUEST = 100
 MAX_BODY_LENGTH = 100_000  # 100 KB
+DEFAULT_MAX_BODY_LENGTH = 50_000  # 50 KB default sanitization truncation
 
 # Dangerous schemes
 DANGEROUS_SCHEMES = {"javascript:", "data:", "file:", "ftp:", "gopher:", "telnet:", "ws:", "wss:"}
@@ -50,7 +51,7 @@ RESERVED_SUBNETS = [
     ipaddress.ip_network("224.0.0.0/4"),
     ipaddress.ip_network("240.0.0.0/4"),
     ipaddress.ip_network("255.255.255.255/32"),
-    ipaddress.ip_network("::/8"),
+    ipaddress.ip_network("::/128"),
     ipaddress.ip_network("fc00::/7"),
     ipaddress.ip_network("fe80::/10"),
     ipaddress.ip_network("ff00::/8"),
@@ -110,7 +111,7 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
 
 
 # ---------- Validation Functions ----------
-def sanitize_email_content(text: str, max_length: int = MAX_BODY_LENGTH) -> str:
+def sanitize_email_content(text: str, max_length: int = DEFAULT_MAX_BODY_LENGTH) -> str:
     """Sanitize email content to prevent XSS and injection attacks."""
     if not text:
         return ""
@@ -208,6 +209,9 @@ def is_safe_webhook_url(url: str, allow_http: bool = False) -> bool:
             # Handle IPv4-mapped IPv6 addresses
             if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
                 ip = ip.ipv4_mapped
+            # Handle RFC 6052 Well-Known Prefix NAT64 addresses (64:ff9b::/96)
+            elif isinstance(ip, ipaddress.IPv6Address) and ip in ipaddress.ip_network("64:ff9b::/96"):
+                ip = ipaddress.IPv4Address(ip.packed[-4:])
 
             for subnet in RESERVED_SUBNETS:
                 if ip in subnet:

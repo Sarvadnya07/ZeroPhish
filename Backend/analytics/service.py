@@ -49,7 +49,6 @@ class AnalyticsService:
     DEFAULT_RISK_SCORE = 0.0
     TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
-    # ---------- Telemetry Ingestion ----------
     @staticmethod
     async def record_scan(
         scan_id: str,
@@ -64,7 +63,7 @@ class AnalyticsService:
         user_id: Optional[str] = None,
     ) -> None:
         """
-        Record a completed scan event for analytics and historical reporting.
+        Record a completed scan event for analytics and historical reporting (with timeout).
         """
         # Validate inputs
         if not scan_id or not sender:
@@ -96,7 +95,10 @@ class AnalyticsService:
         try:
             res = repo.record_scan_event(event)
             if inspect.isawaitable(res):
-                await res
+                await asyncio.wait_for(res, timeout=3.0)
+        except asyncio.TimeoutError:
+            logger.warning("record_scan_event timed out for scan_id=%s", scan_id)
+            # Do not re-raise; telemetry should not break the scan flow.
         except Exception as e:
             logger.error("Failed to record scan event for scan_id=%s: %s", scan_id, e)
             # Do not re-raise; telemetry should not break the scan flow.
@@ -107,20 +109,20 @@ class AnalyticsService:
         try:
             repo = get_analytics_repository()
             res = repo.get_dashboard_summary()
-            summary = await asyncio.wait_for(
-                res if inspect.isawaitable(res) else asyncio.sleep(0),
-                timeout=10.0
-            ) if inspect.isawaitable(res) else res
+            if inspect.isawaitable(res):
+                summary = await asyncio.wait_for(res, timeout=10.0)
+            else:
+                summary = res
 
             # Inject open incidents count from the incidents service
             try:
                 from incidents.service import IncidentService
 
                 raw_stats = IncidentService.stats()
-                inc_stats = await asyncio.wait_for(
-                    raw_stats if inspect.isawaitable(raw_stats) else asyncio.sleep(0),
-                    timeout=5.0
-                ) if inspect.isawaitable(raw_stats) else raw_stats
+                if inspect.isawaitable(raw_stats):
+                    inc_stats = await asyncio.wait_for(raw_stats, timeout=5.0)
+                else:
+                    inc_stats = raw_stats
                 summary.open_incidents = inc_stats.get("open", 0)
             except asyncio.TimeoutError:
                 logger.warning("IncidentService timed out; open_incidents remains default")
@@ -173,10 +175,9 @@ class AnalyticsService:
         try:
             repo = get_analytics_repository()
             res = repo.get_threat_heatmap()
-            return await asyncio.wait_for(
-                res if inspect.isawaitable(res) else asyncio.sleep(0),
-                timeout=10.0
-            ) if inspect.isawaitable(res) else res
+            if inspect.isawaitable(res):
+                return await asyncio.wait_for(res, timeout=10.0)
+            return res
         except asyncio.TimeoutError:
             logger.error("threat_heatmap operation timed out")
             # Return default empty heatmap
@@ -207,10 +208,9 @@ class AnalyticsService:
         try:
             repo = get_analytics_repository()
             res = repo.get_threat_feed(limit=limit)
-            return await asyncio.wait_for(
-                res if inspect.isawaitable(res) else asyncio.sleep(0),
-                timeout=10.0
-            ) if inspect.isawaitable(res) else res
+            if inspect.isawaitable(res):
+                return await asyncio.wait_for(res, timeout=10.0)
+            return res
         except asyncio.TimeoutError:
             logger.error("threat_feed operation timed out")
             return []
@@ -221,22 +221,55 @@ class AnalyticsService:
     # ---------- Model Metrics ----------
     @staticmethod
     async def model_metrics() -> ModelMetrics:
-        """Get the latest ML model performance metrics."""
-        repo = get_analytics_repository()
-        res = repo.get_model_metrics()
-        return await res if inspect.isawaitable(res) else res
+        """Get the latest ML model performance metrics with timeout."""
+        try:
+            repo = get_analytics_repository()
+            res = repo.get_model_metrics()
+            if inspect.isawaitable(res):
+                return await asyncio.wait_for(res, timeout=5.0)
+            return res
+        except asyncio.TimeoutError:
+            logger.error("model_metrics operation timed out")
+            return ModelMetrics(
+                model_id="unknown",
+                accuracy=0.0,
+                precision=0.0,
+                recall=0.0,
+                f1=0.0,
+                total_inferences=0,
+                avg_latency_ms=0.0,
+                false_positive_rate=0.0,
+                false_negative_rate=0.0,
+                last_evaluated=datetime.now(timezone.utc),
+            )
+        except Exception as e:
+            logger.error("Error in model_metrics: %s", e)
+            return ModelMetrics(
+                model_id="unknown",
+                accuracy=0.0,
+                precision=0.0,
+                recall=0.0,
+                f1=0.0,
+                total_inferences=0,
+                avg_latency_ms=0.0,
+                false_positive_rate=0.0,
+                false_negative_rate=0.0,
+                last_evaluated=datetime.now(timezone.utc),
+            )
 
     @staticmethod
     async def update_model_metrics(fp_delta: int = 0, fn_delta: int = 0) -> None:
-        """
-        Increment the model's false-positive and false-negative counts.
-        """
-        repo = get_analytics_repository()
-        res = repo.update_model_metrics(fp_delta=fp_delta, fn_delta=fn_delta)
-        if inspect.isawaitable(res):
-            await res
+        """Increment the model's false-positive and false-negative counts with timeout."""
+        try:
+            repo = get_analytics_repository()
+            res = repo.update_model_metrics(fp_delta=fp_delta, fn_delta=fn_delta)
+            if inspect.isawaitable(res):
+                await asyncio.wait_for(res, timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("update_model_metrics timed out")
+        except Exception as e:
+            logger.error("Error updating model metrics: %s", e)
 
-    # ---------- False-Positive Review ----------
     @staticmethod
     async def report_false_positive(
         scan_id: str,
@@ -246,7 +279,7 @@ class AnalyticsService:
         original_verdict: str,
     ) -> FalsePositiveReport:
         """
-        Submit a false-positive report for a previous scan.
+        Submit a false-positive report for a previous scan with timeout.
         """
         if not scan_id or not reporter_id or not reason:
             raise ValueError("scan_id, reporter_id, and reason are required")
@@ -271,36 +304,63 @@ class AnalyticsService:
             reviewed=False,
         )
 
-        repo = get_analytics_repository()
-        res = repo.save_false_positive(fp)
-        return await res if inspect.isawaitable(res) else res
+        try:
+            repo = get_analytics_repository()
+            res = repo.save_false_positive(fp)
+            if inspect.isawaitable(res):
+                return await asyncio.wait_for(res, timeout=5.0)
+            return res
+        except asyncio.TimeoutError:
+            logger.error("report_false_positive timed out for scan_id=%s", scan_id)
+            return fp  # Return the report even if save times out
+        except Exception as e:
+            logger.error("Error saving false positive: %s", e)
+            return fp  # Return the report even if save fails
 
     @staticmethod
     async def list_false_positives(reviewed: Optional[bool] = None) -> list[FalsePositiveReport]:
-        """List false-positive reports, optionally filtering by review status."""
-        repo = get_analytics_repository()
-        res = repo.list_false_positives(reviewed=reviewed)
-        return await res if inspect.isawaitable(res) else res
+        """List false-positive reports with timeout."""
+        try:
+            repo = get_analytics_repository()
+            res = repo.list_false_positives(reviewed=reviewed)
+            if inspect.isawaitable(res):
+                return await asyncio.wait_for(res, timeout=5.0)
+            return res
+        except asyncio.TimeoutError:
+            logger.warning("list_false_positives timed out")
+            return []
+        except Exception as e:
+            logger.error("Error listing false positives: %s", e)
+            return []
 
     @staticmethod
     async def review_false_positive(
         fp_id: str, reviewer_id: str, resolution: str
     ) -> Optional[FalsePositiveReport]:
         """
-        Mark a false-positive report as reviewed.
+        Mark a false-positive report as reviewed with timeout.
         """
         if not fp_id or not reviewer_id or not resolution:
             raise ValueError("fp_id, reviewer_id, and resolution are required")
 
-        repo = get_analytics_repository()
-        res = repo.review_false_positive(fp_id, reviewer_id, resolution)
-        return await res if inspect.isawaitable(res) else res
+        try:
+            repo = get_analytics_repository()
+            res = repo.review_false_positive(fp_id, reviewer_id, resolution)
+            if inspect.isawaitable(res):
+                return await asyncio.wait_for(res, timeout=5.0)
+            return res
+        except asyncio.TimeoutError:
+            logger.error("review_false_positive timed out for fp_id=%s", fp_id)
+            return None
+        except Exception as e:
+            logger.error("Error reviewing false positive: %s", e)
+            return None
 
     # ---------- Policy Rules ----------
     @staticmethod
     async def create_policy(data: PolicyRuleCreate, creator_id: str) -> PolicyRule:
         """
-        Create a new policy rule.
+        Create a new policy rule with timeout.
         """
         if not data.name or not data.condition_value:
             raise ValueError("name and condition_value are required")
@@ -318,25 +378,54 @@ class AnalyticsService:
             created_at=now,
         )
 
-        repo = get_analytics_repository()
-        res = repo.save_policy_rule(rule)
-        return await res if inspect.isawaitable(res) else res
+        try:
+            repo = get_analytics_repository()
+            res = repo.save_policy_rule(rule)
+            if inspect.isawaitable(res):
+                return await asyncio.wait_for(res, timeout=5.0)
+            return res
+        except asyncio.TimeoutError:
+            logger.warning("create_policy timed out")
+            return rule  # Return the rule even if save times out
+        except Exception as e:
+            logger.error("Error creating policy: %s", e)
+            return rule  # Return the rule even if save fails
 
     @staticmethod
     async def list_policies() -> list[PolicyRule]:
-        """List all policy rules."""
-        repo = get_analytics_repository()
-        res = repo.list_policy_rules()
-        return await res if inspect.isawaitable(res) else res
+        """List all policy rules with timeout."""
+        try:
+            repo = get_analytics_repository()
+            res = repo.list_policy_rules()
+            if inspect.isawaitable(res):
+                return await asyncio.wait_for(res, timeout=5.0)
+            return res
+        except asyncio.TimeoutError:
+            logger.warning("list_policies timed out")
+            return []
+        except Exception as e:
+            logger.error("Error listing policies: %s", e)
+            return []
 
     @staticmethod
     async def delete_policy(rule_id: str) -> bool:
-        """Delete a policy rule by ID. Returns True if deleted, False otherwise."""
+        """Delete a policy rule by ID with timeout."""
         if not rule_id:
             return False
-        repo = get_analytics_repository()
-        res = repo.delete_policy_rule(rule_id)
-        return await res if inspect.isawaitable(res) else res
+        try:
+            repo = get_analytics_repository()
+            res = repo.delete_policy_rule(rule_id)
+            if inspect.isawaitable(res):
+                result = await asyncio.wait_for(res, timeout=5.0)
+            else:
+                result = res
+            return result if isinstance(result, bool) else False
+        except asyncio.TimeoutError:
+            logger.warning("delete_policy timed out for rule_id=%s", rule_id)
+            return False
+        except Exception as e:
+            logger.error("Error deleting policy: %s", e)
+            return False
 
     # ---------- User-Specific Queries ----------
     @staticmethod
@@ -355,10 +444,10 @@ class AnalyticsService:
         try:
             repo = get_analytics_repository()
             res = repo.get_scan_events(limit=limit * 5)  # Request only what we might need
-            all_events = await asyncio.wait_for(
-                res if inspect.isawaitable(res) else asyncio.sleep(0), 
-                timeout=5.0
-            ) if inspect.isawaitable(res) else res
+            if inspect.isawaitable(res):
+                all_events = await asyncio.wait_for(res, timeout=5.0)
+            else:
+                all_events = res
             
             # Filter and sort with early exit
             user_events = []
@@ -386,10 +475,10 @@ class AnalyticsService:
         try:
             repo = get_analytics_repository()
             res = repo.get_scan_events(limit=1000)  # Limit to prevent loading entire dataset
-            all_events = await asyncio.wait_for(
-                res if inspect.isawaitable(res) else asyncio.sleep(0),
-                timeout=5.0
-            ) if inspect.isawaitable(res) else res
+            if inspect.isawaitable(res):
+                all_events = await asyncio.wait_for(res, timeout=5.0)
+            else:
+                all_events = res
             
             # Calculate average in single pass
             total_score = 0.0

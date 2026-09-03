@@ -301,13 +301,18 @@ class AwarenessService:
         """Compute and return the top users sorted by XP and detection score."""
         entries = []
         for user_id, prog in _progress.items():
-            # Fetch user display name; if AuthService cannot find, fallback to user_id
-            user = AuthService.get_user_by_id(user_id)
+            user = None
+            try:
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    user = pool.submit(asyncio.run, AuthService.get_user_by_id(user_id)).result()
+            except Exception:
+                user = None
             display_name = user.full_name if user else user_id[:8]
 
             entries.append(
                 LeaderboardEntry(
-                    rank=0,  # will be updated after sorting
+                    rank=1,  # will be updated after sorting
                     user_id=user_id,
                     display_name=display_name,
                         title="",

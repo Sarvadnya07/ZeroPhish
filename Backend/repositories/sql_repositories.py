@@ -45,6 +45,21 @@ from infrastructure.models import (
     WebhookDeliveryDB,
     WebhookSubscriptionDB,
 )
+
+
+def _to_datetime(v: Any) -> Optional[_dt.datetime]:
+    if v is None:
+        return None
+    if isinstance(v, _dt.datetime):
+        return v
+    if isinstance(v, str):
+        try:
+            return _dt.datetime.fromisoformat(v.replace("Z", "+00:00"))
+        except Exception:
+            return _dt.datetime.now(_dt.timezone.utc)
+    return None
+
+
 from webhooks.models import WebhookDelivery, WebhookSubscription
 
 
@@ -227,9 +242,9 @@ class SQLIncidentRepository:
                 evidence_json=json.dumps(incident.evidence),
                 tags_json=json.dumps(incident.tags),
                 false_positive=incident.false_positive,
-                created_at=incident.created_at,
-                updated_at=incident.updated_at,
-                resolved_at=incident.resolved_at,
+                created_at=_to_datetime(incident.created_at) or _dt.datetime.now(_dt.timezone.utc),
+                updated_at=_to_datetime(incident.updated_at) or _dt.datetime.now(_dt.timezone.utc),
+                resolved_at=_to_datetime(incident.resolved_at),
             )
             session.merge(db_inc)
             session.commit()
@@ -265,7 +280,7 @@ class SQLIncidentRepository:
             inc = session.query(IncidentDB).filter(IncidentDB.id == incident_id).first()
             if not inc:
                 return None
-            now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            now = _dt.datetime.now(_dt.timezone.utc)
             if update.title is not None:
                 inc.title = update.title
             if update.description is not None:
@@ -301,10 +316,10 @@ class SQLIncidentRepository:
                 author_id=comment.author_id,
                 author_name=comment.author_name,
                 body=comment.body,
-                created_at=comment.created_at,
+                created_at=_to_datetime(comment.created_at) or _dt.datetime.now(_dt.timezone.utc),
             )
             session.add(c)
-            inc.updated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            inc.updated_at = _dt.datetime.now(_dt.timezone.utc)
             session.commit()
             return self._to_incident(inc)
 
@@ -341,14 +356,17 @@ class SQLScanResultRepository:
         self._session_factory = session_factory
 
     def save(self, scan_id: str, scan_data: Any) -> None:
-        data_dict = scan_data.model_dump() if hasattr(scan_data, "model_dump") else scan_data
-        data_json = json.dumps(data_dict)
+        try:
+            data_dict = scan_data.model_dump(mode="json") if hasattr(scan_data, "model_dump") else scan_data
+        except Exception:
+            data_dict = scan_data.model_dump() if hasattr(scan_data, "model_dump") else scan_data
+        data_json = json.dumps(data_dict, default=str)
         final_score = getattr(scan_data, "final_score", None)
         partial_score = float(getattr(scan_data, "partial_score", 0.0) or 0.0)
         verdict = str(getattr(scan_data, "verdict", "SAFE"))
         complete = bool(getattr(scan_data, "complete", False))
         layers_completed = int(getattr(scan_data, "layers_completed", 0) or 0)
-        ts_str = str(getattr(scan_data, "timestamp", _dt.datetime.now(_dt.timezone.utc).isoformat()))
+        ts_dt = _to_datetime(getattr(scan_data, "timestamp", None)) or _dt.datetime.now(_dt.timezone.utc)
 
         with self._session_factory() as session:
             existing = session.query(ScanResultDB).filter(ScanResultDB.scan_id == scan_id).first()
@@ -362,7 +380,7 @@ class SQLScanResultRepository:
             else:
                 db_record = ScanResultDB(
                     scan_id=scan_id,
-                    timestamp=ts_str,
+                    timestamp=ts_dt,
                     partial_score=partial_score,
                     final_score=final_score,
                     verdict=verdict,
@@ -432,14 +450,14 @@ class SQLAnalyticsRepository:
             avg_latency_ms=320.0,
             false_positive_rate=0.032,
             false_negative_rate=0.025,
-            last_evaluated=_dt.datetime.utcnow(),
+            last_evaluated=_dt.datetime.now(_dt.timezone.utc),
         )
 
     def record_scan_event(self, event: Dict[str, Any]) -> None:
         with self._session_factory() as session:
             ev = ScanEventDB(
                 scan_id=str(event.get("scan_id", "")),
-                timestamp=str(event.get("timestamp", "")),
+                timestamp=_to_datetime(event.get("timestamp")) or _dt.datetime.now(_dt.timezone.utc),
                 ts=float(event.get("ts", time.time())),
                 hour=int(event.get("hour", 0)),
                 day=int(event.get("day", 0)),
@@ -596,7 +614,7 @@ class SQLAnalyticsRepository:
             0.0,
             1.0 - self._model_metrics.false_positive_rate - self._model_metrics.false_negative_rate,
         )
-        self._model_metrics.last_evaluated = _dt.datetime.utcnow()
+        self._model_metrics.last_evaluated = _dt.datetime.now(_dt.timezone.utc)
 
     def save_false_positive(self, report: FalsePositiveReport) -> FalsePositiveReport:
         with self._session_factory() as session:
@@ -737,7 +755,7 @@ class SQLWebhookRepository:
                 .first()
             )
             if existing:
-                existing.url = subscription.url
+                existing.url = str(subscription.url)
                 existing.events_json = events_json
                 existing.secret = subscription.secret
                 existing.enabled = subscription.enabled
@@ -747,14 +765,14 @@ class SQLWebhookRepository:
             else:
                 row = WebhookSubscriptionDB(
                     id=subscription.id,
-                    url=subscription.url,
+                    url=str(subscription.url),
                     events_json=events_json,
                     secret=subscription.secret,
                     enabled=subscription.enabled,
                     owner_id=subscription.owner_id,
                     description=subscription.description,
                     headers_json=headers_json,
-                    created_at=subscription.created_at,
+                    created_at=_to_datetime(subscription.created_at) or _dt.datetime.now(_dt.timezone.utc),
                 )
                 session.add(row)
             session.commit()

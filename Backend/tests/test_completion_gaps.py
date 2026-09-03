@@ -174,7 +174,7 @@ def test_sql_webhook_repository(sqlite_session_factory):
         id='sub-1',
         url='https://security.example.com/alerts',
         events=[WebhookEventType.SCAN_CRITICAL],
-        secret='hexsecret123',
+        secret='hexsecret12345678901234567890123456789012',
         enabled=True,
         created_at=datetime.now(timezone.utc).isoformat(),
         owner_id='analyst-1',
@@ -185,7 +185,7 @@ def test_sql_webhook_repository(sqlite_session_factory):
 
     subs = repo.list_subscriptions(owner_id='analyst-1')
     assert len(subs) == 1
-    assert subs[0].url == 'https://security.example.com/alerts'
+    assert str(subs[0].url).rstrip('/') == 'https://security.example.com/alerts'
 
     # Delivery log
     deliv = WebhookDelivery(

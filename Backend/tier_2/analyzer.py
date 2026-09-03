@@ -158,6 +158,14 @@ class ThreatAnalyzer:
                             flags.append("ssrf_blocked")
                             return current_url, flags
                         current_url = next_url
+                    elif getattr(response, "url", None) and str(response.url) != current_url:
+                        dest = str(response.url)
+                        if not is_safe_url(dest, allow_http=True):
+                            logger.warning("SSRF blocked redirect from %s to %s", current_url[:50], dest[:50])
+                            flags.append("ssrf_blocked")
+                            return current_url, flags
+                        current_url = dest
+                        break
                     else:
                         break
                 return current_url, flags
