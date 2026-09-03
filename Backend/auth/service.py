@@ -22,9 +22,42 @@ from .models import User, UserInDB, UserRole, UserStatus, UserUpdate
 
 logger = logging.getLogger(__name__)
 
-# In-memory fallback for when repository is not available (e.g., development)
-# This should be used only as a fallback; production must use a real repository.
-_IN_MEMORY_STORE: Dict[str, UserInDB] = {}
+# In-memory fallback / test stores
+_users_by_id: Dict[str, UserInDB] = {}
+_users_by_email: Dict[str, UserInDB] = {}
+_users_by_clerk_id: Dict[str, UserInDB] = {}
+_IN_MEMORY_STORE = _users_by_id
+
+def _store_user_in_memory(u: UserInDB) -> None:
+    _users_by_id[u.id] = u
+    if u.email:
+        _users_by_email[u.email.lower()] = u
+    if u.clerk_user_id:
+        _users_by_clerk_id[u.clerk_user_id] = u
+
+def _remove_user_from_memory(user_id: str) -> None:
+    u = _users_by_id.pop(user_id, None)
+    if u:
+        if u.email:
+            _users_by_email.pop(u.email.lower(), None)
+        if u.clerk_user_id:
+            _users_by_clerk_id.pop(u.clerk_user_id, None)
+
+def _maybe_await(res: Any) -> Any:
+    import inspect
+    import asyncio
+    if inspect.isawaitable(res):
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(lambda: asyncio.run(res)).result()
+        else:
+            return asyncio.run(res)
+    return res
 
 
 class AuthService:
@@ -92,38 +125,29 @@ class AuthService:
         # 1. Lookup by clerk_user_id
         if repo:
             user_db = repo.get_by_clerk_id(clerk_user_id)
-        if not user_db and clerk_user_id in _IN_MEMORY_STORE:
-            # Fallback if repo failed or not available
-            # We need to map clerk_id to user id; but we store by user_id, so scan
-            for u in _IN_MEMORY_STORE.values():
-                if u.clerk_user_id == clerk_user_id:
-                    user_db = u
-                    break
+        if not user_db:
+            user_db = _users_by_clerk_id.get(clerk_user_id)
 
         # 2. If not found, try by email (legacy migration)
         if not user_db and email:
             if repo:
                 user_db = repo.get_by_email(email)
             if not user_db:
-                for u in _IN_MEMORY_STORE.values():
-                    if u.email == email:
-                        user_db = u
-                        break
+                user_db = _users_by_email.get(email)
             if user_db:
                 # Update the existing user with the Clerk ID (migrate)
                 user_db.clerk_user_id = clerk_user_id
                 user_db.last_login = datetime.now(timezone.utc)
                 if repo:
                     repo.save(user_db)
-                # Update in-memory store if present
-                _IN_MEMORY_STORE[user_db.id] = user_db
+                _store_user_in_memory(user_db)
 
         if user_db:
             # Update last_login
             user_db.last_login = datetime.now(timezone.utc)
             if repo:
                 repo.save(user_db)
-            _IN_MEMORY_STORE[user_db.id] = user_db
+            _store_user_in_memory(user_db)
             return cls._to_model(user_db)
 
         # 3. Provision new user
@@ -153,7 +177,7 @@ class AuthService:
 
         if repo:
             repo.save(user_in_db)
-        _IN_MEMORY_STORE[new_id] = user_in_db
+        _store_user_in_memory(user_in_db)
 
         AuditLogger.log_event(
             event_type="USER_PROVISIONED",
@@ -175,8 +199,8 @@ class AuthService:
         user_db = None
         if repo:
             user_db = repo.get_by_id(user_id)
-        if not user_db and user_id in _IN_MEMORY_STORE:
-            user_db = _IN_MEMORY_STORE[user_id]
+        if not user_db:
+            user_db = _users_by_id.get(user_id)
         if not user_db:
             return None
         return cls._to_model(user_db)
@@ -191,10 +215,7 @@ class AuthService:
         if repo:
             user_db = repo.get_by_clerk_id(clerk_user_id)
         if not user_db:
-            for u in _IN_MEMORY_STORE.values():
-                if u.clerk_user_id == clerk_user_id:
-                    user_db = u
-                    break
+            user_db = _users_by_clerk_id.get(clerk_user_id)
         if not user_db:
             return None
         return cls._to_model(user_db)
@@ -215,8 +236,8 @@ class AuthService:
 
         if repo:
             user_db = repo.update(user_id, update)
-        if not user_db and user_id in _IN_MEMORY_STORE:
-            user_db = _IN_MEMORY_STORE[user_id]
+        if not user_db and user_id in _users_by_id:
+            user_db = _users_by_id[user_id]
             if update.full_name is not None:
                 user_db.full_name = update.full_name.strip()
             if update.role is not None:
@@ -226,7 +247,7 @@ class AuthService:
             # Persist to repo if available
             if repo:
                 repo.save(user_db)
-            _IN_MEMORY_STORE[user_id] = user_db
+            _store_user_in_memory(user_db)
 
         if user_db:
             # If we're downgrading an admin, log it
@@ -250,7 +271,7 @@ class AuthService:
         if repo:
             users = repo.list_all(role=role)
         else:
-            users = list(_IN_MEMORY_STORE.values())
+            users = list(_users_by_id.values())
             if role:
                 users = [u for u in users if u.role == role]
         return [cls._to_model(u) for u in users]
@@ -264,7 +285,7 @@ class AuthService:
         ok = False
         if repo:
             ok = repo.delete(user_id)
-        if user_id in _IN_MEMORY_STORE:
-            del _IN_MEMORY_STORE[user_id]
+        if user_id in _users_by_id:
+            _remove_user_from_memory(user_id)
             ok = True
         return ok

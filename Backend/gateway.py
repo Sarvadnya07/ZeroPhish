@@ -152,6 +152,7 @@ class GatewayConfig:
 
 
 CONFIG = GatewayConfig()
+WEIGHTS = CONFIG.weights
 logger = logging.getLogger(__name__)
 
 # ---------- Circuit Breaker ----------
@@ -292,7 +293,7 @@ def _calculate_weighted_score(scores: List[float], weights: List[float]) -> floa
     if not scores:
         return 0.0
     if len(scores) != len(weights):
-        raise ValueError("Scores and weights must have same length")
+        raise ValueError("Scores and weights must have the same length")
     total_weight = sum(weights)
     if total_weight <= 0:
         return _clamp_score(sum(scores) / len(scores))

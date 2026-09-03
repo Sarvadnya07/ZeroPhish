@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 # In-memory fallback for development and testing
 _IN_MEMORY_STORE: Dict[str, Incident] = {}
+_store = _IN_MEMORY_STORE
 
 
 # ---------- Constants ----------
