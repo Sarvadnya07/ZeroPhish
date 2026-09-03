@@ -30,11 +30,15 @@ def _ensure_stub_module(name: str, *, is_package: bool = False):
     """Create a module stub with a valid __spec__ so importlib.find_spec() does not crash."""
     import types
 
-    module = sys.modules.setdefault(name, types.ModuleType(name))
-    if getattr(module, "__spec__", None) is None:
-        module.__spec__ = importlib.machinery.ModuleSpec(name, loader=None, is_package=is_package)
-        if is_package:
-            module.__path__ = []
+    existing = sys.modules.get(name)
+    if existing is not None and getattr(existing, "__spec__", None) is not None:
+        return existing
+
+    module = types.ModuleType(name)
+    module.__spec__ = importlib.machinery.ModuleSpec(name, loader=None, is_package=is_package)
+    if is_package:
+        module.__path__ = []
+    sys.modules[name] = module
     return module
 
 
