@@ -40,7 +40,7 @@ async def create_subscription(
     - A random secret is generated for HMAC signing.
     """
     try:
-        return WebhookService.subscribe(data, owner_id=current_user.id)
+        return await WebhookService.subscribe(data, owner_id=current_user.id)
     except ValueError as e:
         logger.warning("Webhook creation failed for user %s: %s", current_user.id, e)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

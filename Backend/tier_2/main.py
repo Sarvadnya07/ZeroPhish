@@ -13,7 +13,8 @@ import re
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import whois
 from dotenv import load_dotenv
@@ -192,7 +193,7 @@ def _category_from_verdict(verdict: str | None) -> str:
 # --- THREAT ANALYSIS LOGIC ---
 
 
-from tier_2.analyzer import ThreatAnalysis, ThreatAnalyzer
+from tier_2.analyzer import ThreatAnalysis as AnalyzerThreatAnalysis, ThreatAnalyzer
 from tier_2.domain_intel import analyze_domain_age, get_domain_age
 from tier_2.rules import (
     AUTHORITY_PATTERNS,
@@ -209,11 +210,11 @@ from tier_2.rules import (
 class SpeedLayerCache:
     """Speed Layer with Redis for high-performance caching."""
 
-    def __init__(self, redis_url: str = None):
+    def __init__(self, redis_url: Optional[str] = None):
         # Load Redis URL from environment or use default
-        self.redis_url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379")
-        self.client = None
-        self.ttl = 300  # 5 minutes cache
+        self.redis_url: str = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379")
+        self.client: Optional[Any] = None
+        self.ttl: int = 300  # 5 minutes cache
 
     async def connect(self):
         """Connect to Redis."""

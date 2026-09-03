@@ -133,8 +133,9 @@ async def execute_tier3_with_circuit_breaker(
         try:
             return await circuit_breaker.call(
                 _tier3_execution,
-                body,
                 fallback=_tier3_fallback,
+                timeout_seconds=tier3_timeout,
+                text=body,
             )
         except Tier3UnavailableError:
             # API key missing – return neutral score without counting as failure

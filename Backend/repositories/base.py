@@ -43,47 +43,47 @@ if TYPE_CHECKING:
 class UserRepository(Protocol):
     """Repository for user profiles and authentication tokens."""
 
-    def get_by_id(self, user_id: str) -> Optional[Any]:
+    async def get_by_id(self, user_id: str) -> Optional[Any]:
         """Retrieve a user by internal ID."""
         ...
 
-    def get_by_clerk_id(self, clerk_user_id: str) -> Optional[Any]:
+    async def get_by_clerk_id(self, clerk_user_id: str) -> Optional[Any]:
         """Retrieve a user by Clerk user ID."""
         ...
 
-    def get_by_email(self, email: str) -> Optional[Any]:
+    async def get_by_email(self, email: str) -> Optional[Any]:
         """Retrieve a user by email address."""
         ...
 
-    def save(self, user: Any) -> Any:
+    async def save(self, user: Any) -> Any:
         """Save a user record (insert or update)."""
         ...
 
-    def list_all(self, role: Optional[Any] = None) -> List[Any]:
+    async def list_all(self, role: Optional[Any] = None) -> List[Any]:
         """List all users, optionally filtered by role."""
         ...
 
-    def update(self, user_id: str, update: Any) -> Optional[Any]:
+    async def update(self, user_id: str, update: Any) -> Optional[Any]:
         """Update a user's fields (provided in update object)."""
         ...
 
-    def delete(self, user_id: str) -> bool:
+    async def delete(self, user_id: str) -> bool:
         """Delete a user by ID. Returns True if deleted."""
         ...
 
-    def increment_scan(self, user_id: str, final_score: float) -> None:
+    async def increment_scan(self, user_id: str, final_score: float) -> None:
         """Increment scan count and update risk score for a user."""
         ...
 
-    def store_token(self, token: str, user_id: str, expires_at: float) -> None:
+    async def store_token(self, token: str, user_id: str, expires_at: float) -> None:
         """Store a revocation record for a token."""
         ...
 
-    def validate_token(self, token: str) -> Optional[Any]:
+    async def validate_token(self, token: str) -> Optional[Any]:
         """Validate a token; returns user if valid, None otherwise."""
         ...
 
-    def revoke_token(self, token: str) -> None:
+    async def revoke_token(self, token: str) -> None:
         """Revoke a token (delete revocation record)."""
         ...
 
@@ -92,15 +92,15 @@ class UserRepository(Protocol):
 class IncidentRepository(Protocol):
     """Repository for incident tickets."""
 
-    def save(self, incident: Any) -> Any:
+    async def save(self, incident: Any) -> Any:
         """Save an incident (insert or update)."""
         ...
 
-    def get_by_id(self, incident_id: str) -> Optional[Any]:
+    async def get_by_id(self, incident_id: str) -> Optional[Any]:
         """Retrieve an incident by ID."""
         ...
 
-    def list_all(
+    async def list_all(
         self,
         status: Optional[Any] = None,
         severity: Optional[Any] = None,
@@ -110,19 +110,19 @@ class IncidentRepository(Protocol):
         """List incidents with optional filters."""
         ...
 
-    def update(self, incident_id: str, update: Any) -> Optional[Any]:
+    async def update(self, incident_id: str, update: Any) -> Optional[Any]:
         """Update an incident."""
         ...
 
-    def add_comment(self, incident_id: str, comment: Any) -> Optional[Any]:
+    async def add_comment(self, incident_id: str, comment: Any) -> Optional[Any]:
         """Add a comment to an incident."""
         ...
 
-    def delete(self, incident_id: str) -> bool:
+    async def delete(self, incident_id: str) -> bool:
         """Delete an incident. Returns True if deleted."""
         ...
 
-    def stats(self) -> Dict[str, Any]:
+    async def stats(self) -> Dict[str, Any]:
         """Return summary statistics about incidents."""
         ...
 
@@ -131,57 +131,57 @@ class IncidentRepository(Protocol):
 class AnalyticsRepository(Protocol):
     """Repository for analytics, telemetry, and policies."""
 
-    def record_scan_event(self, event: Dict[str, Any]) -> None:
+    async def record_scan_event(self, event: Dict[str, Any]) -> None:
         """Record a scan event for analytics."""
         ...
 
-    def get_scan_events(self, limit: int = 10000) -> List[Dict[str, Any]]:
+    async def get_scan_events(self, limit: int = 10000) -> List[Dict[str, Any]]:
         """Retrieve recent scan events."""
         ...
 
-    def get_dashboard_summary(self) -> Any:
+    async def get_dashboard_summary(self) -> Any:
         """Return the admin dashboard summary."""
         ...
 
-    def get_threat_heatmap(self) -> List[Any]:
+    async def get_threat_heatmap(self) -> List[Any]:
         """Return threat heatmap data."""
         ...
 
-    def get_threat_feed(self, limit: int = 50) -> List[Any]:
+    async def get_threat_feed(self, limit: int = 50) -> List[Any]:
         """Return recent threat feed items."""
         ...
 
-    def get_model_metrics(self) -> Any:
+    async def get_model_metrics(self) -> Any:
         """Return ML model performance metrics."""
         ...
 
-    def update_model_metrics(self, fp_delta: int = 0, fn_delta: int = 0) -> None:
+    async def update_model_metrics(self, fp_delta: int = 0, fn_delta: int = 0) -> None:
         """Update model metrics with false‑positive/negative deltas."""
         ...
 
-    def save_false_positive(self, report: Any) -> Any:
+    async def save_false_positive(self, report: Any) -> Any:
         """Save a false‑positive report."""
         ...
 
-    def list_false_positives(self, reviewed: Optional[bool] = None) -> List[Any]:
+    async def list_false_positives(self, reviewed: Optional[bool] = None) -> List[Any]:
         """List false‑positive reports, optionally filtered by review status."""
         ...
 
-    def review_false_positive(
+    async def review_false_positive(
         self, fp_id: str, reviewer_id: str, resolution: str
     ) -> Optional[Any]:
         """Mark a false‑positive report as reviewed."""
         ...
 
-    def save_policy_rule(self, rule: Any) -> Any:
+    async def save_policy_rule(self, rule: Any) -> Any:
         """Save a policy rule."""
         ...
 
-    def list_policy_rules(self) -> List[Any]:
+    async def list_policy_rules(self) -> List[Any]:
         """List all policy rules."""
         ...
 
-    def delete_policy_rule(self, rule_id: str) -> bool:
+    async def delete_policy_rule(self, rule_id: str) -> bool:
         """Delete a policy rule. Returns True if deleted."""
         ...
 
@@ -190,27 +190,27 @@ class AnalyticsRepository(Protocol):
 class WebhookRepository(Protocol):
     """Repository for webhook subscriptions and delivery logs."""
 
-    def save_subscription(self, subscription: Any) -> Any:
+    async def save_subscription(self, subscription: Any) -> Any:
         """Save a webhook subscription."""
         ...
 
-    def get_subscription(self, sub_id: str) -> Optional[Any]:
+    async def get_subscription(self, sub_id: str) -> Optional[Any]:
         """Retrieve a subscription by ID."""
         ...
 
-    def list_subscriptions(self, owner_id: Optional[str] = None) -> List[Any]:
+    async def list_subscriptions(self, owner_id: Optional[str] = None) -> List[Any]:
         """List subscriptions, optionally filtered by owner."""
         ...
 
-    def delete_subscription(self, sub_id: str, owner_id: Optional[str] = None) -> bool:
+    async def delete_subscription(self, sub_id: str, owner_id: Optional[str] = None) -> bool:
         """Delete a subscription. Returns True if deleted."""
         ...
 
-    def record_delivery(self, delivery: Any) -> None:
+    async def record_delivery(self, delivery: Any) -> None:
         """Record a webhook delivery attempt."""
         ...
 
-    def get_delivery_log(self, limit: int = 100) -> List[Any]:
+    async def get_delivery_log(self, limit: int = 100) -> List[Any]:
         """Return recent delivery log entries."""
         ...
 
@@ -219,27 +219,27 @@ class WebhookRepository(Protocol):
 class ScanResultRepository(Protocol):
     """Repository for scan result caching."""
 
-    def save(self, scan_id: str, scan_data: Any) -> None:
+    async def save(self, scan_id: str, scan_data: Any) -> None:
         """Save a scan result."""
         ...
 
-    def get(self, scan_id: str) -> Optional[Any]:
+    async def get(self, scan_id: str) -> Optional[Any]:
         """Retrieve a scan result by ID."""
         ...
 
-    def delete(self, scan_id: str) -> bool:
+    async def delete(self, scan_id: str) -> bool:
         """Delete a scan result. Returns True if deleted."""
         ...
 
-    def list_all(self, limit: int = 100) -> List[Any]:
+    async def list_all(self, limit: int = 100) -> List[Any]:
         """List recent scan results."""
         ...
 
-    def count(self) -> int:
+    async def count(self) -> int:
         """Return total number of stored scan results."""
         ...
 
-    def count_pending(self) -> int:
+    async def count_pending(self) -> int:
         """Return number of incomplete (pending) scan results."""
         ...
 

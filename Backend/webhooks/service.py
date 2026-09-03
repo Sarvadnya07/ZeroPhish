@@ -24,6 +24,7 @@ import secrets
 import time
 import uuid
 from collections import deque
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 try:
@@ -114,7 +115,7 @@ class WebhookService:
     """
 
     @staticmethod
-    def subscribe(
+    async def subscribe(
         data: WebhookSubscriptionCreate,
         owner_id: Optional[str] = None,
     ) -> WebhookSubscription:
@@ -127,7 +128,7 @@ class WebhookService:
             ValueError: If the URL is unsafe or invalid.
         """
         is_dev = ENV == "development"
-        if not is_safe_webhook_url(data.url, allow_http=is_dev):
+        if not is_safe_webhook_url(str(data.url), allow_http=is_dev):
             raise ValueError(f"Provided webhook URL is unsafe or invalid: {data.url}")
 
         repo = get_webhook_repository()
@@ -139,23 +140,29 @@ class WebhookService:
             url=data.url,
             events=data.events,
             secret=secret,
-            created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            created_at=datetime.now(timezone.utc),
             owner_id=owner_id,
             description=data.description,
             headers=data.headers or {},
         )
         saved = repo.save_subscription(sub)
+        # repository may be sync or async; handle coroutine result
+        if asyncio.iscoroutine(saved):
+            saved = await saved
         _subscriptions[saved.id] = saved
         logger.info("Webhook subscription created: id=%s, owner=%s, events=%d",
                     sub_id, owner_id, len(data.events))
         return saved
 
     @staticmethod
-    def unsubscribe(sub_id: str, owner_id: Optional[str] = None) -> bool:
+    async def unsubscribe(sub_id: str, owner_id: Optional[str] = None) -> bool:
         """Delete a subscription. Owner check applied if provided."""
         repo = get_webhook_repository()
         _subscriptions.pop(sub_id, None)
         deleted = repo.delete_subscription(sub_id, owner_id=owner_id)
+        # repository may be sync or async; handle coroutine result
+        if asyncio.iscoroutine(deleted):
+            deleted = await deleted
         if deleted:
             logger.info("Webhook subscription deleted: id=%s, owner=%s", sub_id, owner_id)
         return deleted
@@ -164,19 +171,55 @@ class WebhookService:
     def list_subscriptions(owner_id: Optional[str] = None) -> List[WebhookSubscription]:
         """List subscriptions, optionally filtered by owner."""
         repo = get_webhook_repository()
-        return repo.list_subscriptions(owner_id=owner_id)
+        result = repo.list_subscriptions(owner_id=owner_id)
+        if asyncio.iscoroutine(result):
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.get_event_loop()
+                return loop.run_until_complete(result)
+            else:
+                raise RuntimeError("list_subscriptions returned a coroutine; call the async API from an async context")
+        return result
 
     @staticmethod
     def get_subscription(sub_id: str) -> Optional[WebhookSubscription]:
-        """Retrieve a subscription by ID."""
+        """Retrieve a subscription by ID.
+
+        Repository implementations may be async; handle coroutine results by
+        running them to completion when possible. If called from within an
+        active event loop, raise a RuntimeError to indicate the caller should
+        use an async API.
+        """
         repo = get_webhook_repository()
-        return repo.get_subscription(sub_id)
+        result = repo.get_subscription(sub_id)
+        if asyncio.iscoroutine(result):
+            # If there's no running loop we can run the coroutine synchronously.
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                # safe to run until complete
+                loop = asyncio.get_event_loop()
+                return loop.run_until_complete(result)
+            else:
+                raise RuntimeError("get_subscription returned a coroutine; call the async API from an async context")
+        return result
 
     @staticmethod
     def delivery_log(limit: int = 100) -> List[WebhookDelivery]:
         """Get recent delivery log entries."""
         repo = get_webhook_repository()
-        return repo.get_delivery_log(limit=limit)
+        result = repo.get_delivery_log(limit=limit)
+        if asyncio.iscoroutine(result):
+            # If there's no running loop we can run the coroutine synchronously.
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.get_event_loop()
+                return loop.run_until_complete(result)
+            else:
+                raise RuntimeError("get_delivery_log returned a coroutine; call the async API from an async context")
+        return result
 
     @staticmethod
     async def fire(event_type: WebhookEventType, payload: Dict[str, Any]) -> None:
@@ -186,7 +229,10 @@ class WebhookService:
         Uses a semaphore to limit concurrency per batch.
         """
         repo = get_webhook_repository()
-        targets = [s for s in repo.list_subscriptions() if s.enabled and event_type in s.events]
+        subs = repo.list_subscriptions()
+        if asyncio.iscoroutine(subs):
+            subs = await subs
+        targets = [s for s in subs if s.enabled and event_type in s.events]
 
         if not targets:
             logger.debug("No enabled subscriptions for event %s", event_type.value)
@@ -243,14 +289,19 @@ class WebhookService:
             event_type=event_type,
             payload=envelope,
             status="pending",
-            attempted_at=timestamp_str,
+            attempted_at=datetime.now(timezone.utc),
             retries=attempt,
+            http_status=None,
+            response_body=None,
+            duration_ms=0.0,
         )
 
         if not HTTPX_AVAILABLE:
             delivery.status = "failed"
             delivery.response_body = "httpx not installed"
-            repo.record_delivery(delivery)
+            res = repo.record_delivery(delivery)
+            if asyncio.iscoroutine(res):
+                await res
             _delivery_log.append(delivery)
             logger.error("Webhook delivery failed (httpx unavailable): sub=%s", sub.id)
             return
@@ -268,7 +319,9 @@ class WebhookService:
             logger.warning("Webhook delivery error (sub=%s, attempt=%d): %s", sub.id, attempt, exc)
         finally:
             delivery.duration_ms = (time.perf_counter() - start) * 1000
-            repo.record_delivery(delivery)
+            res = repo.record_delivery(delivery)
+            if asyncio.iscoroutine(res):
+                await res
             _delivery_log.append(delivery)
 
         # Retry if failed and under limit

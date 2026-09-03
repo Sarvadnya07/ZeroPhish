@@ -142,9 +142,9 @@ class GatewayScanRequest(BaseModel):
     @field_validator("links")
     @classmethod
     def validate_links(cls, v: List[str]) -> List[str]:
-        if not v:
-            raise ValueError("At least one link is required")
-        return [link.strip() for link in v if link and link.strip()]
+        if v is None:
+            return []
+        return [link.strip() for link in v if isinstance(link, str) and link.strip()]
 
 
 # ---------- Scoring Weights ----------
