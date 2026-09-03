@@ -222,12 +222,11 @@ class URLBERTPredictor:
                 )
 
         try:
-            # Locals with explicit Any type to satisfy static type checkers
-            tokenizer = cast(Any, self.tokenizer)
-            model = cast(Any, self.model)
-            assert tokenizer is not None and model is not None, "Tokenizer/model not loaded"
-
             def _inference():
+                tokenizer = cast(Any, self.tokenizer)
+                model = cast(Any, self.model)
+                assert tokenizer is not None and model is not None, "Tokenizer/model not loaded"
+
                 inputs = tokenizer(
                     cleaned,
                     return_tensors="pt",
@@ -342,10 +341,42 @@ class ONNXURLPredictor:
             self._loaded = False
             return False
 
-        if not os.path.exists(self.model_path):
+        # Check candidate locations for model.onnx
+        resolved_path = None
+        if self.model_path and os.path.exists(self.model_path):
+            resolved_path = self.model_path
+        elif self.model_path == DEFAULT_ONNX_MODEL_PATH or not self.model_path:
+            candidates = [
+                os.path.join(os.path.dirname(__file__), "..", "models", "pirocheto_onnx", "model.onnx"),
+                os.path.join(os.getcwd(), "models", "pirocheto_onnx", "model.onnx"),
+                os.path.join(os.getcwd(), "Backend", "models", "pirocheto_onnx", "model.onnx"),
+            ]
+            for cand in candidates:
+                if cand and os.path.exists(cand):
+                    resolved_path = cand
+                    break
+
+            if not resolved_path:
+                try:
+                    from huggingface_hub import hf_hub_download
+                    logger.info("Downloading ONNX model from %s...", self.model_name)
+                    target_dir = os.path.join(os.path.dirname(__file__), "..", "models", "pirocheto_onnx")
+                    resolved_path = hf_hub_download(
+                        repo_id=self.model_name,
+                        filename="model.onnx",
+                        local_dir=target_dir,
+                    )
+                except Exception as dl_err:
+                    logger.info("ONNX model file not found at %s (%s). Baseline ONNX disabled.", self.model_path, dl_err)
+                    self._loaded = False
+                    return False
+
+        if not resolved_path:
             logger.info("ONNX model file not found at %s. Baseline ONNX disabled.", self.model_path)
             self._loaded = False
             return False
+
+        self.model_path = resolved_path
 
         try:
             def _load():
@@ -397,10 +428,18 @@ class ONNXURLPredictor:
                 session_local = cast(Any, self.session)
                 input_name = session_local.get_inputs()[0].name
                 outputs = session_local.run(None, {input_name: inputs})
-                # Output[1] contains list of dict probabilities [{0: prob_safe, 1: prob_phish}]
+                # Output[1] contains list of dict probabilities [{0: prob_safe, 1: prob_phish}] or ndarray [[prob_safe, prob_phish]]
                 if len(outputs) > 1 and len(outputs[1]) > 0:
-                    prob_dict = outputs[1][0]
-                    return float(prob_dict.get(1, FALLBACK_PROB))
+                    first_out = outputs[1][0]
+                    if isinstance(first_out, dict):
+                        return float(first_out.get(1, FALLBACK_PROB))
+                    elif hasattr(first_out, "__getitem__") and len(first_out) > 1:
+                        return float(first_out[1])
+                    elif hasattr(first_out, "__float__"):
+                        return float(first_out)
+                elif len(outputs) > 0 and len(outputs[0]) > 0:
+                    first_out = outputs[0][0]
+                    return 1.0 if float(first_out) >= 0.5 else 0.0
                 return FALLBACK_PROB
 
             phishing_prob = await asyncio.wait_for(
