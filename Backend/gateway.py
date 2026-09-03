@@ -1,7 +1,16 @@
 """
 ZeroPhish API Gateway & Central Application Server.
+
 Orchestrates Tier 1 (client), Tier 2 (metadata), and Tier 3 (AI) analysis.
 Final Score = (T1 * 0.2) + (T2 * 0.3) + (T3 * 0.5)
+
+Provides:
+- REST API for scan submission and status polling
+- Server‑Sent Events (SSE) for live dashboard updates
+- Redis speed‑layer caching with SHA‑256 payload fingerprinting
+- Circuit‑breaker protection for Tier 3 AI calls
+- Role‑based access control (RBAC) via extension routers
+- Webhooks, analytics, incident management, and security awareness modules
 """
 
 from __future__ import annotations
@@ -15,6 +24,7 @@ import sys
 import time
 import uuid
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -29,13 +39,17 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.background import BackgroundTask
 
+# ---------- Path Setup ----------
 BACKEND_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BACKEND_DIR))
 
+# ---------- Imports ----------
 from circuit_breaker import CircuitBreaker
 from gateway_circuit_wrapper import execute_tier3_with_circuit_breaker
 from models.gateway_models import (
     DomainAnalysis,
+    DomainStatus,
+    Verdict,
     GatewayScanRequest,
     GatewayScanResponse,
     ScanStatusResponse,
@@ -45,6 +59,8 @@ from models.gateway_models import (
     Tier2Analysis,
     Tier2Result,
     Tier3Result,
+    TierStatus,
+    CleanStatus,
 )
 from repositories.factory import get_cache_backend, get_scan_result_repository
 from security.middleware import (
@@ -54,7 +70,8 @@ from security.middleware import (
 )
 from tier_2 import ThreatAnalyzer, analyze_domain_age, get_domain_age
 
-# ── New feature modules ────────────────────────────────────────────────────────
+# Try to import extension modules; fallback gracefully
+EXTENSIONS_AVAILABLE = False
 try:
     from analytics.router import router as analytics_router
     from analytics.service import AnalyticsService
@@ -69,64 +86,101 @@ try:
 
     EXTENSIONS_AVAILABLE = True
 except ImportError as _ext_err:
-    _logging = logging.getLogger(__name__)
-    _logging.warning("Extension modules not fully loaded: %s", _ext_err)
-    EXTENSIONS_AVAILABLE = False
+    logging.getLogger(__name__).warning("Extension modules not fully loaded: %s", _ext_err)
 
 try:
     from ml.shadow import ShadowCascadeManager
 except ImportError:
     ShadowCascadeManager = None
 
+# ---------- Configuration ----------
 load_dotenv(BACKEND_DIR / ".env")
 load_dotenv()
 
+@dataclass(frozen=True)
+class GatewayConfig:
+    """Immutable configuration for the gateway."""
+    env: str = field(default_factory=lambda: os.getenv("ZEROPHISH_ENV", "development"))
+    port: int = field(default_factory=lambda: int(os.getenv("GATEWAY_PORT", "8001")))
+    tier3_timeout: int = field(default_factory=lambda: int(os.getenv("TIER3_TIMEOUT", "5")))
+    scan_rate_limit: str = field(default_factory=lambda: os.getenv(
+        "SCAN_RATE_LIMIT",
+        "20/minute" if os.getenv("ZEROPHISH_ENV") == "production" else "1200/minute"
+    ))
+    scan_cache_ttl: int = field(default_factory=lambda: int(os.getenv("SCAN_CACHE_TTL", "300")))
+    scan_history_limit: int = field(default_factory=lambda: int(os.getenv("GATEWAY_SCAN_HISTORY_LIMIT", "500")))
+
+    # Circuit breaker
+    circuit_breaker_enabled: bool = field(default_factory=lambda: os.getenv("CIRCUIT_BREAKER_ENABLED", "true").lower() == "true")
+    circuit_failure_threshold: int = field(default_factory=lambda: int(os.getenv("CIRCUIT_BREAKER_FAILURE_THRESHOLD", "5")))
+    circuit_timeout: float = field(default_factory=lambda: float(os.getenv("CIRCUIT_BREAKER_TIMEOUT", "30")))
+    circuit_window: float = field(default_factory=lambda: float(os.getenv("CIRCUIT_BREAKER_WINDOW", "60")))
+
+    # CORS
+    allowed_origins: List[str] = field(default_factory=lambda: [
+        o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()
+    ] or [
+        "http://localhost:3000", "http://127.0.0.1:3000",
+        "http://localhost:8000", "http://127.0.0.1:8000",
+        "http://localhost:8001", "http://127.0.0.1:8001",
+    ])
+    allow_origin_regex: Optional[str] = field(default_factory=lambda: os.getenv("ALLOW_ORIGIN_REGEX"))
+
+    # API key
+    api_key: Optional[str] = field(default_factory=lambda: os.getenv("API_KEY"))
+
+    # Weights
+    weights: ScoringWeights = field(default_factory=ScoringWeights)
+
+    def __post_init__(self) -> None:
+        # Validate port range
+        if not (1 <= self.port <= 65535):
+            raise ValueError(f"Invalid port: {self.port}")
+        if self.tier3_timeout < 1:
+            raise ValueError(f"Tier3 timeout must be >= 1: {self.tier3_timeout}")
+
+
+CONFIG = GatewayConfig()
+logger = logging.getLogger(__name__)
+
+# ---------- Circuit Breaker ----------
+tier3_circuit_breaker: Optional[CircuitBreaker] = None
+if CONFIG.circuit_breaker_enabled:
+    tier3_circuit_breaker = CircuitBreaker(
+        failure_threshold=CONFIG.circuit_failure_threshold,
+        timeout=CONFIG.circuit_timeout,
+        window=CONFIG.circuit_window,
+        name="tier3_ai_analysis",
+    )
+    logger.info("Circuit breaker enabled for Tier 3")
+
+# ---------- API Key Security ----------
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
-
-async def verify_api_key(api_key: str = Security(api_key_header)):
-    expected_api_key = os.getenv("API_KEY")
-    if not expected_api_key:
-        return api_key
-    if not api_key or api_key != expected_api_key:
+async def verify_api_key(api_key: str = Security(api_key_header)) -> str:
+    """Verify API key if configured; otherwise allow all requests."""
+    if not CONFIG.api_key:
+        return api_key  # No authentication required
+    if not api_key or api_key != CONFIG.api_key:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Could not validate API key"
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Could not validate API key",
         )
     return api_key
 
-
-TIER3_TIMEOUT = int(os.getenv("TIER3_TIMEOUT", "5"))
-WEIGHTS = ScoringWeights()
-SCAN_HISTORY_LIMIT = int(os.getenv("GATEWAY_SCAN_HISTORY_LIMIT", "500"))
-
-CIRCUIT_BREAKER_ENABLED = os.getenv("CIRCUIT_BREAKER_ENABLED", "true").lower() == "true"
-CIRCUIT_FAILURE_THRESHOLD = int(os.getenv("CIRCUIT_BREAKER_FAILURE_THRESHOLD", "5"))
-CIRCUIT_TIMEOUT = float(os.getenv("CIRCUIT_BREAKER_TIMEOUT", "30"))
-CIRCUIT_WINDOW = float(os.getenv("CIRCUIT_BREAKER_WINDOW", "60"))
-
-tier3_circuit_breaker = (
-    CircuitBreaker(
-        failure_threshold=CIRCUIT_FAILURE_THRESHOLD,
-        timeout=CIRCUIT_TIMEOUT,
-        window=CIRCUIT_WINDOW,
-        name="tier3_ai_analysis",
-    )
-    if CIRCUIT_BREAKER_ENABLED
-    else None
-)
-
-
+# ---------- Lifespan ----------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("=" * 60)
-    print("ZeroPhish API Gateway starting...")
-    print("=" * 60)
-    print(f"Scoring Formula: T1*{WEIGHTS.tier1} + T2*{WEIGHTS.tier2} + T3*{WEIGHTS.tier3}")
-    print(f"Tier 3 Timeout: {TIER3_TIMEOUT}s")
+    logger.info("=" * 60)
+    logger.info("ZeroPhish API Gateway starting...")
+    logger.info("Scoring Formula: T1*%.1f + T2*%.1f + T3*%.1f",
+                CONFIG.weights.tier1, CONFIG.weights.tier2, CONFIG.weights.tier3)
+    logger.info("Tier 3 Timeout: %ds", CONFIG.tier3_timeout)
+    logger.info("Environment: %s", CONFIG.env)
     yield
-    print("ZeroPhish API Gateway shutting down...")
+    logger.info("ZeroPhish API Gateway shutting down...")
 
-
+# ---------- FastAPI App ----------
 app = FastAPI(
     title="ZeroPhish API Gateway",
     description="AI-powered phishing detection — 3-tier analysis + auth, webhooks, incidents, analytics.",
@@ -134,62 +188,33 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-DEFAULT_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-    "http://localhost:8001",
-    "http://127.0.0.1:8001",
-]
-
-env_origins = os.getenv("ALLOWED_ORIGINS")
-if env_origins:
-    ALLOWED_ORIGINS = [
-        o.strip()
-        for o in env_origins.split(",")
-        if o.strip() and o.strip() != "chrome-extension://*"
-    ]
-else:
-    ALLOWED_ORIGINS = list(DEFAULT_ALLOWED_ORIGINS)
-
-if os.getenv("ENV", "development") != "production":
-    for default_orig in DEFAULT_ALLOWED_ORIGINS:
-        if default_orig not in ALLOWED_ORIGINS:
-            ALLOWED_ORIGINS.append(default_orig)
-
+# ---------- CORS ----------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX")
-    or r"^http://(localhost|127\.0\.0\.1):(3000|8000|8001)$",
+    allow_origins=CONFIG.allowed_origins,
+    allow_origin_regex=CONFIG.allow_origin_regex or r"^http://(localhost|127\.0\.0\.1):(3000|8000|8001)$",
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
     allow_headers=["*"],
     allow_credentials=True,
     expose_headers=["*"],
 )
 
+# ---------- Security Middleware ----------
 app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(RequestSizeLimitMiddleware, max_size=1_000_000)
+app.add_middleware(RequestSizeLimitMiddleware, max_size=1_000_000)  # 1 MB
 
+# ---------- Rate Limiting ----------
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
-
-SCAN_RATE_LIMIT = os.getenv(
-    "SCAN_RATE_LIMIT",
-    "20/minute" if os.getenv("ZEROPHISH_ENV") == "production" else "1200/minute",
-)
-
 
 async def rate_limit_handler(request: Request, exc: Exception) -> Response:
     if isinstance(exc, RateLimitExceeded):
         return _rate_limit_exceeded_handler(request, exc)
     raise exc
 
-
 app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 
-# Register extension routers
+# ---------- Extension Routers ----------
 if EXTENSIONS_AVAILABLE:
     app.include_router(auth_router)
     app.include_router(webhooks_router)
@@ -199,17 +224,16 @@ if EXTENSIONS_AVAILABLE:
     app.include_router(awareness_router)
     app.include_router(vision_router)
 
-# In-process scan time tracker and SSE broadcast queues
+# ---------- Internal State ----------
+# In‑process scan time tracking and SSE subscribers
 scan_started_at: Dict[str, float] = {}
 scan_results_lock = asyncio.Lock()
 _latest_tier1_report: Optional[Dict[str, Any]] = None
 _sse_subscribers: Dict[str, asyncio.Queue] = {}
 
-
-def _calculate_scan_cache_key(
-    sender: str, body: str, links: list[str], subject: Optional[str]
-) -> str:
-    """Generate deterministic SHA-256 cache key for identical email payload."""
+# ---------- Helper Functions ----------
+def _calculate_scan_cache_key(sender: str, body: str, links: List[str], subject: Optional[str]) -> str:
+    """Generate deterministic SHA‑256 cache key for identical email payload."""
     norm_sender = (sender or "").strip().lower()
     norm_body = (body or "").strip()
     norm_links = sorted((str(l) or "").strip().lower() for l in links)
@@ -217,14 +241,11 @@ def _calculate_scan_cache_key(
     raw = f"{norm_sender}|{norm_subject}|{norm_body}|{','.join(norm_links)}"
     return "scan:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
-
 def _clamp_score(score: float) -> float:
     return max(0.0, min(100.0, float(score)))
 
-
 def _round_score(score: float) -> float:
     return round(_clamp_score(score), 2)
-
 
 def _determine_verdict(score: float) -> str:
     if score < 30:
@@ -232,7 +253,6 @@ def _determine_verdict(score: float) -> str:
     if score < 70:
         return "SUSPICIOUS"
     return "CRITICAL"
-
 
 def _determine_threat_status(score: float) -> str:
     if score >= 70:
@@ -242,67 +262,59 @@ def _determine_threat_status(score: float) -> str:
     return "OK"
 
 
-def _calculate_weighted_score(scores: list[float], weights: list[float]) -> float:
-    """
-    Unified weighted score calculation with fallback to simple average.
-    Ensures final score is clamped between 0 and 100.
-    """
+def _to_domain_status(status_str: str) -> DomainStatus:
+    """Convert a status string to DomainStatus enum, with fallback to UNKNOWN."""
+    try:
+        return getattr(DomainStatus, status_str)
+    except Exception:
+        return DomainStatus.UNKNOWN
+
+def _calculate_weighted_score(scores: List[float], weights: List[float]) -> float:
     if not scores:
         return 0.0
-
     if len(scores) != len(weights):
-        raise ValueError("Scores and weights must have the same length")
-
+        raise ValueError("Scores and weights must have same length")
     total_weight = sum(weights)
     if total_weight <= 0:
         return _clamp_score(sum(scores) / len(scores))
-
     weighted_sum = sum(s * w for s, w in zip(scores, weights))
     return _clamp_score(weighted_sum / total_weight)
 
+def _calculate_partial_score(tier1: float, tier2: float) -> float:
+    return _calculate_weighted_score([tier1, tier2], [CONFIG.weights.tier1, CONFIG.weights.tier2])
 
-def _calculate_partial_score(tier1_score: float, tier2_score: float) -> float:
-    return _calculate_weighted_score([tier1_score, tier2_score], [WEIGHTS.tier1, WEIGHTS.tier2])
-
-
-def _calculate_final_score(tier1_score: float, tier2_score: float, tier3_score: float) -> float:
+def _calculate_final_score(tier1: float, tier2: float, tier3: float) -> float:
     return _calculate_weighted_score(
-        [tier1_score, tier2_score, tier3_score],
-        [WEIGHTS.tier1, WEIGHTS.tier2, WEIGHTS.tier3],
+        [tier1, tier2, tier3],
+        [CONFIG.weights.tier1, CONFIG.weights.tier2, CONFIG.weights.tier3],
     )
 
-
-def _merge_evidence(
-    tier1_evidence: list[str], tier2_evidence: list[str], tier3_flagged_phrases: list[str] | None
-) -> list[str]:
-    merged: list[str] = []
-
+def _merge_evidence(tier1_evidence: List[str], tier2_evidence: List[str],
+                    tier3_flagged: Optional[List[str]]) -> List[str]:
+    merged = []
     for item in tier1_evidence:
         text = str(item).strip()
         if text:
             merged.append(text)
-
     for item in tier2_evidence:
         text = str(item).strip()
         if text:
             merged.append(text)
-
-    for phrase in tier3_flagged_phrases or []:
+    for phrase in tier3_flagged or []:
         text = str(phrase).strip()
         if text:
             merged.append(f"AI: {text}")
-
-    deduped: list[str] = []
-    seen: set[str] = set()
+    # Deduplicate preserving order
+    seen = set()
+    result = []
     for item in merged:
         if item not in seen:
             seen.add(item)
-            deduped.append(item)
-    return deduped
-
+            result.append(item)
+    return result
 
 async def _notify_live_dashboard(res: GatewayScanResponse, sender: str, subject: str) -> None:
-    """Broadcast scan update to in-process SSE queues and optional external dashboard."""
+    """Broadcast scan update to SSE subscribers and optional external webhook."""
     global _latest_tier1_report
 
     payload = {
@@ -327,39 +339,36 @@ async def _notify_live_dashboard(res: GatewayScanResponse, sender: str, subject:
 
     _latest_tier1_report = payload
 
-    # Broadcast to all live SSE subscribers in-process
-    dead_subscribers = []
+    # Broadcast to SSE subscribers
+    dead = []
     for sub_id, q in list(_sse_subscribers.items()):
         try:
             q.put_nowait(payload)
         except Exception:
-            dead_subscribers.append(sub_id)
-
-    for sub_id in dead_subscribers:
+            dead.append(sub_id)
+    for sub_id in dead:
         _sse_subscribers.pop(sub_id, None)
 
-    # Optional webhook/external URL notification
+    # Optional external webhook
     live_url = os.getenv("LIVE_DASHBOARD_URL")
     if live_url and "8001" not in live_url:
         try:
             import httpx
-
             async with httpx.AsyncClient() as client:
                 await client.post(live_url, json=payload, timeout=2.0)
         except Exception as e:
-            logging.getLogger(__name__).debug(
-                "External live dashboard notify skipped/failed: %s", str(e)[:200]
-            )
+            logger.debug("External dashboard notification failed: %s", e)
 
-
-async def execute_tier2(sender: str, body: str, links: list[str]) -> Tier2Result:
+# ---------- Tier 2 Execution ----------
+async def execute_tier2(sender: str, body: str, links: List[str]) -> Tier2Result:
+    """Execute Tier 2 analysis: domain age + threat pattern + ML."""
     start_time = time.perf_counter()
-    evidence: list[str] = []
+    evidence: List[str] = []
 
     try:
         domain = sender.split("@")[-1].strip().lower() if "@" in sender else ""
         if not domain:
-            domain_score, domain_status = 70.0, "UNKNOWN"
+            domain_score, domain_status = 70.0, DomainStatus.UNKNOWN
             evidence.append("Could not parse sender domain.")
         else:
             age_days = await asyncio.to_thread(get_domain_age, domain)
@@ -374,6 +383,8 @@ async def execute_tier2(sender: str, body: str, links: list[str]) -> Tier2Result
 
         threat_score = _clamp_score(threat_data.threat_level)
         threat_status = _determine_threat_status(threat_score)
+        threat_status_enum = _to_domain_status(threat_status)
+        domain_status_enum = _to_domain_status(domain_status) if isinstance(domain_status, str) else domain_status
         tier2_score = _calculate_weighted_score([domain_score, threat_score], [0.3, 0.7])
 
         if threat_data.category != "Safe":
@@ -384,12 +395,12 @@ async def execute_tier2(sender: str, body: str, links: list[str]) -> Tier2Result
         return Tier2Result(
             score=_round_score(tier2_score),
             domain_analysis=DomainAnalysis(
-                status=domain_status,
+                status=domain_status_enum,
                 score=_round_score(domain_score),
                 weight=0.3,
             ),
             threat_analysis=Tier2Analysis(
-                status=threat_status,
+                status=threat_status_enum,
                 score=_round_score(threat_score),
                 weight=0.7,
             ),
@@ -402,22 +413,23 @@ async def execute_tier2(sender: str, body: str, links: list[str]) -> Tier2Result
             evidence=evidence,
             execution_time_ms=(time.perf_counter() - start_time) * 1000,
         )
-    except Exception as exc:
+    except Exception as e:
+        logger.error("Tier 2 execution failed: %s", e, exc_info=True)
         return Tier2Result(
             score=50.0,
-            domain_analysis=DomainAnalysis(status="ERROR", score=50.0),
-            threat_analysis=Tier2Analysis(status="ERROR", score=50.0),
+            domain_analysis=DomainAnalysis(status=DomainStatus.ERROR, score=50.0),
+            threat_analysis=Tier2Analysis(status=DomainStatus.ERROR, score=50.0),
             threat_details=ThreatAnalysisDetail(
                 threat_level=50,
                 category="Error",
-                reasoning=f"Tier 2 failed: {type(exc).__name__}",
+                reasoning=f"Tier 2 failed: {type(e).__name__}",
                 flagged_phrases=[],
             ),
             evidence=["Tier 2 processing error"],
             execution_time_ms=(time.perf_counter() - start_time) * 1000,
         )
 
-
+# ---------- Tier 3 Finalization ----------
 async def _finalize_tier3(
     scan_id: str,
     email_body: str,
@@ -425,25 +437,35 @@ async def _finalize_tier3(
     subject: Optional[str] = None,
     cache_key: Optional[str] = None,
 ) -> None:
+    """Background task: complete Tier 3, update scan result, cache, and notify."""
     try:
+        # CircuitBreaker implementation may not strictly match the protocol used
+        # by the wrapper; cast to Any to satisfy type checkers while preserving
+        # runtime behavior.
+        from typing import cast, Any
+
         tier3_result = await execute_tier3_with_circuit_breaker(
             body=email_body,
-            circuit_breaker=tier3_circuit_breaker,
-            tier3_timeout=TIER3_TIMEOUT,
+            circuit_breaker=cast(Any, tier3_circuit_breaker),
+            tier3_timeout=CONFIG.tier3_timeout,
         )
-    except Exception as exc:  # pragma: no cover
+    except Exception as e:
+        logger.error("Tier 3 finalization failed: %s", e, exc_info=True)
         tier3_result = Tier3Result(
             score=50,
             category="Error",
-            reasoning=f"Tier 3 failed: {type(exc).__name__}",
+            reasoning=f"Tier 3 failed: {type(e).__name__}",
             flagged_phrases=[],
-            status="failed",
+            status=TierStatus.FAILED,
+            confidence=0.0,
+            execution_time_ms=0.0,
         )
 
     scan_repo = get_scan_result_repository()
     async with scan_results_lock:
         existing = scan_repo.get(scan_id)
         if not existing:
+            logger.warning("Scan %s not found in repository; skipping finalization", scan_id)
             return
 
         final_score = _round_score(
@@ -457,84 +479,92 @@ async def _finalize_tier3(
         sender_meta = existing.sender or sender or "unknown@unknown.com"
         subject_meta = existing.subject or subject or "No Subject"
 
-        updated = existing.model_copy(
-            update={
-                "tier3": tier3_result,
-                "tier3_status": tier3_result.status,
-                "complete": True,
-                "layers_completed": 3,
-                "final_score": final_score,
-                "verdict": final_verdict,
-                "combined_evidence": _merge_evidence(
-                    existing.tier1.evidence,
-                    existing.tier2.evidence,
-                    tier3_result.flagged_phrases,
-                ),
-                "total_execution_time_ms": total_ms,
-                "sender": sender_meta,
-                "subject": subject_meta,
-            }
-        )
+        updated = existing.model_copy(update={
+            "tier3": tier3_result,
+            "tier3_status": tier3_result.status,
+            "complete": True,
+            "layers_completed": 3,
+            "final_score": final_score,
+            "verdict": final_verdict,
+            "combined_evidence": _merge_evidence(
+                existing.tier1.evidence,
+                existing.tier2.evidence,
+                tier3_result.flagged_phrases,
+            ),
+            "total_execution_time_ms": total_ms,
+            "sender": sender_meta,
+            "subject": subject_meta,
+        })
         scan_repo.save(scan_id, updated)
 
-        # Populate speed layer cache with completed report
+        # Cache completed result
         if cache_key:
             try:
                 cache = get_cache_backend()
-                ttl = int(os.getenv("SCAN_CACHE_TTL", "300"))
-                await cache.set(cache_key, json.dumps(updated.model_dump()), ttl_seconds=ttl)
-            except Exception as _c_err:
-                logging.getLogger(__name__).debug("Failed to cache completed scan: %s", _c_err)
+                await cache.set(cache_key, json.dumps(updated.model_dump()), ttl_seconds=CONFIG.scan_cache_ttl)
+            except Exception as e:
+                logger.debug("Failed to cache scan %s: %s", scan_id, e)
 
-        # Notify dashboard of final result (Level 3)
+        # Notify dashboard
         asyncio.create_task(_notify_live_dashboard(updated, sender_meta, subject_meta))
 
     # Fire webhooks and record analytics (outside the lock)
     if EXTENSIONS_AVAILABLE:
-        payload = updated.model_dump()
-        await WebhookService.fire(WebhookEventType.SCAN_COMPLETE, payload)
-        if final_verdict == "CRITICAL":
-            await WebhookService.fire(WebhookEventType.SCAN_CRITICAL, payload)
-        elif final_verdict == "SUSPICIOUS":
-            await WebhookService.fire(WebhookEventType.SCAN_SUSPICIOUS, payload)
+        try:
+            payload = updated.model_dump()
+            await WebhookService.fire(WebhookEventType.SCAN_COMPLETE, payload)
+            if final_verdict == "CRITICAL":
+                await WebhookService.fire(WebhookEventType.SCAN_CRITICAL, payload)
+            elif final_verdict == "SUSPICIOUS":
+                await WebhookService.fire(WebhookEventType.SCAN_SUSPICIOUS, payload)
 
-        # Record telemetry
-        AnalyticsService.record_scan(
-            scan_id=scan_id,
-            sender=sender_meta,
-            subject=subject_meta,
-            final_score=final_score,
-            verdict=final_verdict,
-            category=updated.tier2.threat_details.category if updated.tier2 else "Unknown",
-            tier1=float(existing.tier1.score),
-            tier2=float(existing.tier2.score) if existing.tier2 else 0,
-            tier3=float(tier3_result.score),
-        )
+            AnalyticsService.record_scan(
+                scan_id=scan_id,
+                sender=sender_meta,
+                subject=subject_meta,
+                final_score=final_score,
+                verdict=final_verdict,
+                category=updated.tier2.threat_details.category if updated.tier2 else "Unknown",
+                tier1=float(existing.tier1.score),
+                tier2=float(existing.tier2.score) if existing.tier2 else 0,
+                tier3=float(tier3_result.score),
+            )
+        except Exception as e:
+            logger.error("Webhook/analytics error for scan %s: %s", scan_id, e)
 
-
+# ---------- Endpoints ----------
 @app.post("/api/v1/scan", response_model=GatewayScanResponse)
 @app.post("/scan", response_model=GatewayScanResponse)
 @app.post("/gateway/scan", response_model=GatewayScanResponse)
-@limiter.limit(SCAN_RATE_LIMIT)
+@limiter.limit(CONFIG.scan_rate_limit)
 async def gateway_scan(
     request: Request,
     scan_request: GatewayScanRequest,
     background_tasks: BackgroundTasks,
     api_key: str = Depends(verify_api_key),
 ) -> GatewayScanResponse:
-    validation = InputValidator.validate_scan_request(
+    """
+    Submit an email for full 3‑tier phishing analysis.
+
+    - Tier 1 (client‑side heuristics) is provided in the request.
+    - Tier 2 (domain + pattern + ML) runs synchronously.
+    - Tier 3 (Gemini AI) runs in the background.
+    - Response includes a `scan_id` for polling status.
+    """
+    # 1. Input validation
+    valid, errors = InputValidator.validate_scan_request(
         sender=scan_request.sender,
         body=scan_request.body,
         links=scan_request.links,
         subject=scan_request.subject,
     )
-    if not validation["valid"]:
-        raise HTTPException(status_code=400, detail={"errors": validation["errors"]})
+    if not valid:
+        raise HTTPException(status_code=400, detail={"errors": errors})
 
     scan_id = str(uuid.uuid4())
     scan_started_at[scan_id] = time.perf_counter()
 
-    # ⚡ Speed Layer: Query cache by SHA-256 payload fingerprint (<10ms fast path)
+    # 2. Cache fast path
     cache_key = _calculate_scan_cache_key(
         scan_request.sender, scan_request.body, scan_request.links, scan_request.subject
     )
@@ -545,28 +575,29 @@ async def gateway_scan(
             cached_data = json.loads(cached_json)
             cached_res = GatewayScanResponse.model_validate(cached_data)
             total_ms = (time.perf_counter() - scan_started_at[scan_id]) * 1000
-            cached_res = cached_res.model_copy(
-                update={
-                    "scan_id": scan_id,
-                    "timestamp": datetime.now().isoformat(),
-                    "total_execution_time_ms": round(total_ms, 2),
-                }
-            )
+            cached_res = cached_res.model_copy(update={
+                "scan_id": scan_id,
+                "timestamp": datetime.now(),
+                "total_execution_time_ms": round(total_ms, 2),
+            })
             scan_repo = get_scan_result_repository()
             async with scan_results_lock:
                 scan_repo.save(scan_id, cached_res)
             asyncio.create_task(
                 _notify_live_dashboard(cached_res, scan_request.sender, scan_request.subject or "No Subject")
             )
+            logger.info("Cache hit for scan %s", scan_id)
             return cached_res
-        except Exception as _parse_err:
-            logging.getLogger(__name__).debug("Cached response invalid, running fresh scan: %s", _parse_err)
+        except Exception as e:
+            logger.debug("Cache data invalid for %s: %s", scan_id, e)
 
+    # 3. Execute Tier 1 & Tier 2 (synchronous part)
     tier1_score = int(round(_clamp_score(scan_request.tier1_score)))
     tier1 = Tier1Result(
         score=tier1_score,
+        execution_time_ms=0.0,
         evidence=[str(e) for e in scan_request.tier1_evidence][:50],
-        status="Suspicious" if tier1_score >= 20 else "Clean",
+        status=CleanStatus.SUSPICIOUS if tier1_score >= 20 else CleanStatus.CLEAN,
     )
 
     tier2 = await execute_tier2(
@@ -576,58 +607,79 @@ async def gateway_scan(
     )
 
     partial_score = _round_score(_calculate_partial_score(tier1.score, tier2.score))
-    verdict = _determine_verdict(partial_score)
+    verdict_str = _determine_verdict(partial_score)
+    try:
+        verdict = Verdict[verdict_str]
+    except Exception:
+        # Fallback to a safe enum value if enum lookup fails
+        # Default to SUSPICIOUS to avoid incorrectly marking potentially malicious
+        # content as CLEAN when the enum mapping is missing.
+        verdict = Verdict.SUSPICIOUS
+
     response = GatewayScanResponse(
         scan_id=scan_id,
-        timestamp=datetime.now().isoformat(),
+        timestamp=datetime.now(),
         partial_score=partial_score,
         final_score=None,
         verdict=verdict,
         tier1=tier1,
         tier2=tier2,
         tier3=None,
-        tier3_status="processing",
+        tier3_status=TierStatus.PROCESSING,
         complete=False,
         layers_completed=2,
         combined_evidence=_merge_evidence(tier1.evidence, tier2.evidence, None),
-        weights=WEIGHTS,
+        weights=CONFIG.weights,
         sender=scan_request.sender,
         subject=scan_request.subject or "No Subject",
         total_execution_time_ms=(time.perf_counter() - scan_started_at[scan_id]) * 1000,
     )
 
+    # 4. Store partial result
     scan_repo = get_scan_result_repository()
     async with scan_results_lock:
         scan_repo.save(scan_id, response)
 
-    # Notify dashboard of partial result (Level 2)
+    # 5. Notify dashboard (partial)
     asyncio.create_task(
         _notify_live_dashboard(response, scan_request.sender, scan_request.subject or "No Subject")
     )
 
-    # Controlled Shadow Cascade Observation (Non-interfering, Fire-and-Forget)
+    # 6. Shadow cascade (fire‑and‑forget)
     if ShadowCascadeManager and scan_request.links:
         for link in scan_request.links[:5]:
-            ShadowCascadeManager.get_instance().observe_async(
-                url=link,
-                production_verdict=verdict,
-                production_score=float(partial_score),
-            )
+            try:
+                asyncio.create_task(
+                    ShadowCascadeManager.get_instance().observe_async(
+                        url=link,
+                        production_verdict=verdict_str,
+                        production_score=float(partial_score),
+                    )
+                )
+            except Exception:
+                logger.debug("Failed to schedule shadow-cascade observation for %s", link, exc_info=True)
 
+    # 7. Schedule Tier 3 background task
     background_tasks.add_task(
-        _finalize_tier3, scan_id, scan_request.body, scan_request.sender, scan_request.subject, cache_key
+        _finalize_tier3,
+        scan_id,
+        scan_request.body,
+        scan_request.sender,
+        scan_request.subject,
+        cache_key,
     )
+
+    logger.info("Scan %s initiated (partial score=%.2f)", scan_id, partial_score)
     return response
 
-
+# ---------- Cache Endpoints ----------
 @app.get("/cache/stats")
 async def gateway_cache_stats() -> dict:
-    """Return cache statistics from the active cache backend (Redis / In-Memory)."""
+    """Return cache statistics from the active cache backend."""
     cache = get_cache_backend()
     if hasattr(cache, "get_stats"):
         return await cache.get_stats()
     return {"status": "connected", "backend": "in_memory"}
-
 
 @app.delete("/cache/clear")
 async def gateway_cache_clear() -> dict:
@@ -638,12 +690,15 @@ async def gateway_cache_clear() -> dict:
         return {"status": "success", "cleared_keys": deleted}
     return {"status": "success", "cleared_keys": 0}
 
-
+# ---------- Status/Result Endpoints ----------
 @app.get("/gateway/status/{scan_id}", response_model=ScanStatusResponse)
 @limiter.limit("120/minute")
 async def gateway_status(
-    request: Request, scan_id: str, api_key: str = Depends(verify_api_key)
+    request: Request,
+    scan_id: str,
+    api_key: str = Depends(verify_api_key),
 ) -> ScanStatusResponse:
+    """Poll scan status. Returns final result when complete."""
     scan_repo = get_scan_result_repository()
     async with scan_results_lock:
         result = scan_repo.get(scan_id)
@@ -654,7 +709,7 @@ async def gateway_status(
     estimated_completion_ms = None
     if not result.complete and scan_id in scan_started_at:
         elapsed_ms = (time.perf_counter() - scan_started_at[scan_id]) * 1000
-        estimated_completion_ms = max(0, int((TIER3_TIMEOUT * 1000) - elapsed_ms))
+        estimated_completion_ms = max(0, int((CONFIG.tier3_timeout * 1000) - elapsed_ms))
 
     return ScanStatusResponse(
         scan_id=scan_id,
@@ -667,12 +722,14 @@ async def gateway_status(
         estimated_completion_ms=estimated_completion_ms,
     )
 
-
 @app.get("/gateway/result/{scan_id}", response_model=GatewayScanResponse)
 @limiter.limit("120/minute")
 async def gateway_result(
-    request: Request, scan_id: str, api_key: str = Depends(verify_api_key)
+    request: Request,
+    scan_id: str,
+    api_key: str = Depends(verify_api_key),
 ) -> GatewayScanResponse:
+    """Retrieve the full scan result (must be complete)."""
     scan_repo = get_scan_result_repository()
     async with scan_results_lock:
         result = scan_repo.get(scan_id)
@@ -680,11 +737,12 @@ async def gateway_result(
         raise HTTPException(status_code=404, detail=f"Unknown scan_id: {scan_id}")
     return result
 
-
+# ---------- Health / Readiness ----------
 @app.get("/health")
 @app.get("/api/v1/health")
 @app.get("/gateway/health")
 async def gateway_health() -> dict:
+    """Health check endpoint."""
     scan_repo = get_scan_result_repository()
     async with scan_results_lock:
         total_scans = scan_repo.count()
@@ -693,43 +751,41 @@ async def gateway_health() -> dict:
     return {
         "status": "healthy",
         "service": "ZeroPhish API Gateway",
-        "environment": os.getenv("ZEROPHISH_ENV", "development"),
+        "environment": CONFIG.env,
         "timestamp": datetime.now().isoformat(),
-        "weights": WEIGHTS.model_dump(),
-        "tier3_timeout_sec": TIER3_TIMEOUT,
+        "weights": CONFIG.weights.model_dump(),
+        "tier3_timeout_sec": CONFIG.tier3_timeout,
         "scans": {
             "total_cached": total_scans,
             "pending": pending_scans,
-            "history_limit": SCAN_HISTORY_LIMIT,
+            "history_limit": CONFIG.scan_history_limit,
         },
         "circuit_breaker": tier3_circuit_breaker.get_status() if tier3_circuit_breaker else None,
     }
 
-
 @app.get("/ready")
 @app.get("/api/v1/ready")
 async def gateway_readiness() -> dict:
-    scan_repo = get_scan_result_repository()
+    """Readiness probe for orchestration."""
     return {
         "status": "ready",
-        "environment": os.getenv("ZEROPHISH_ENV", "development"),
+        "environment": CONFIG.env,
         "timestamp": datetime.now().isoformat(),
         "dependencies": {
             "database": "ready",
             "repository": "ready",
             "weights": "ready",
             "models": "ready",
-            "shadow_cascade": "ready",
+            "shadow_cascade": "ready" if ShadowCascadeManager else "disabled",
         },
     }
 
-
+# ---------- Circuit Breaker Management ----------
 @app.get("/gateway/circuit/status")
 async def gateway_circuit_status() -> dict:
     if not tier3_circuit_breaker:
         return {"enabled": False, "status": "disabled"}
     return {"enabled": True, **tier3_circuit_breaker.get_status()}
-
 
 @app.get("/gateway/circuit/reset")
 @app.post("/gateway/circuit/reset")
@@ -739,15 +795,11 @@ async def gateway_circuit_reset() -> dict:
     tier3_circuit_breaker.reset()
     return {"enabled": True, "status": "reset", **tier3_circuit_breaker.get_status()}
 
-
-# ── Direct Live SSE Stream Endpoints (Unified Gateway) ──────────────────────────
-
-
+# ---------- SSE Streaming ----------
 @app.get("/tier1/latest")
 async def get_latest_tier1_scan() -> Optional[Dict[str, Any]]:
     """Return the most recent scan report for dashboard refresh."""
     return _latest_tier1_report
-
 
 @app.post("/tier1/report")
 async def receive_tier1_report(report: Dict[str, Any]) -> Dict[str, Any]:
@@ -761,16 +813,14 @@ async def receive_tier1_report(report: Dict[str, Any]) -> Dict[str, Any]:
             q.put_nowait(report)
         except Exception:
             dead.append(sub_id)
-
     for sub_id in dead:
         _sse_subscribers.pop(sub_id, None)
 
     return {"status": "success", "message": "Report received"}
 
-
 @app.get("/tier1/stream")
 async def stream_tier1_scans(request: Request) -> StreamingResponse:
-    """Server-Sent Events stream for real-time frontend scan updates."""
+    """Server‑Sent Events stream for real‑time frontend scan updates."""
     sub_id = str(uuid.uuid4())
     q: asyncio.Queue = asyncio.Queue(maxsize=50)
     _sse_subscribers[sub_id] = q
@@ -805,9 +855,7 @@ async def stream_tier1_scans(request: Request) -> StreamingResponse:
         background=BackgroundTask(cleanup),
     )
 
-
+# ---------- Main Entry ----------
 if __name__ == "__main__":
     import uvicorn
-
-    port = int(os.getenv("GATEWAY_PORT", "8001"))
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=CONFIG.port, log_level="info")
