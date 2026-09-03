@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib.machinery
 import logging
 import os
 import sys
@@ -25,14 +26,23 @@ from typing import Optional, Tuple, Dict, Any
 logger = logging.getLogger(__name__)
 
 # ---------- Platform workarounds ----------
+def _ensure_stub_module(name: str, *, is_package: bool = False):
+    """Create a module stub with a valid __spec__ so importlib.find_spec() does not crash."""
+    import types
+
+    module = sys.modules.setdefault(name, types.ModuleType(name))
+    if getattr(module, "__spec__", None) is None:
+        module.__spec__ = importlib.machinery.ModuleSpec(name, loader=None, is_package=is_package)
+        if is_package:
+            module.__path__ = []
+    return module
+
+
 if sys.platform == "win32":
     # Prevent transformers from loading broken torchvision C-extension DLLs on Windows Python 3.13
     # Insert dummy modules instead of None to satisfy type checkers expecting a module object
-    import types
-    sys.modules.setdefault("torchvision", types.ModuleType("torchvision"))
-    sys.modules.setdefault(
-        "torchvision.transforms", types.ModuleType("torchvision.transforms")
-    )
+    _ensure_stub_module("torchvision", is_package=True)
+    _ensure_stub_module("torchvision.transforms")
 
 # ---------- Optional imports ----------
 try:

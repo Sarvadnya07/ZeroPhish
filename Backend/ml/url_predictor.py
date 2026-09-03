@@ -10,6 +10,7 @@ Includes the URLPredictor protocol, health states, and singleton getters.
 from __future__ import annotations
 
 import asyncio
+import importlib.machinery
 import logging
 import os
 import sys
@@ -26,12 +27,20 @@ from .url_preprocessor import URLPreprocessor
 logger = logging.getLogger(__name__)
 
 # ---------- Platform/Import Workarounds ----------
+def _ensure_stub_module(name: str, *, is_package: bool = False) -> types.ModuleType:
+    """Create a module stub with a valid __spec__ so importlib.find_spec() does not crash."""
+    module = sys.modules.setdefault(name, types.ModuleType(name))
+    if getattr(module, "__spec__", None) is None:
+        module.__spec__ = importlib.machinery.ModuleSpec(name, loader=None, is_package=is_package)
+        if is_package:
+            module.__path__ = []
+    return module
+
+
 if sys.platform == "win32":
     # mypy/typing: set a dummy module instead of None to satisfy ModuleType expectation
-    sys.modules.setdefault("torchvision", types.ModuleType("torchvision"))
-    sys.modules.setdefault(
-        "torchvision.transforms", types.ModuleType("torchvision.transforms")
-    )
+    _ensure_stub_module("torchvision", is_package=True)
+    _ensure_stub_module("torchvision.transforms")
 
 # ---------- Optional Imports ----------
 try:
