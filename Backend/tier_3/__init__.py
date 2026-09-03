@@ -1,9 +1,15 @@
 """
-Tier 3: Semantic AI Brain for Zero-Day Phishing Detection
+Tier 3: Semantic AI Brain for Zero‑Day Phishing Detection
 
-This module provides Gemini-powered semantic analysis to catch sophisticated
-phishing and social engineering attacks that traditional rules (T1) and 
+This module provides Gemini‑powered semantic analysis to catch sophisticated
+phishing and social engineering attacks that traditional rules (T1) and
 technical metadata (T2) cannot detect.
+
+Exports:
+    T3Result: Pydantic model for analysis result.
+    T3Service: Main service class (use via functions).
+    analyze_email_intent: Async function to analyze an email.
+    get_t3_service: Get the global service instance.
 """
 
 from tier_3.main import T3Result, T3Service, analyze_email_intent, get_t3_service
