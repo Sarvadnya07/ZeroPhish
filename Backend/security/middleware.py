@@ -1,21 +1,68 @@
 """
 Security Middleware and Utilities for ZeroPhish
-Implements input validation, sanitization, and security headers
+
+Implements input validation, sanitization, and security headers.
+Provides middleware for security headers, request size limiting, and SSRF protection.
 """
 
+from __future__ import annotations
+
 import html
+import ipaddress
+import logging
 import re
+import socket
 import urllib.parse
 from typing import Optional
 
 from email_validator import EmailNotValidError, validate_email
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from security.audit_logger import log_ssrf_blocked
+
+logger = logging.getLogger(__name__)
+
+# Constants
+DEFAULT_MAX_SIZE = 1_000_000  # 1 MB
+MAX_EMAIL_LENGTH = 320  # RFC 5321
+MAX_URL_LENGTH = 2048
+MAX_LINKS_PER_REQUEST = 100
+MAX_BODY_LENGTH = 100_000  # 100 KB
+
+# Dangerous schemes
+DANGEROUS_SCHEMES = {"javascript:", "data:", "file:", "ftp:", "gopher:", "telnet:", "ws:", "wss:"}
+
+# Reserved subnets for SSRF protection
+RESERVED_SUBNETS = [
+    ipaddress.ip_network("0.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.0.2.0/24"),
+    ipaddress.ip_network("192.88.99.0/24"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("198.18.0.0/15"),
+    ipaddress.ip_network("198.51.100.0/24"),
+    ipaddress.ip_network("203.0.113.0/24"),
+    ipaddress.ip_network("224.0.0.0/4"),
+    ipaddress.ip_network("240.0.0.0/4"),
+    ipaddress.ip_network("255.255.255.255/32"),
+    ipaddress.ip_network("::/8"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+    ipaddress.ip_network("ff00::/8"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("100.64.0.0/10"),  # CGNAT
+]
+
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Add security headers to all responses."""
+    """
+    Add security headers to all responses.
+    """
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -23,7 +70,6 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Security headers
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        # Note: X-XSS-Protection is largely legacy but kept for older browsers
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; script-src 'none'; object-src 'none'"
@@ -39,30 +85,38 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
-    """Limit request body size to prevent DoS attacks."""
+    """
+    Limit request body size to prevent DoS attacks.
+    """
 
-    def __init__(self, app, max_size: int = 1_000_000):  # 1MB default
+    def __init__(self, app, max_size: int = DEFAULT_MAX_SIZE):
         super().__init__(app)
         self.max_size = max_size
 
     async def dispatch(self, request: Request, call_next):
-        # Check content length
         content_length = request.headers.get("content-length")
-        if content_length and int(content_length) > self.max_size:
-            return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+        if content_length:
+            try:
+                if int(content_length) > self.max_size:
+                    logger.warning("Request size exceeded: %s > %s", content_length, self.max_size)
+                    return JSONResponse(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        content={"detail": "Request body too large"},
+                    )
+            except ValueError:
+                pass
 
         return await call_next(request)
 
 
-def sanitize_email_content(text: str, max_length: int = 50000) -> str:
+# ---------- Validation Functions ----------
+def sanitize_email_content(text: str, max_length: int = MAX_BODY_LENGTH) -> str:
     """Sanitize email content to prevent XSS and injection attacks."""
     if not text:
         return ""
-
     text = text[:max_length]
     text = html.escape(text)
     text = text.replace("\x00", "")
-
     return text
 
 
@@ -70,11 +124,9 @@ def validate_email_address(email: str) -> bool:
     """
     Validate email address format using email-validator to prevent ReDoS.
     """
-    if not email or len(email) > 320:  # RFC 5321
+    if not email or len(email) > MAX_EMAIL_LENGTH:
         return False
-
     try:
-        # check_deliverability=False avoids performing a DNS lookup during validation
         validate_email(email, check_deliverability=False)
         return True
     except EmailNotValidError:
@@ -83,7 +135,7 @@ def validate_email_address(email: str) -> bool:
 
 def validate_url(url: str) -> bool:
     """Validate URL format and prevent CRLF/Injection and dangerous schemes."""
-    if not url or len(url) > 2048:
+    if not url or len(url) > MAX_URL_LENGTH:
         return False
 
     if re.search(r"[\s\x00-\x1F\x7F]", url):
@@ -91,12 +143,11 @@ def validate_url(url: str) -> bool:
 
     try:
         parsed = urllib.parse.urlparse(url)
-        if parsed.scheme.lower() not in ("http", "https"):
+        scheme = parsed.scheme.lower()
+        if scheme not in ("http", "https"):
             return False
-
         if not parsed.netloc or not parsed.hostname:
             return False
-
         return True
     except ValueError:
         return False
@@ -106,8 +157,8 @@ def is_safe_webhook_url(url: str, allow_http: bool = False) -> bool:
     """
     Validate destination URL to prevent SSRF attacks against:
     - Loopback addresses (127.0.0.0/8, ::1)
-    - Private RFC1918 networks (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7)
-    - Link-local & cloud metadata (169.254.0.0/16, fe80::/10, 169.254.169.254)
+    - Private RFC1918 networks
+    - Link-local & cloud metadata (169.254.0.0/16, fe80::/10)
     - Carrier-grade NAT (100.64.0.0/10)
     - Multicast, reserved, unspecified addresses
     - IPv4-mapped IPv6 representations
@@ -115,9 +166,6 @@ def is_safe_webhook_url(url: str, allow_http: bool = False) -> bool:
     """
     if not validate_url(url):
         return False
-
-    import ipaddress
-    import socket
 
     parsed = urllib.parse.urlparse(url)
     if parsed.username or parsed.password:
@@ -134,43 +182,41 @@ def is_safe_webhook_url(url: str, allow_http: bool = False) -> bool:
     # Block well-known localhost aliases early
     lower_host = hostname.lower()
     if lower_host in ("localhost", "localhost.localdomain", "127.0.0.1", "0.0.0.0", "::1"):
+        log_ssrf_blocked(hostname, "localhost_alias")
         return False
 
     try:
+        # Resolve hostname to all IP addresses
         ip_objs = []
         try:
             ip_objs.append(ipaddress.ip_address(hostname))
         except ValueError:
-            # Resolve DNS records for hostname
-            for res in socket.getaddrinfo(hostname, None):
-                sockaddr = res[4]
-                ip_objs.append(ipaddress.ip_address(sockaddr[0]))
+            # DNS resolution - use getaddrinfo with timeout
+            try:
+                addrinfo = socket.getaddrinfo(hostname, None, family=socket.AF_UNSPEC, proto=socket.IPPROTO_TCP)
+                for res in addrinfo:
+                    sockaddr = res[4]
+                    ip_objs.append(ipaddress.ip_address(sockaddr[0]))
+            except socket.gaierror:
+                return False
 
         if not ip_objs:
             return False
 
-        # Additional reserved subnets (e.g., Carrier-Grade NAT, Cloud Metadata)
-        cgnat = ipaddress.ip_network("100.64.0.0/10")
-        cloud_meta = ipaddress.ip_network("169.254.0.0/16")
-
+        # Check each resolved IP against reserved subnets
         for ip in ip_objs:
-            # Handle IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1)
+            # Handle IPv4-mapped IPv6 addresses
             if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
                 ip = ip.ipv4_mapped
 
-            if (
-                ip.is_loopback
-                or ip.is_private
-                or ip.is_link_local
-                or ip.is_reserved
-                or ip.is_multicast
-                or ip.is_unspecified
-                or (isinstance(ip, ipaddress.IPv4Address) and (ip in cgnat or ip in cloud_meta))
-            ):
-                return False
+            for subnet in RESERVED_SUBNETS:
+                if ip in subnet:
+                    log_ssrf_blocked(str(ip), f"reserved_subnet: {subnet}")
+                    return False
 
         return True
-    except Exception:
+    except Exception as e:
+        logger.warning("SSRF check failed for %s: %s", hostname, e)
         return False
 
 
@@ -183,12 +229,9 @@ def sanitize_log_message(message: str) -> str:
     """Sanitize log messages to prevent log injection."""
     if not message:
         return ""
-
     message = message.replace("\n", " ").replace("\r", " ")
-
     if len(message) > 500:
         message = message[:497] + "..."
-
     return message
 
 
@@ -221,18 +264,21 @@ class InputValidator:
 
         if not body:
             errors.append("Email body is required")
-        elif len(body) > 100000:
-            errors.append("Email body too large (max 100KB)")
+        elif len(body) > MAX_BODY_LENGTH:
+            errors.append(f"Email body too large (max {MAX_BODY_LENGTH} chars)")
 
         if links:
-            if len(links) > 100:
-                errors.append("Too many links (max 100)")
-            for link in links[:100]:
-                if isinstance(link, str) and len(link) > 2048:
+            if len(links) > MAX_LINKS_PER_REQUEST:
+                errors.append(f"Too many links (max {MAX_LINKS_PER_REQUEST})")
+            for link in links[:MAX_LINKS_PER_REQUEST]:
+                if isinstance(link, str) and len(link) > MAX_URL_LENGTH:
                     errors.append(f"Link too long: {link[:50]}...")
                     break
+                # Also validate each link
+                if not validate_url(link):
+                    errors.append("Invalid URL format in links")
 
-        if subject and len(subject) > 1000:
-            errors.append("Subject too long (max 1000 chars)")
+        if subject and len(subject) > 500:
+            errors.append("Subject too long (max 500 chars)")
 
         return {"valid": len(errors) == 0, "errors": errors}
