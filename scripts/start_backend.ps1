@@ -1,56 +1,216 @@
-# ZeroPhish Backend Startup Script
-# This script starts the FastAPI backend server
+<#
+.SYNOPSIS
+    Starts the ZeroPhish FastAPI Backend Server (Tier 2) with environment validation and dependency checks.
 
-Write-Host "🛡️  ZeroPhish Backend Startup" -ForegroundColor Cyan
-Write-Host "================================" -ForegroundColor Cyan
-Write-Host ""
+.DESCRIPTION
+    This script activates the Python virtual environment, installs required packages,
+    validates the .env files (both root and tier_2/), and launches the backend server.
+    It also checks for port conflicts and optionally runs the server in the background.
 
-# Check if virtual environment exists
-if (Test-Path "venv\Scripts\Activate.ps1") {
-    Write-Host "✅ Activating virtual environment..." -ForegroundColor Green
-    & "venv\Scripts\Activate.ps1"
+.PARAMETER Port
+    Port on which the backend should listen (overrides .env). Default: 8000.
+
+.PARAMETER EnvFile
+    Path to the main .env file. Default: .\.env.
+
+.PARAMETER Tier2EnvFile
+    Path to the tier_2 .env file. Default: .\tier_2\.env.
+
+.PARAMETER Background
+    Run the backend in the background (as a PowerShell job).
+
+.PARAMETER NoInstall
+    Skip dependency installation (pip install).
+
+.EXAMPLE
+    .\start_backend.ps1
+    .\start_backend.ps1 -Port 8002 -Background
+#>
+
+param(
+    [int]$Port,
+    [string]$EnvFile = ".\.env",
+    [string]$Tier2EnvFile = ".\tier_2\.env",
+    [switch]$Background,
+    [switch]$NoInstall
+)
+
+# ---------- Helper Functions ----------
+function Write-Info {
+    param([string]$Message)
+    Write-Host "ℹ️  $Message" -ForegroundColor Cyan
+}
+
+function Write-Success {
+    param([string]$Message)
+    Write-Host "✅ $Message" -ForegroundColor Green
+}
+
+function Write-Warning {
+    param([string]$Message)
+    Write-Host "⚠️  $Message" -ForegroundColor Yellow
+}
+
+function Write-ErrorMsg {
+    param([string]$Message)
+    Write-Host "❌ $Message" -ForegroundColor Red
+}
+
+# ---------- Main Script ----------
+Write-Info "🛡️  ZeroPhish Backend Startup"
+Write-Info "=============================="
+
+# 1. Check Python
+try {
+    $pythonVersion = python --version 2>&1
+    Write-Success "Python found: $pythonVersion"
+} catch {
+    Write-ErrorMsg "Python is not installed or not in PATH. Please install Python 3.11+."
+    exit 1
+}
+
+# 2. Virtual environment
+$venvPath = "venv"
+if (Test-Path "$venvPath\Scripts\Activate.ps1") {
+    Write-Success "Virtual environment found: $venvPath"
 } else {
-    Write-Host "⚠️  Virtual environment not found. Creating one..." -ForegroundColor Yellow
-    python -m venv venv
-    & "venv\Scripts\Activate.ps1"
-    Write-Host "📦 Installing dependencies..." -ForegroundColor Yellow
-    pip install -r requirements.txt
+    Write-Warning "Virtual environment not found. Creating one..."
+    python -m venv $venvPath
+    if (-not $?) {
+        Write-ErrorMsg "Failed to create virtual environment."
+        exit 1
+    }
+    Write-Success "Virtual environment created."
 }
 
-Write-Host ""
-Write-Host "🔍 Checking environment configuration..." -ForegroundColor Cyan
+# Activate venv
+& "$venvPath\Scripts\Activate.ps1"
+if (-not $?) {
+    Write-ErrorMsg "Failed to activate virtual environment."
+    exit 1
+}
+Write-Success "Virtual environment activated."
 
-# Check if .env exists
-if (-not (Test-Path ".env")) {
-    Write-Host "⚠️  .env file not found. Creating default..." -ForegroundColor Yellow
+# 3. Install dependencies (unless skipped)
+if (-not $NoInstall) {
+    Write-Info "Checking/installing dependencies..."
+    $requirements = "requirements.txt"
+    if (Test-Path $requirements) {
+        pip install -r $requirements
+        if (-not $?) {
+            Write-ErrorMsg "Failed to install dependencies."
+            exit 1
+        }
+        Write-Success "Dependencies installed."
+    } else {
+        Write-Warning "requirements.txt not found; skipping install."
+    }
+}
+
+# 4. Environment file (root)
+if (Test-Path $EnvFile) {
+    Write-Success "Root environment file found: $EnvFile"
+    # Load environment variables from .env
+    Get-Content $EnvFile | ForEach-Object {
+        if ($_ -match '^\s*([^#][^=]+)=(.*)') {
+            $key = $matches[1].Trim()
+            $value = $matches[2].Trim()
+            if ($value -match '^"(.+)"$' -or $value -match "^'(.+)'$") {
+                $value = $matches[1]
+            }
+            Set-Item -Path "env:$key" -Value $value
+        }
+    }
+    Write-Success "Root environment variables loaded."
+} else {
+    Write-Warning "Root .env file not found at $EnvFile. Creating default..."
     @"
+# ZeroPhish Backend Configuration
 GEMINI_API_KEY=your_actual_gemini_api_key_here
-"@ | Out-File -FilePath ".env" -Encoding UTF8
+"@ | Out-File -FilePath $EnvFile -Encoding UTF8
+    Write-Success "Default root .env created. Please edit it if needed."
 }
 
-# Check if tier_2/.env exists
-if (-not (Test-Path "tier_2\.env")) {
-    Write-Host "⚠️  tier_2/.env file not found. Creating default..." -ForegroundColor Yellow
+# 5. Environment file (tier_2)
+if (Test-Path $Tier2EnvFile) {
+    Write-Success "Tier-2 environment file found: $Tier2EnvFile"
+    # Load tier_2 environment variables (if any)
+    Get-Content $Tier2EnvFile | ForEach-Object {
+        if ($_ -match '^\s*([^#][^=]+)=(.*)') {
+            $key = $matches[1].Trim()
+            $value = $matches[2].Trim()
+            if ($value -match '^"(.+)"$' -or $value -match "^'(.+)'$") {
+                $value = $matches[1]
+            }
+            Set-Item -Path "env:$key" -Value $value
+        }
+    }
+    Write-Success "Tier-2 environment variables loaded."
+} else {
+    Write-Warning "Tier-2 .env file not found at $Tier2EnvFile. Creating default..."
     @"
+# Redis Configuration (optional)
 REDIS_URL=redis://localhost:6379
 # For Redis Cloud:
 # REDIS_URL=redis://username:password@host:port
-"@ | Out-File -FilePath "tier_2\.env" -Encoding UTF8
+"@ | Out-File -FilePath $Tier2EnvFile -Encoding UTF8
+    Write-Success "Default tier_2/.env created. Please edit it if needed."
 }
 
-Write-Host ""
-Write-Host "🚀 Starting ZeroPhish Backend Server..." -ForegroundColor Green
-Write-Host ""
-Write-Host "📊 Available Endpoints:" -ForegroundColor Cyan
-Write-Host "   - API Docs:     http://localhost:8000/docs" -ForegroundColor White
-Write-Host "   - Health Check: http://localhost:8000/health" -ForegroundColor White
-Write-Host "   - Cache Stats:  http://localhost:8000/cache/stats" -ForegroundColor White
-Write-Host ""
-Write-Host "Press Ctrl+C to stop the server" -ForegroundColor Yellow
-Write-Host ""
+# 6. Override port if specified (if backend uses PORT env var, set it)
+if ($Port) {
+    Set-Item -Path "env:PORT" -Value $Port
+    Write-Info "Port overridden to $Port"
+}
 
-# Navigate to Backend directory and start the server
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$BackendDir = Join-Path (Split-Path -Parent $ScriptDir) "Backend"
-Set-Location (Join-Path $BackendDir "tier_2")
-python main.py
+# 7. Check port availability (if we can determine the port)
+$backendPort = [int](Get-Item -Path "env:PORT" -ErrorAction SilentlyContinue).Value
+if (-not $backendPort) { $backendPort = 8000 }  # default
+
+$portInUse = Get-NetTCPConnection -LocalPort $backendPort -ErrorAction SilentlyContinue
+if ($portInUse) {
+    Write-Warning "Port $backendPort is already in use by another process."
+    Write-Warning "You may need to stop that process or use a different port."
+    $choice = Read-Host "Continue anyway? (y/N)"
+    if ($choice -ne 'y' -and $choice -ne 'Y') {
+        Write-Info "Exiting."
+        exit 1
+    }
+}
+
+# 8. Display summary
+Write-Info "Backend Configuration:"
+Write-Info "  Port: $backendPort"
+Write-Info "  Root Env: $EnvFile"
+Write-Info "  Tier-2 Env: $Tier2EnvFile"
+Write-Info "  Background: $Background"
+
+# 9. Start the backend
+$backendScript = "Backend/tier_2/main.py"
+if (-not (Test-Path $backendScript)) {
+    Write-ErrorMsg "Backend script not found at $backendScript"
+    exit 1
+}
+
+Write-Info "🚀 Starting ZeroPhish Backend Server..."
+Write-Info "📡 Available Endpoints:"
+Write-Info "   - API Docs:     http://localhost:$backendPort/docs"
+Write-Info "   - Health Check: http://localhost:$backendPort/health"
+Write-Info "   - Cache Stats:  http://localhost:$backendPort/cache/stats"
+Write-Info ""
+Write-Info "Press Ctrl+C to stop the server"
+
+if ($Background) {
+    # Run as a background job
+    $job = Start-Job -ScriptBlock {
+        param($ScriptPath)
+        Set-Location (Split-Path $ScriptPath -Parent)
+        python (Split-Path $ScriptPath -Leaf)
+    } -ArgumentList $backendScript
+    Write-Success "Backend started in background (Job ID: $($job.Id))."
+    Write-Info "To stop it, run: Stop-Job -Id $($job.Id)"
+} else {
+    # Run in foreground
+    Set-Location (Split-Path $backendScript -Parent)
+    python (Split-Path $backendScript -Leaf)
+}
