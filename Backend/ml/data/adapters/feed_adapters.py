@@ -142,17 +142,21 @@ class BaseBulkFeedAdapter(ThreatFeedAdapter, ABC):
         except urllib.error.HTTPError as e:
             self._last_status = FeedIngestionStatus.FAILED
             host = urllib.parse.urlsplit(url).netloc or "feed_host"
-            logger.error("HTTP error %s fetching from %s", getattr(e, "code", "unknown"), host)
+            clean_host = str(host).replace("\n", "").replace("\r", "")
+            logger.error("HTTP error %s fetching from %s", getattr(e, "code", "unknown"), clean_host)
             raise
         except urllib.error.URLError as e:
             self._last_status = FeedIngestionStatus.FAILED
             host = urllib.parse.urlsplit(url).netloc or "feed_host"
-            logger.error("Network error fetching from %s: %s", host, getattr(e, "reason", "connection_error"))
+            clean_host = str(host).replace("\n", "").replace("\r", "")
+            clean_reason = str(getattr(e, "reason", "connection_error")).replace("\n", "").replace("\r", "")
+            logger.error("Network error fetching from %s: %s", clean_host, clean_reason)
             raise
         except Exception as e:
             self._last_status = FeedIngestionStatus.FAILED
             host = urllib.parse.urlsplit(url).netloc or "feed_host"
-            logger.error("Unexpected error fetching from %s: %s", host, type(e).__name__)
+            clean_host = str(host).replace("\n", "").replace("\r", "")
+            logger.error("Unexpected error fetching from %s: %s", clean_host, type(e).__name__)
             raise
 
     def _build_record(
