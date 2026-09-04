@@ -98,13 +98,17 @@ async def scan_eml(
 
     try:
         result = EmlParser.parse(data)
-        logger.info("EML scan completed for user %s: %s", current_user.id, result.message_id or "unknown")
+        clean_user_id = str(current_user.id).replace("\n", "").replace("\r", "")
+        clean_msg_id = str(result.message_id or "unknown").replace("\n", "").replace("\r", "")
+        logger.info("EML scan completed for user %s: %s", clean_user_id, clean_msg_id)
         return result
     except ValueError as e:
-        logger.error("EML parse error for user %s: %s", current_user.id, e)
+        clean_user_id = str(current_user.id).replace("\n", "").replace("\r", "")
+        logger.error("EML parse error for user %s: %s", clean_user_id, type(e).__name__)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.exception("Unexpected error parsing EML for user %s", current_user.id)
+        clean_user_id = str(current_user.id).replace("\n", "").replace("\r", "")
+        logger.exception("Unexpected error parsing EML for user %s", clean_user_id)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal parsing error")
 
 
@@ -125,15 +129,18 @@ async def validate_domain(
             detail="Domain is required",
         )
 
+    clean_domain = str(domain.strip()).replace("\n", "").replace("\r", "")
+    clean_user_id = str(current_user.id).replace("\n", "").replace("\r", "")
+
     try:
         result = await DnsValidator.validate(domain.strip())
         logger.info("DNS validation for domain %s by user %s: SPF=%s, DMARC=%s",
-                    domain, current_user.id, result.spf_valid, result.dmarc_policy)
+                    clean_domain, clean_user_id, result.spf_valid, result.dmarc_policy)
         return result
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.exception("DNS validation failed for %s by user %s", domain, current_user.id)
+        logger.exception("DNS validation failed for %s by user %s", clean_domain, clean_user_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"DNS lookup failed: {e}",
@@ -164,15 +171,18 @@ async def sandbox_attachment(
             detail=f"Attachment too large (max {MAX_ATTACHMENT_SIZE} bytes)",
         )
 
+    clean_filename = str(file.filename or "unknown").replace("\n", "").replace("\r", "")
+    clean_user_id = str(current_user.id).replace("\n", "").replace("\r", "")
+
     try:
         report = AttachmentSandbox.analyse(file.filename or "unknown", data)
         logger.info("Attachment analysis for %s by user %s: risk=%s",
-                    file.filename, current_user.id, report.risk_level.value)
+                    clean_filename, clean_user_id, report.risk_level.value)
         return report
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.exception("Attachment analysis failed for user %s", current_user.id)
+        logger.exception("Attachment analysis failed for user %s", clean_user_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Attachment analysis failed",

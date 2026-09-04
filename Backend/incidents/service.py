@@ -128,7 +128,8 @@ class IncidentService:
 
         clean_inc_id = str(incident_id).replace("\n", "").replace("\r", "")
         clean_rep_id = str(reporter_id or "system").replace("\n", "").replace("\r", "")
-        logger.info("Incident %s created by %s, severity=%s", clean_inc_id, clean_rep_id, severity.value)
+        clean_sev = str(severity.value).replace("\n", "").replace("\r", "")
+        logger.info("Incident %s created by %s, severity=%s", clean_inc_id, clean_rep_id, clean_sev)
         return saved
 
     @staticmethod

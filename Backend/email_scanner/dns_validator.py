@@ -81,8 +81,10 @@ class DnsValidator:
         if dmarc_policy in (None, "none"):
             penalty += PENALTY_WEAK_DMARC
 
+        clean_domain = str(domain).replace("\n", "").replace("\r", "")
+        clean_policy = str(dmarc_policy or "none").replace("\n", "").replace("\r", "")
         logger.info("DNS validation for %s: SPF=%s, DMARC=%s, penalty=%d",
-                    domain, spf_valid, dmarc_policy, penalty)
+                    clean_domain, spf_valid, clean_policy, penalty)
 
         return DNSAuthRecord(
             domain=domain,

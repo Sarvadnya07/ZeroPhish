@@ -97,10 +97,12 @@ class AnalyticsService:
             if inspect.isawaitable(res):
                 await asyncio.wait_for(res, timeout=3.0)
         except asyncio.TimeoutError:
-            logger.warning("record_scan_event timed out for scan_id=%s", scan_id)
+            clean_scan_id = str(scan_id).replace("\n", "").replace("\r", "")
+            logger.warning("record_scan_event timed out for scan_id=%s", clean_scan_id)
             # Do not re-raise; telemetry should not break the scan flow.
         except Exception as e:
-            logger.error("Failed to record scan event for scan_id=%s: %s", scan_id, e)
+            clean_scan_id = str(scan_id).replace("\n", "").replace("\r", "")
+            logger.error("Failed to record scan event for scan_id=%s: %s", clean_scan_id, type(e).__name__)
             # Do not re-raise; telemetry should not break the scan flow.
 
     @staticmethod
@@ -311,10 +313,11 @@ class AnalyticsService:
                 return await asyncio.wait_for(res, timeout=5.0)
             return res
         except asyncio.TimeoutError:
-            logger.error("report_false_positive timed out for scan_id=%s", scan_id)
+            clean_scan_id = str(scan_id).replace("\n", "").replace("\r", "")
+            logger.error("report_false_positive timed out for scan_id=%s", clean_scan_id)
             return fp  # Return the report even if save times out
         except Exception as e:
-            logger.error("Error saving false positive: %s", e)
+            logger.error("Error saving false positive: %s", type(e).__name__)
             return fp  # Return the report even if save fails
 
     @staticmethod
@@ -330,7 +333,7 @@ class AnalyticsService:
             logger.warning("list_false_positives timed out")
             return []
         except Exception as e:
-            logger.error("Error listing false positives: %s", e)
+            logger.error("Error listing false positives: %s", type(e).__name__)
             return []
 
     @staticmethod
@@ -350,10 +353,11 @@ class AnalyticsService:
                 return await asyncio.wait_for(res, timeout=5.0)
             return res
         except asyncio.TimeoutError:
-            logger.error("review_false_positive timed out for fp_id=%s", fp_id)
+            clean_fp_id = str(fp_id).replace("\n", "").replace("\r", "")
+            logger.error("review_false_positive timed out for fp_id=%s", clean_fp_id)
             return None
         except Exception as e:
-            logger.error("Error reviewing false positive: %s", e)
+            logger.error("Error reviewing false positive: %s", type(e).__name__)
             return None
 
     # ---------- Policy Rules ----------
@@ -421,10 +425,11 @@ class AnalyticsService:
                 result = res
             return result if isinstance(result, bool) else False
         except asyncio.TimeoutError:
-            logger.warning("delete_policy timed out for rule_id=%s", rule_id)
+            clean_rule_id = str(rule_id).replace("\n", "").replace("\r", "")
+            logger.warning("delete_policy timed out for rule_id=%s", clean_rule_id)
             return False
         except Exception as e:
-            logger.error("Error deleting policy: %s", e)
+            logger.error("Error deleting policy: %s", type(e).__name__)
             return False
 
     # ---------- User-Specific Queries ----------
@@ -458,10 +463,11 @@ class AnalyticsService:
                         break
             return user_events
         except asyncio.TimeoutError:
-            logger.warning("user_scan_history timed out for user_id=%s", user_id)
+            clean_uid = str(user_id).replace("\n", "").replace("\r", "")
+            logger.warning("user_scan_history timed out for user_id=%s", clean_uid)
             return []
         except Exception as e:
-            logger.error("Error fetching user_scan_history: %s", e)
+            logger.error("Error fetching user_scan_history: %s", type(e).__name__)
             return []
 
     @staticmethod
@@ -494,8 +500,9 @@ class AnalyticsService:
             avg_score = total_score / count
             return round(avg_score, 2)
         except asyncio.TimeoutError:
-            logger.warning("user_risk_score timed out for user_id=%s", user_id)
+            clean_uid = str(user_id).replace("\n", "").replace("\r", "")
+            logger.warning("user_risk_score timed out for user_id=%s", clean_uid)
             return AnalyticsService.DEFAULT_RISK_SCORE
         except Exception as e:
-            logger.error("Error calculating user_risk_score: %s", e)
+            logger.error("Error calculating user_risk_score: %s", type(e).__name__)
             return AnalyticsService.DEFAULT_RISK_SCORE
