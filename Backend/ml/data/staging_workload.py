@@ -98,34 +98,63 @@ class StagingConfig:
             raise ValueError(f"rate_rps must be positive, got {self.rate_rps}")
         if self.count <= 0:
             raise ValueError(f"count must be positive, got {self.count}")
-        if self.base_url.startswith(("https://zerophish.com", "https://app.zerophish.com")):
-            raise ValueError("Refusing to target production domain!")
+        if self.env.lower() in ("prod", "production"):
+            raise ValueError(
+                "SAFETY VIOLATION: Staging workload generator cannot run against production"
+            )
+        if any(prod in self.base_url.lower()
+               for prod in ("zerophish.com", "app.zerophish.com", "api.zerophish.com")):
+            raise ValueError("SAFETY VIOLATION: Refusing to target production domain")
 
 
 class StagingWorkloadGenerator:
     """Safe, controlled workload generator for staging API shadow evaluation."""
 
-    def __init__(self, config: StagingConfig) -> None:
+    def __init__(
+        self,
+        config: Optional[StagingConfig] = None,
+        base_url: Optional[str] = None,
+        env: Optional[str] = None,
+        count: Optional[int] = None,
+        rate_rps: Optional[float] = None,
+        **kwargs: Any,
+    ) -> None:
+        if config is None:
+            cfg_kwargs: Dict[str, Any] = {}
+            if base_url is not None:
+                cfg_kwargs["base_url"] = base_url
+            if env is not None:
+                cfg_kwargs["env"] = env
+            if count is not None:
+                cfg_kwargs["count"] = count
+            if rate_rps is not None:
+                cfg_kwargs["rate_rps"] = rate_rps
+            for k, v in kwargs.items():
+                if hasattr(StagingConfig, k):
+                    cfg_kwargs[k] = v
+            config = StagingConfig(**cfg_kwargs)
         self.config = config
         self.run_id = f"gen_run_{uuid.uuid4().hex[:12]}"
         self._validate_safety()
 
     def _validate_safety(self) -> None:
         """Enforce hard fail‑closed if targeting production."""
-        host = URLNormalizer.extract_hostname(self.config.base_url)
         if self.config.env.lower() in ("prod", "production"):
             raise ValueError(
-                "SAFETY VIOLATION: Cannot run staging workload against production!"
+                "SAFETY VIOLATION: Staging workload generator cannot run against production"
             )
         if any(prod in self.config.base_url.lower()
                for prod in ("zerophish.com", "app.zerophish.com", "api.zerophish.com")):
-            raise ValueError("SAFETY VIOLATION: Refusing to target production domain!")
+            raise ValueError("SAFETY VIOLATION: Refusing to target production domain")
 
     @classmethod
     async def run_workload(
         cls,
         config: Optional[StagingConfig] = None,
         app: Optional[Any] = None,
+        count: Optional[int] = None,
+        rate_rps: Optional[float] = None,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         """
         Execute HTTP scan requests through the genuine ZeroPhish FastAPI endpoint.
@@ -133,8 +162,24 @@ class StagingWorkloadGenerator:
         Uses AsyncClient with in‑process app or live staging HTTP server.
         """
         if config is None:
-            config = StagingConfig()
+            cfg_kwargs: Dict[str, Any] = {}
+            if count is not None:
+                cfg_kwargs["count"] = count
+            if rate_rps is not None:
+                cfg_kwargs["rate_rps"] = rate_rps
+            for k, v in kwargs.items():
+                if hasattr(StagingConfig, k):
+                    cfg_kwargs[k] = v
+            config = StagingConfig(**cfg_kwargs)
         generator = cls(config)
+
+        if app is None:
+            try:
+                from gateway import app as default_app
+                app = default_app
+            except Exception as e:
+                logger.warning("Could not import gateway.app: %s", e)
+                app = None
 
         # Build corpus
         corpus = [

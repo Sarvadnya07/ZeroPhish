@@ -142,7 +142,9 @@ class AuthService:
                 "role": initial_role.value,
             },
         )
-        logger.info("User provisioned: %s (%s)", email, initial_role.value)
+        clean_email = str(email).replace("\n", "").replace("\r", "")
+        clean_role = str(initial_role.value).replace("\n", "").replace("\r", "")
+        logger.info("User provisioned: %s (%s)", clean_email, clean_role)
 
         return cls._to_model(user_in_db)
 
@@ -192,7 +194,9 @@ class AuthService:
         # If we're downgrading an admin, log it
         old_role = user_db.role
         if update.role is not None and old_role == UserRole.ADMIN and update.role != UserRole.ADMIN:
-            logger.warning("Admin user %s downgraded to %s", user_id, update.role.value)
+            clean_user_id = str(user_id).replace("\n", "").replace("\r", "")
+            clean_role = str(update.role.value).replace("\n", "").replace("\r", "")
+            logger.warning("Admin user %s downgraded to %s", clean_user_id, clean_role)
             AuditLogger.log_event(
                 event_type="ADMIN_DOWNGRADE",
                 user_id=user_id,

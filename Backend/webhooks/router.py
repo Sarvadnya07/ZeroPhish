@@ -42,10 +42,13 @@ async def create_subscription(
     try:
         return await WebhookService.subscribe(data, owner_id=current_user.id)
     except ValueError as e:
-        logger.warning("Webhook creation failed for user %s: %s", current_user.id, e)
+        clean_user_id = str(current_user.id).replace("\n", "").replace("\r", "")
+        clean_err = str(e).replace("\n", "").replace("\r", "")
+        logger.warning("Webhook creation failed for user %s: %s", clean_user_id, clean_err)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.exception("Unexpected error creating webhook for user %s", current_user.id)
+        clean_user_id = str(current_user.id).replace("\n", "").replace("\r", "")
+        logger.exception("Unexpected error creating webhook for user %s", clean_user_id)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create subscription")
 
 
@@ -114,4 +117,6 @@ async def delete_subscription(
     ok = await WebhookService.unsubscribe(sub_id, owner_id=owner_id)
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found or access denied")
-    logger.info("Subscription %s deleted by user %s", sub_id, current_user.id)
+    clean_sub_id = str(sub_id).replace("\n", "").replace("\r", "")
+    clean_user_id = str(current_user.id).replace("\n", "").replace("\r", "")
+    logger.info("Subscription %s deleted by user %s", clean_sub_id, clean_user_id)

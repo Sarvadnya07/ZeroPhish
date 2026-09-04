@@ -97,7 +97,9 @@ def submit_quiz(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
-        logger.error("Quiz submission error for user %s: %s", current_user.id, e)
+        clean_user_id = str(current_user.id).replace("\n", "").replace("\r", "")
+        clean_err = str(e).replace("\n", "").replace("\r", "")
+        logger.error("Quiz submission error for user %s: %s", clean_user_id, clean_err)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process quiz submission",

@@ -102,7 +102,7 @@ class GatewayConfig:
     """Immutable configuration for the gateway."""
     env: str = field(default_factory=lambda: os.getenv("ZEROPHISH_ENV", "development"))
     port: int = field(default_factory=lambda: int(os.getenv("GATEWAY_PORT", "8001")))
-    tier3_timeout: int = field(default_factory=lambda: int(os.getenv("TIER3_TIMEOUT", "5")))
+    tier3_timeout: int = field(default_factory=lambda: int(os.getenv("TIER3_TIMEOUT", "7")))
     scan_rate_limit: str = field(default_factory=lambda: os.getenv(
         "SCAN_RATE_LIMIT",
         os.getenv("GATEWAY_SCAN_RATE_LIMIT", "20/minute" if os.getenv("ZEROPHISH_ENV") == "production" else "1200/minute"),
@@ -455,9 +455,14 @@ async def _notify_live_dashboard(res: GatewayScanResponse, sender: str, subject:
     if live_url and "8001" not in live_url:
         try:
             import httpx
-            json_payload = json.loads(json.dumps(payload, default=str))
+            payload_bytes = json.dumps(payload, default=str).encode("utf-8")
             async with httpx.AsyncClient() as client:
-                await client.post(live_url, json=json_payload, timeout=2.0)
+                await client.post(
+                    live_url,
+                    content=payload_bytes,
+                    headers={"Content-Type": "application/json"},
+                    timeout=2.0,
+                )
         except (httpx.HTTPError, OSError, TimeoutError, ValueError, TypeError) as e:
             logger.debug("External dashboard notification failed: %s", e)
 
@@ -763,12 +768,10 @@ async def gateway_scan(
     if ShadowCascadeManager and scan_request.links:
         for link in scan_request.links[:5]:
             try:
-                asyncio.create_task(
-                    ShadowCascadeManager.get_instance().observe_async(
-                        url=link,
-                        production_verdict=verdict_str,
-                        production_score=float(partial_score),
-                    )
+                ShadowCascadeManager.get_instance().observe_async(
+                    url=link,
+                    production_verdict=verdict_str,
+                    production_score=float(partial_score),
                 )
             except (RuntimeError, ValueError, TypeError):
                 logger.debug("Failed to schedule shadow-cascade observation for %s", link, exc_info=True)
@@ -947,7 +950,7 @@ async def stream_tier1_scans(request: Request) -> StreamingResponse:
     async def event_generator():
         yield f"event: ping\ndata: {json.dumps({'status': 'connected'})}\n\n"
         if _latest_tier1_report:
-            yield f"data: {json.dumps(_latest_tier1_report)}\n\n"
+            yield f"data: {json.dumps(_latest_tier1_report, default=str)}\n\n"
 
         while True:
             if await request.is_disconnected():

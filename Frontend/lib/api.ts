@@ -1,3 +1,5 @@
+import type { GatewayScanResponse } from "./live-tier1";
+
 // Centralised API client for all ZeroPhish backend endpoints
 const BASE = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://localhost:8001";
 
@@ -37,13 +39,14 @@ export const api = {
 
   // ── Gateway scan ──────────────────────────────────────────────────────────
   scan: {
-    submit:  (payload: any, token?: string) =>
-      request<any>("/gateway/scan", { method: "POST", body: JSON.stringify(payload) }, token),
-    status:  (id: string, token?: string) =>
-      request<any>(`/gateway/status/${id}`, {}, token),
-    result:  (id: string, token?: string) =>
-      request<any>(`/gateway/result/${id}`, {}, token),
-    health:  () => request<any>("/gateway/health"),
+    submit: (payload: any, token?: string): Promise<GatewayScanResponse> =>
+      request<GatewayScanResponse>("/gateway/scan", { method: "POST", body: JSON.stringify(payload) }, token),
+    status: (id: string, token?: string): Promise<GatewayScanResponse> =>
+      request<GatewayScanResponse>(`/gateway/status/${id}`, {}, token),
+    result: (id: string, token?: string): Promise<GatewayScanResponse> =>
+      request<GatewayScanResponse>(`/gateway/result/${id}`, {}, token),
+    health: (): Promise<{ status: string; timestamp?: string }> =>
+      request<{ status: string; timestamp?: string }>("/gateway/health"),
   },
 
   // ── Incidents ─────────────────────────────────────────────────────────────

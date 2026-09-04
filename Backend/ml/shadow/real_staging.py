@@ -141,7 +141,12 @@ class RealStagingTelemetryValidator:
         if gate_passed:
             reasons.append("All gate criteria satisfied")
 
-        gate_status = "READY_FOR_25_PERCENT" if gate_passed else "REMAIN_AT_10_PERCENT"
+        if gate_passed:
+            gate_status = "READY_FOR_25_PERCENT"
+        elif total_real < criteria.min_observations:
+            gate_status = "INSUFFICIENT_REAL_STAGING_EVIDENCE"
+        else:
+            gate_status = "REMAIN_AT_10_PERCENT"
 
         # Save artifacts
         cls._save_artifacts(
@@ -236,8 +241,8 @@ class RealStagingTelemetryValidator:
         # 2. observation_summary
         write_json("observation_summary.json", {**common_meta, "total_observations": kwargs["total_real"]})
 
-        # 3. stage_distribution
-        n_succ = max(kwargs["successful"], 1)
+        succ_val = kwargs.get("successful", 1)
+        n_succ = max(len(succ_val) if isinstance(succ_val, (list, tuple, set)) else int(succ_val), 1)
         write_json("stage_distribution.json", {**common_meta, "hard_rule_resolution_pct": (kwargs["hard_rules"]/n_succ)*100,
                                                 "heuristics_resolution_pct": (kwargs["heuristics"]/n_succ)*100,
                                                 "onnx_invocation_pct": (kwargs["onnx_calls"]/n_succ)*100,

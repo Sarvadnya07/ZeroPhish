@@ -3,3 +3,5 @@
 c8f640d2e94dcbf3aca2cadb4577dd8915998b3d:Backend/.env.example:stripe-access-token:14
 c8f640d2e94dcbf3aca2cadb4577dd8915998b3d:Frontend/.env.example:stripe-access-token:4
 d0a9aa0dbe9c0b08c35047caeb5214a624b3ff27:Backend/ml/data/staging_workload.py:generic-api-key:60
+d4212236b6609666b58639a1816f03294b69a693:Backend/tests/test_repositories.py:generic-api-key:239
+d4212236b6609666b58639a1816f03294b69a693:Backend/tests/test_completion_gaps.py:generic-api-key:177

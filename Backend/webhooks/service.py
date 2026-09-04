@@ -151,8 +151,10 @@ class WebhookService:
         if asyncio.iscoroutine(saved):
             saved = await saved
         _subscriptions[saved.id] = saved
+        clean_sub_id = str(sub_id).replace("\n", "").replace("\r", "")
+        clean_owner_id = str(owner_id or "").replace("\n", "").replace("\r", "")
         logger.info("Webhook subscription created: id=%s, owner=%s, events=%d",
-                    sub_id, owner_id, len(data.events))
+                    clean_sub_id, clean_owner_id, len(data.events))
         return saved
 
     @staticmethod
@@ -165,7 +167,9 @@ class WebhookService:
         if asyncio.iscoroutine(deleted):
             deleted = await deleted
         if deleted:
-            logger.info("Webhook subscription deleted: id=%s, owner=%s", sub_id, owner_id)
+            clean_sub_id = str(sub_id).replace("\n", "").replace("\r", "")
+            clean_owner_id = str(owner_id or "").replace("\n", "").replace("\r", "")
+            logger.info("Webhook subscription deleted: id=%s, owner=%s", clean_sub_id, clean_owner_id)
         return deleted
 
     @staticmethod

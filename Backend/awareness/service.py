@@ -171,7 +171,9 @@ class AwarenessService:
             created_at=datetime.now(timezone.utc),
         )
         _lessons[lid] = lesson
-        logger.info("Created lesson: %s (%s)", data.title, lid)
+        clean_title = str(data.title).replace("\n", "").replace("\r", "")
+        clean_lid = str(lid).replace("\n", "").replace("\r", "")
+        logger.info("Created lesson: %s (%s)", clean_title, clean_lid)
         return lesson
 
     # ---------- Quiz ----------
@@ -215,7 +217,9 @@ class AwarenessService:
             prog.xp += xp_earned
             AwarenessService._update_level(prog)
             AwarenessService._check_badges(prog)
-            logger.info("User %s completed lesson %s, earned %d XP", user_id, lesson_id, xp_earned)
+            clean_user_id = str(user_id).replace("\n", "").replace("\r", "")
+            clean_lesson_id = str(lesson_id).replace("\n", "").replace("\r", "")
+            logger.info("User %s completed lesson %s, earned %d XP", clean_user_id, clean_lesson_id, xp_earned)
 
         AwarenessService._update_detection_score(prog)
 
@@ -252,7 +256,9 @@ class AwarenessService:
             status=CampaignStatus.DRAFT,
         )
         _campaigns[cid] = campaign
-        logger.info("Created campaign: %s by %s", data.name, created_by)
+        clean_name = str(data.name).replace("\n", "").replace("\r", "")
+        clean_creator = str(created_by or "").replace("\n", "").replace("\r", "")
+        logger.info("Created campaign: %s by %s", clean_name, clean_creator)
         return campaign
 
     @staticmethod
@@ -267,7 +273,8 @@ class AwarenessService:
         if camp:
             camp.click_count += 1
         else:
-            logger.warning("Click recorded for non-existent campaign %s", campaign_id)
+            clean_cid = str(campaign_id).replace("\n", "").replace("\r", "")
+            logger.warning("Click recorded for non-existent campaign %s", clean_cid)
 
         prog = AwarenessService._get_or_create_progress(user_id)
         if campaign_id not in prog.campaigns_clicked:
@@ -281,7 +288,8 @@ class AwarenessService:
         if camp:
             camp.report_count += 1
         else:
-            logger.warning("Report recorded for non-existent campaign %s", campaign_id)
+            clean_cid = str(campaign_id).replace("\n", "").replace("\r", "")
+            logger.warning("Report recorded for non-existent campaign %s", clean_cid)
 
         prog = AwarenessService._get_or_create_progress(user_id)
         if campaign_id not in prog.campaigns_reported:
@@ -290,8 +298,10 @@ class AwarenessService:
             prog.xp += CAMPAIGN_REPORT_BONUS_XP
             AwarenessService._update_level(prog)
             AwarenessService._check_badges(prog)
+            clean_user_id = str(user_id).replace("\n", "").replace("\r", "")
+            clean_cid = str(campaign_id).replace("\n", "").replace("\r", "")
             logger.info("User %s correctly reported campaign %s, +%d XP",
-                        user_id, campaign_id, CAMPAIGN_REPORT_BONUS_XP)
+                        clean_user_id, clean_cid, CAMPAIGN_REPORT_BONUS_XP)
 
         AwarenessService._update_detection_score(prog)
 

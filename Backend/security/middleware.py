@@ -192,14 +192,22 @@ def is_safe_webhook_url(url: str, allow_http: bool = False) -> bool:
         try:
             ip_objs.append(ipaddress.ip_address(hostname))
         except ValueError:
-            # DNS resolution - use getaddrinfo with timeout
+            # Check if hostname can be parsed as alternate numeric IP (decimal, hex, octal via inet_aton)
             try:
-                addrinfo = socket.getaddrinfo(hostname, None, family=socket.AF_UNSPEC, proto=socket.IPPROTO_TCP)
-                for res in addrinfo:
-                    sockaddr = res[4]
-                    ip_objs.append(ipaddress.ip_address(sockaddr[0]))
-            except socket.gaierror:
-                return False
+                raw_bytes = socket.inet_aton(hostname)
+                ip_objs.append(ipaddress.IPv4Address(raw_bytes))
+            except (OSError, ValueError):
+                pass
+
+            # DNS resolution - use getaddrinfo if not already resolved
+            if not ip_objs:
+                try:
+                    addrinfo = socket.getaddrinfo(hostname, None, family=socket.AF_UNSPEC, proto=socket.IPPROTO_TCP)
+                    for res in addrinfo:
+                        sockaddr = res[4]
+                        ip_objs.append(ipaddress.ip_address(sockaddr[0]))
+                except socket.gaierror:
+                    return False
 
         if not ip_objs:
             return False

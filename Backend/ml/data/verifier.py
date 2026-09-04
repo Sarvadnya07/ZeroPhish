@@ -86,6 +86,8 @@ class ThreatFeedAccessVerifier:
         """Safely check if an environment variable exists and is non‑empty."""
         return bool(os.environ.get(env_var, "").strip())
 
+    _check_env_credential_presence = _check_env_credential
+
     def _safe_fetch(self, url: str, headers: Optional[Dict[str, str]] = None) -> Tuple[bytes, int, float]:
         """Perform HTTP GET with timeout and size limit, returning (payload, status, elapsed_ms)."""
         t0 = time.perf_counter()
@@ -119,6 +121,21 @@ class ThreatFeedAccessVerifier:
 
         try:
             payload, status, fetch_ms = self._safe_fetch(endpoint)
+            if status >= 400 or not payload:
+                total_ms = (time.perf_counter() - t0) * 1000.0
+                return SourceAccessReportItem(
+                    source_name="Tranco Top 1M",
+                    status=SourceAccessStatus.UNAVAILABLE,
+                    mode="BULK_FILE",
+                    endpoint_url=endpoint,
+                    auth_required=False,
+                    license_status="MIT License",
+                    http_status=status,
+                    total_ms=total_ms,
+                    notes=f"Fetch failed with HTTP status {status}",
+                    blocker="Network egress or endpoint unreachable",
+                    required_action="Enable outbound HTTPS or use local mirror",
+                )
             t_parse = time.perf_counter()
             sha256 = hashlib.sha256(payload).hexdigest()
             domains: Set[str] = set()
@@ -153,6 +170,7 @@ class ThreatFeedAccessVerifier:
             )
         except Exception as e:
             total_ms = (time.perf_counter() - t0) * 1000.0
+            http_status = getattr(e, "code", None)
             return SourceAccessReportItem(
                 source_name="Tranco Top 1M",
                 status=SourceAccessStatus.UNAVAILABLE,
@@ -160,6 +178,7 @@ class ThreatFeedAccessVerifier:
                 endpoint_url=endpoint,
                 auth_required=False,
                 license_status="MIT License",
+                http_status=http_status,
                 total_ms=total_ms,
                 notes=f"Fetch failed: {e}",
                 blocker="Network egress or endpoint unreachable",

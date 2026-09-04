@@ -48,14 +48,17 @@ async def create_incident(
     """Create a new incident ticket. Any authenticated user can report an incident."""
     try:
         incident = IncidentService.create(data, reporter_id=current_user.id)
-        logger.info("Incident created: %s by user %s", incident.id, current_user.id)
+        clean_inc_id = str(incident.id).replace("\n", "").replace("\r", "")
+        clean_user_id = str(current_user.id).replace("\n", "").replace("\r", "")
+        logger.info("Incident created: %s by user %s", clean_inc_id, clean_user_id)
         # Fire webhook asynchronously (fire-and-forget)
         await WebhookService.fire(WebhookEventType.INCIDENT_CREATED, incident.model_dump())
         return incident
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.exception("Failed to create incident for user %s", current_user.id)
+        clean_user_id = str(current_user.id).replace("\n", "").replace("\r", "")
+        logger.exception("Failed to create incident for user %s", clean_user_id)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Incident creation failed")
 
 
@@ -85,7 +88,8 @@ async def list_incidents(
             reporter_id=reporter_id,
         )
     except Exception as e:
-        logger.exception("Failed to list incidents for user %s", current_user.id)
+        clean_user_id = str(current_user.id).replace("\n", "").replace("\r", "")
+        logger.exception("Failed to list incidents for user %s", clean_user_id)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch incidents")
 
 
@@ -141,7 +145,9 @@ async def update_incident(
         if not inc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
 
-        logger.info("Incident %s updated by user %s", incident_id, current_user.id)
+        clean_inc_id = str(incident_id).replace("\n", "").replace("\r", "")
+        clean_user_id = str(current_user.id).replace("\n", "").replace("\r", "")
+        logger.info("Incident %s updated by user %s", clean_inc_id, clean_user_id)
         await WebhookService.fire(WebhookEventType.INCIDENT_UPDATED, inc.model_dump())
 
         if update.false_positive:
@@ -151,7 +157,8 @@ async def update_incident(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.exception("Failed to update incident %s", incident_id)
+        clean_inc_id = str(incident_id).replace("\n", "").replace("\r", "")
+        logger.exception("Failed to update incident %s", clean_inc_id)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Update failed")
 
 
@@ -182,12 +189,15 @@ async def add_comment(
         )
         if not updated:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
-        logger.info("Comment added to incident %s by user %s", incident_id, current_user.id)
+        clean_inc_id = str(incident_id).replace("\n", "").replace("\r", "")
+        clean_user_id = str(current_user.id).replace("\n", "").replace("\r", "")
+        logger.info("Comment added to incident %s by user %s", clean_inc_id, clean_user_id)
         return updated
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.exception("Failed to add comment to incident %s", incident_id)
+        clean_inc_id = str(incident_id).replace("\n", "").replace("\r", "")
+        logger.exception("Failed to add comment to incident %s", clean_inc_id)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add comment")
 
 
@@ -205,7 +215,9 @@ async def delete_incident(
     try:
         if not IncidentService.delete(incident_id):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
-        logger.info("Incident %s deleted", incident_id)
+        clean_inc_id = str(incident_id).replace("\n", "").replace("\r", "")
+        logger.info("Incident %s deleted", clean_inc_id)
     except Exception as e:
-        logger.exception("Failed to delete incident %s", incident_id)
+        clean_inc_id = str(incident_id).replace("\n", "").replace("\r", "")
+        logger.exception("Failed to delete incident %s", clean_inc_id)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Deletion failed")

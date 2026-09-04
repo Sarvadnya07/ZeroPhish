@@ -103,9 +103,28 @@ class ShadowCascadeManager:
 
     _instance: Optional[ShadowCascadeManager] = None
 
-    def __init__(self, config: Optional[ShadowConfig] = None):
+    def __init__(
+        self,
+        config: Optional[ShadowConfig] = None,
+        enabled: Optional[bool] = None,
+        sample_rate: Optional[float] = None,
+        timeout_ms: Optional[int] = None,
+        max_concurrency: Optional[int] = None,
+        **kwargs,
+    ):
         if config is None:
             config = ShadowConfig.from_env()
+        if enabled is not None:
+            config.enabled = enabled
+        if sample_rate is not None:
+            config.sample_rate = sample_rate
+        if timeout_ms is not None:
+            config.timeout_ms = timeout_ms
+        if max_concurrency is not None:
+            config.max_concurrency = max_concurrency
+        for k, v in kwargs.items():
+            if hasattr(config, k) and v is not None:
+                setattr(config, k, v)
         self.config = config
 
         self._semaphore = asyncio.Semaphore(config.max_concurrency)
@@ -127,6 +146,22 @@ class ShadowCascadeManager:
             "hard_rules_resolved_total": 0,
         }
         self._lock = asyncio.Lock()
+
+    @property
+    def enabled(self) -> bool:
+        return self.config.enabled
+
+    @property
+    def sample_rate(self) -> float:
+        return self.config.sample_rate
+
+    @property
+    def timeout_ms(self) -> int:
+        return self.config.timeout_ms
+
+    @property
+    def max_concurrency(self) -> int:
+        return self.config.max_concurrency
 
     @classmethod
     def get_instance(cls, config: Optional[ShadowConfig] = None) -> ShadowCascadeManager:
@@ -271,7 +306,7 @@ class ShadowCascadeManager:
                 await self._record_observation(obs)
                 return obs
 
-    async def observe_async(
+    def observe_async(
         self,
         url: str,
         production_verdict: str,

@@ -32,7 +32,7 @@ _cache_backend: Optional[CacheBackend] = None
 
 def _check_production_persistence_requirement() -> None:
     """Fail closed in production if DATABASE_URL is missing."""
-    env = os.getenv("ENV", "development").lower()
+    env = (os.getenv("ZEROPHISH_ENV") or os.getenv("ENV", "development")).lower()
     if env == "production" and not os.getenv("DATABASE_URL"):
         logger.critical("FATAL: DATABASE_URL is not set in production mode.")
         raise RuntimeError("DATABASE_URL must be configured in production environment.")

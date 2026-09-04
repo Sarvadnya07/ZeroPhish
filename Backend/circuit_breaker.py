@@ -149,6 +149,7 @@ class CircuitBreaker:
         self._failure_timestamps: List[float] = []
         self._last_failure_time: Optional[float] = None
         self._opened_at: Optional[float] = None
+        self._half_open_probe_in_flight: bool = False
         self._lock = asyncio.Lock()
         self._metrics = CircuitBreakerMetrics()
 
@@ -204,16 +205,34 @@ class CircuitBreaker:
             Exception: Any exception from `func` (unless handled by fallback).
         """
         # 1. Check state under lock
+        should_reject = False
+        rejection_state = CircuitState.OPEN
+
         async with self._lock:
             if self._state == CircuitState.OPEN:
                 if self._should_attempt_reset():
                     self._transition_to(CircuitState.HALF_OPEN)
+                    self._half_open_probe_in_flight = True
+                    self._metrics.record_half_open_probe()
                 else:
+                    should_reject = True
+                    rejection_state = CircuitState.OPEN
                     self._metrics.record_rejection()
                     logger.warning("Circuit '%s' OPEN; request rejected", self.name)
-                    if fallback:
-                        return await fallback(*args, **kwargs)
-                    raise CircuitBreakerOpenError(f"Circuit breaker '{self.name}' is OPEN")
+            elif self._state == CircuitState.HALF_OPEN:
+                if not self._half_open_probe_in_flight:
+                    self._half_open_probe_in_flight = True
+                    self._metrics.record_half_open_probe()
+                else:
+                    should_reject = True
+                    rejection_state = CircuitState.HALF_OPEN
+                    self._metrics.record_rejection()
+                    logger.warning("Circuit '%s' HALF_OPEN; probe already in flight, request rejected", self.name)
+
+        if should_reject:
+            if fallback:
+                return await fallback(*args, **kwargs)
+            raise CircuitBreakerOpenError(f"Circuit breaker '{self.name}' is {rejection_state.value.upper()}")
 
         # 2. Execute the call (with optional timeout)
         try:
@@ -252,6 +271,7 @@ class CircuitBreaker:
         self._metrics.record_success()
 
         if self._state == CircuitState.HALF_OPEN:
+            self._half_open_probe_in_flight = False
             self._metrics.record_half_open_success()
             self._transition_to(CircuitState.CLOSED)
             self._failure_count = 0
@@ -270,6 +290,7 @@ class CircuitBreaker:
 
         # If in half-open, failure immediately re-opens the circuit
         if self._state == CircuitState.HALF_OPEN:
+            self._half_open_probe_in_flight = False
             self._metrics.record_half_open_failure()
             self._transition_to(CircuitState.OPEN)
             self._opened_at = now
@@ -301,15 +322,13 @@ class CircuitBreaker:
 
     def reset(self) -> None:
         """Manually reset the circuit to CLOSED state."""
-        async def _reset():
-            async with self._lock:
-                self._state = CircuitState.CLOSED
-                self._failure_count = 0
-                self._failure_timestamps = []
-                self._last_failure_time = None
-                self._opened_at = None
-                logger.info("Circuit '%s' manually reset to CLOSED", self.name)
-        asyncio.create_task(_reset())
+        self._state = CircuitState.CLOSED
+        self._failure_count = 0
+        self._failure_timestamps = []
+        self._last_failure_time = None
+        self._opened_at = None
+        self._half_open_probe_in_flight = False
+        logger.info("Circuit '%s' manually reset to CLOSED", self.name)
 
     async def async_reset(self) -> None:
         """Async version of reset (for use in routes)."""
@@ -319,6 +338,7 @@ class CircuitBreaker:
             self._failure_timestamps = []
             self._last_failure_time = None
             self._opened_at = None
+            self._half_open_probe_in_flight = False
             logger.info("Circuit '%s' manually reset to CLOSED (async)", self.name)
 
     def get_status(self) -> Dict[str, Any]:

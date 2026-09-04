@@ -11,7 +11,7 @@ import logging
 import os
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from auth.middleware import require_auth
 from auth.models import User
@@ -41,6 +41,7 @@ router = APIRouter(prefix="/vision", tags=["vision"])
 @limiter.limit(RATE_LIMIT)
 async def analyze_screenshot(
     request: Request,
+    response: Response,
     data: VisionAnalysisRequest,
     current_user: User = Depends(require_auth),
 ) -> dict[str, Any]:

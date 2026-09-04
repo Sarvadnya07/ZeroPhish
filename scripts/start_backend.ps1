@@ -185,32 +185,20 @@ Write-Info "  Root Env: $EnvFile"
 Write-Info "  Tier-2 Env: $Tier2EnvFile"
 Write-Info "  Background: $Background"
 
-# 9. Start the backend
-$backendScript = "Backend/tier_2/main.py"
+# 9. Start the backend (Forward to canonical gateway)
+$gatewayScript = "$PSScriptRoot\start_gateway.ps1"
+if (Test-Path $gatewayScript) {
+    Write-Info "⚡ Notice: tier_2/main.py is deprecated. Delegating to canonical start_gateway.ps1..."
+    & $gatewayScript @PSBoundParameters
+    exit $LASTEXITCODE
+}
+
+$backendScript = "Backend/gateway.py"
 if (-not (Test-Path $backendScript)) {
-    Write-ErrorMsg "Backend script not found at $backendScript"
+    Write-ErrorMsg "Backend gateway script not found at $backendScript"
     exit 1
 }
 
-Write-Info "🚀 Starting ZeroPhish Backend Server..."
-Write-Info "📡 Available Endpoints:"
-Write-Info "   - API Docs:     http://localhost:$backendPort/docs"
-Write-Info "   - Health Check: http://localhost:$backendPort/health"
-Write-Info "   - Cache Stats:  http://localhost:$backendPort/cache/stats"
-Write-Info ""
-Write-Info "Press Ctrl+C to stop the server"
-
-if ($Background) {
-    # Run as a background job
-    $job = Start-Job -ScriptBlock {
-        param($ScriptPath)
-        Set-Location (Split-Path $ScriptPath -Parent)
-        python (Split-Path $ScriptPath -Leaf)
-    } -ArgumentList $backendScript
-    Write-Success "Backend started in background (Job ID: $($job.Id))."
-    Write-Info "To stop it, run: Stop-Job -Id $($job.Id)"
-} else {
-    # Run in foreground
-    Set-Location (Split-Path $backendScript -Parent)
-    python (Split-Path $backendScript -Leaf)
-}
+Write-Info "🚀 Starting ZeroPhish Unified Gateway..."
+Set-Location "Backend"
+python gateway.py

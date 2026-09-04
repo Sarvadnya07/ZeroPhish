@@ -75,7 +75,7 @@ class ShadowRetentionBuffer:
         """Return True if the buffer has reached its capacity."""
         return len(self._buffer) >= self.max_size
 
-    def audit_privacy(self, observations: Optional[List[ExtendedShadowObservation]] = None) -> bool:
+    def audit_privacy(self_or_cls, observations: Optional[List[ExtendedShadowObservation]] = None) -> bool:
         """
         Verify that no raw secrets, auth tokens, passwords, or raw URLs are stored.
 
@@ -89,10 +89,17 @@ class ShadowRetentionBuffer:
         Returns:
             True if all privacy requirements are satisfied, False otherwise.
         """
-        if observations is None:
-            observations = self.get_all()
+        if isinstance(self_or_cls, list):
+            obs_list = self_or_cls
+            patterns = ShadowRetentionBuffer.DEFAULT_SENSITIVE_PATTERNS
+        elif isinstance(self_or_cls, ShadowRetentionBuffer):
+            obs_list = observations if observations is not None else self_or_cls.get_all()
+            patterns = self_or_cls.sensitive_patterns
+        else:
+            obs_list = observations or []
+            patterns = getattr(self_or_cls, "DEFAULT_SENSITIVE_PATTERNS", ShadowRetentionBuffer.DEFAULT_SENSITIVE_PATTERNS)
 
-        for obs in observations:
+        for obs in obs_list:
             # Hashes must be exactly 64 hex characters
             if len(obs.url_hash) != 64 or len(obs.hostname_hash) != 64:
                 return False
@@ -104,7 +111,7 @@ class ShadowRetentionBuffer:
                 return False
 
             # Additionally, ensure no sensitive patterns (should be redundant)
-            for pattern in self.sensitive_patterns:
+            for pattern in patterns:
                 if pattern.search(obs.url_hash) or pattern.search(obs.hostname_hash):
                     return False
 
@@ -119,7 +126,7 @@ class ShadowRetentionBuffer:
             ]
             for field in fields_to_check:
                 if field:
-                    for pattern in self.sensitive_patterns:
+                    for pattern in patterns:
                         if pattern.search(field):
                             return False
 

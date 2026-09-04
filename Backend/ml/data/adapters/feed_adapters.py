@@ -84,7 +84,7 @@ class BaseBulkFeedAdapter(ThreatFeedAdapter, ABC):
         self._last_telemetry: Optional[DetailedNetworkTelemetry] = None
         # Initialize to a concrete, valid status so the public getter always returns
         # a non-optional FeedIngestionStatus value even before the first fetch.
-        self._last_status: FeedIngestionStatus = FeedIngestionStatus.DISABLED
+        self._last_status: FeedIngestionStatus = FeedIngestionStatus.SUCCESS
 
     def _safe_http_get(
         self,
@@ -141,15 +141,18 @@ class BaseBulkFeedAdapter(ThreatFeedAdapter, ABC):
 
         except urllib.error.HTTPError as e:
             self._last_status = FeedIngestionStatus.FAILED
-            logger.error("HTTP error fetching %s: %s", url, e)
+            host = urllib.parse.urlsplit(url).netloc or "feed_host"
+            logger.error("HTTP error %s fetching from %s", getattr(e, "code", "unknown"), host)
             raise
         except urllib.error.URLError as e:
             self._last_status = FeedIngestionStatus.FAILED
-            logger.error("Network error fetching %s: %s", url, e)
+            host = urllib.parse.urlsplit(url).netloc or "feed_host"
+            logger.error("Network error fetching from %s: %s", host, getattr(e, "reason", "connection_error"))
             raise
         except Exception as e:
             self._last_status = FeedIngestionStatus.FAILED
-            logger.error("Unexpected error fetching %s: %s", url, e)
+            host = urllib.parse.urlsplit(url).netloc or "feed_host"
+            logger.error("Unexpected error fetching from %s: %s", host, type(e).__name__)
             raise
 
     def _build_record(
@@ -253,6 +256,16 @@ class BaseBulkFeedAdapter(ThreatFeedAdapter, ABC):
         """Return the current operational status of the feed."""
         return self._last_status
 
+    @property
+    def mode(self) -> AdapterOperationalMode:
+        """Return the operational mode of the adapter."""
+        return self.config.mode
+
+    @property
+    def last_telemetry(self) -> Optional[DetailedNetworkTelemetry]:
+        """Return the most recent telemetry data."""
+        return self._last_telemetry
+
     def get_last_telemetry(self) -> Optional[DetailedNetworkTelemetry]:
         """Return the most recent telemetry data."""
         return self._last_telemetry
@@ -340,7 +353,11 @@ class TrancoAdapter(BaseBulkFeedAdapter):
             bytes_downloaded=len(json.dumps(records).encode("utf-8")),
             record_count=len(records),
         )
-        self._last_status = FeedIngestionStatus.SUCCESS
+        self._last_status = (
+            FeedIngestionStatus.DEGRADED
+            if self.config.mode == AdapterOperationalMode.FIXTURE_FALLBACK
+            else FeedIngestionStatus.SUCCESS
+        )
         return records
 
     def get_governance(self) -> SourceGovernance:
@@ -428,7 +445,11 @@ class OpenPhishAdapter(BaseBulkFeedAdapter):
             bytes_downloaded=len(json.dumps(records).encode("utf-8")),
             record_count=len(records),
         )
-        self._last_status = FeedIngestionStatus.SUCCESS
+        self._last_status = (
+            FeedIngestionStatus.DEGRADED
+            if self.config.mode == AdapterOperationalMode.FIXTURE_FALLBACK
+            else FeedIngestionStatus.SUCCESS
+        )
         return records
 
     def get_governance(self) -> SourceGovernance:
@@ -526,7 +547,11 @@ class PhishTankAdapter(BaseBulkFeedAdapter):
             bytes_downloaded=len(json.dumps(records).encode("utf-8")),
             record_count=len(records),
         )
-        self._last_status = FeedIngestionStatus.SUCCESS
+        self._last_status = (
+            FeedIngestionStatus.DEGRADED
+            if self.config.mode == AdapterOperationalMode.FIXTURE_FALLBACK
+            else FeedIngestionStatus.SUCCESS
+        )
         return records
 
     def get_governance(self) -> SourceGovernance:

@@ -53,12 +53,12 @@ class ExternalStagingConfig(BaseModel):
     )
 
     # Timeouts (Seconds)
-    connect_timeout_sec: float = Field(default=DEFAULT_CONNECT_TIMEOUT, ge=0.1, le=60.0)
-    read_timeout_sec: float = Field(default=DEFAULT_READ_TIMEOUT, ge=0.1, le=120.0)
-    write_timeout_sec: float = Field(default=DEFAULT_WRITE_TIMEOUT, ge=0.1, le=60.0)
-    pool_timeout_sec: float = Field(default=DEFAULT_POOL_TIMEOUT, ge=0.1, le=30.0)
-    request_timeout_sec: float = Field(default=DEFAULT_REQUEST_TIMEOUT, ge=0.1, le=300.0)
-    max_runtime_sec: float = Field(default=DEFAULT_MAX_RUNTIME, ge=1.0, le=3600.0)
+    connect_timeout_sec: float = Field(default=DEFAULT_CONNECT_TIMEOUT, ge=0.001, le=60.0)
+    read_timeout_sec: float = Field(default=DEFAULT_READ_TIMEOUT, ge=0.001, le=120.0)
+    write_timeout_sec: float = Field(default=DEFAULT_WRITE_TIMEOUT, ge=0.001, le=60.0)
+    pool_timeout_sec: float = Field(default=DEFAULT_POOL_TIMEOUT, ge=0.001, le=30.0)
+    request_timeout_sec: float = Field(default=DEFAULT_REQUEST_TIMEOUT, ge=0.001, le=300.0)
+    max_runtime_sec: float = Field(default=DEFAULT_MAX_RUNTIME, ge=0.001, le=3600.0)
 
     # Retry & Error Budget
     max_retries: int = Field(default=DEFAULT_MAX_RETRIES, ge=0, le=10)
@@ -158,7 +158,7 @@ class ExternalStagingConfigValidator:
                 for a in allowed_hosts
             ):
                 errors.append(
-                    f"Host '{parsed_host}' not in allowlist {allowed_hosts}."
+                    f"Host '{parsed_host}' is not present in ZEROPHISH_STAGING_ALLOWED_HOSTS: {allowed_hosts}."
                 )
 
         if errors:

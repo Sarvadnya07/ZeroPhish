@@ -126,7 +126,9 @@ class IncidentService:
         else:
             saved = incident
 
-        logger.info("Incident %s created by %s, severity=%s", incident_id, reporter_id or "system", severity.value)
+        clean_inc_id = str(incident_id).replace("\n", "").replace("\r", "")
+        clean_rep_id = str(reporter_id or "system").replace("\n", "").replace("\r", "")
+        logger.info("Incident %s created by %s, severity=%s", clean_inc_id, clean_rep_id, severity.value)
         return saved
 
     @staticmethod
@@ -184,7 +186,8 @@ class IncidentService:
             inc = _maybe_await(repo.update(incident_id, update))
             if inc:
                 _IN_MEMORY_STORE[incident_id] = inc
-                logger.info("Incident %s updated", incident_id)
+                clean_inc_id = str(incident_id).replace("\n", "").replace("\r", "")
+                logger.info("Incident %s updated", clean_inc_id)
             return inc
 
         # Fallback: update in-memory
@@ -201,7 +204,8 @@ class IncidentService:
 
         inc.updated_at = _now()
         _IN_MEMORY_STORE[incident_id] = inc
-        logger.info("Incident %s updated (in-memory)", incident_id)
+        clean_inc_id = str(incident_id).replace("\n", "").replace("\r", "")
+        logger.info("Incident %s updated (in-memory)", clean_inc_id)
         return inc
 
     @staticmethod
@@ -228,7 +232,9 @@ class IncidentService:
             inc = _maybe_await(repo.add_comment(incident_id, comment))
             if inc:
                 _IN_MEMORY_STORE[incident_id] = inc
-                logger.info("Comment added to incident %s by %s", incident_id, author_id)
+                clean_inc_id = str(incident_id).replace("\n", "").replace("\r", "")
+                clean_auth_id = str(author_id).replace("\n", "").replace("\r", "")
+                logger.info("Comment added to incident %s by %s", clean_inc_id, clean_auth_id)
             return inc
 
         # Fallback: update in-memory
@@ -239,7 +245,8 @@ class IncidentService:
         inc.comments.append(comment)
         inc.updated_at = _now()
         _IN_MEMORY_STORE[incident_id] = inc
-        logger.info("Comment added to incident %s (in-memory)", incident_id)
+        clean_inc_id = str(incident_id).replace("\n", "").replace("\r", "")
+        logger.info("Comment added to incident %s (in-memory)", clean_inc_id)
         return inc
 
     @staticmethod
@@ -258,7 +265,8 @@ class IncidentService:
             deleted = True
 
         if deleted:
-            logger.info("Incident %s deleted", incident_id)
+            clean_inc_id = str(incident_id).replace("\n", "").replace("\r", "")
+            logger.info("Incident %s deleted", clean_inc_id)
         return deleted
 
     @staticmethod
@@ -266,7 +274,8 @@ class IncidentService:
         """Return summary statistics: counts by status, severity, etc."""
         repo = IncidentService._get_repository()
         if repo:
-            return repo.stats()
+            res = _maybe_await(repo.stats())
+            return res if isinstance(res, dict) else {}
 
         # Fallback: compute from memory
         incidents = list(_IN_MEMORY_STORE.values())

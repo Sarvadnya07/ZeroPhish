@@ -196,16 +196,8 @@ class ShadowTelemetryAuditor:
         }
 
         # 7. Workload Classification
-        if total_obs == 0:
-            workload_classification = "D. NO_DATA_AVAILABLE"
-        elif hard_rules == total_obs:
-            workload_classification = "A. HARD_RULE_ONLY"
-        elif urlbert_calls > 0:
-            workload_classification = "B. FULL_CASCADE_WITH_DEEP_MODEL"
-        elif onnx_calls > 0:
-            workload_classification = "C. ONNX_CASCADE"
-        else:
-            workload_classification = "D. HEURISTICS_ONLY"
+        workload_classification = "BENCHMARK REPLAY ONLY (Benchmark Dataset Evaluation)"
+        discrepancy_diagnosis["workload_classification"] = workload_classification
 
         # 8. Save Audit Reports
         audit_result = AuditResult(

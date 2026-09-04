@@ -84,6 +84,42 @@ class StagingAccounting:
     shadow_error: int = 0
     shadow_dropped: int = 0
 
+    def __getitem__(self, key: str) -> Any:
+        mapping = {
+            "HTTP_REQUESTS_ATTEMPTED": self.http_attempted,
+            "HTTP_REQUESTS_SUCCESSFUL": self.http_successful,
+            "HTTP_REQUESTS_FAILED": self.http_failed,
+            "HTTP_REQUESTS_RETRIED": self.http_retried,
+            "SHADOW_OBSERVATIONS_ELIGIBLE": self.shadow_eligible,
+            "SHADOW_OBSERVATIONS_RECORDED": self.shadow_recorded,
+            "SHADOW_OBSERVATIONS_SUCCESSFUL": self.shadow_successful,
+            "SHADOW_OBSERVATIONS_TIMEOUT": self.shadow_timeout,
+            "SHADOW_OBSERVATIONS_ERROR": self.shadow_error,
+            "SHADOW_OBSERVATIONS_DROPPED": self.shadow_dropped,
+        }
+        if key in mapping:
+            return mapping[key]
+        key_lower = key.lower()
+        if hasattr(self, key_lower):
+            return getattr(self, key_lower)
+        raise KeyError(key)
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = dict(self.__dict__)
+        d.update({
+            "HTTP_REQUESTS_ATTEMPTED": self.http_attempted,
+            "HTTP_REQUESTS_SUCCESSFUL": self.http_successful,
+            "HTTP_REQUESTS_FAILED": self.http_failed,
+            "HTTP_REQUESTS_RETRIED": self.http_retried,
+            "SHADOW_OBSERVATIONS_ELIGIBLE": self.shadow_eligible,
+            "SHADOW_OBSERVATIONS_RECORDED": self.shadow_recorded,
+            "SHADOW_OBSERVATIONS_SUCCESSFUL": self.shadow_successful,
+            "SHADOW_OBSERVATIONS_TIMEOUT": self.shadow_timeout,
+            "SHADOW_OBSERVATIONS_ERROR": self.shadow_error,
+            "SHADOW_OBSERVATIONS_DROPPED": self.shadow_dropped,
+        })
+        return d
+
 
 @dataclass
 class RetryMetrics:
@@ -354,7 +390,7 @@ class ExternalStagingRunner:
         return {
             "run_id": self.run_id,
             "status": status,
-            "accounting": self.accounting.__dict__,
+            "accounting": self.accounting.to_dict(),
             "p50_ms": round(p50, 3),
             "p95_ms": round(p95, 3),
             "p99_ms": round(p99, 3),
