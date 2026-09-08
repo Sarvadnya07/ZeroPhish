@@ -520,7 +520,8 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "service": "ZeroPhish Backend",
-        "version": "1.0.0",
+        "version": os.getenv("ZEROPHISH_VERSION", "1.0.0"),
+        "commit_sha": os.getenv("GIT_COMMIT_SHA") or os.getenv("GITHUB_SHA", "dev-local"),
         "features": {
             "speed_layer": "Redis" if cache.client else "None",
             "threat_analysis": "Local Engine",

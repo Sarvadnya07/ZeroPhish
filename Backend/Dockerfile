@@ -1,5 +1,5 @@
 # ==============================================================================
-# ZeroPhish Backend — Hardened Multi-Stage Staging Dockerfile
+# ZeroPhish Backend — Hardened Multi-Stage Production Dockerfile
 # ==============================================================================
 
 # --- Stage 1: Build & Dependencies ---
@@ -10,13 +10,13 @@ WORKDIR /build
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Install build dependencies
+# Install build dependencies required for compiling native wheels
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Create isolated virtual environment
+# Create virtual environment to isolate installed dependencies
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
@@ -31,33 +31,35 @@ WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    ZEROPHISH_ENV=staging \
+    ZEROPHISH_ENV=production \
     PATH="/opt/venv/bin:$PATH"
 
-# Install runtime utilities
+# Install only minimal runtime dependencies (curl for container health checks)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Create unprivileged application user & group (UID 10001)
+# Principle of Least Privilege: Create unprivileged application user & group (UID 10001)
 RUN groupadd -g 10001 appgroup && \
     useradd -u 10001 -g appgroup -s /bin/bash -m appuser
 
 # Copy virtual environment from builder stage
 COPY --from=builder --chown=appuser:appgroup /opt/venv /opt/venv
 
-# Copy application source code
+# Copy application source code with unprivileged ownership
 COPY --chown=appuser:appgroup . .
 
-# Create staging directories with proper permissions
-RUN mkdir -p /app/staging_data && chown -R appuser:appgroup /app/staging_data
+# Create writable data directory for storage / caches
+RUN mkdir -p /app/data && chown -R appuser:appgroup /app/data
 
-# Run as non-root user
+# Drop privileges to non-root
 USER appuser
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+# Container liveness & readiness health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["uvicorn", "gateway:app", "--host", "0.0.0.0", "--port", "8000"]
+# Production gateway launch with multi-worker ASGI server
+CMD ["uvicorn", "gateway:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

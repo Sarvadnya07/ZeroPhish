@@ -871,6 +871,8 @@ async def gateway_health() -> dict:
         "status": "healthy",
         "service": "ZeroPhish API Gateway",
         "environment": CONFIG.env,
+        "version": os.getenv("ZEROPHISH_VERSION", "1.0.0"),
+        "commit_sha": os.getenv("GIT_COMMIT_SHA") or os.getenv("GITHUB_SHA", "dev-local"),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "weights": CONFIG.weights.model_dump(),
         "tier3_timeout_sec": CONFIG.tier3_timeout,
@@ -888,19 +890,54 @@ async def gateway_health() -> dict:
 
 @app.get("/ready")
 @app.get("/api/v1/ready")
-async def gateway_readiness() -> dict:
-    """Readiness probe for orchestration."""
+async def gateway_readiness(response: Response) -> dict:
+    """Active readiness probe for orchestration and load balancers."""
+    dependencies = {
+        "repository": "ready",
+        "weights": "ready",
+        "models": "ready",
+        "shadow_cascade": "ready" if ShadowCascadeManager else "disabled",
+    }
+    is_ready = True
+
+    # Active database connectivity probe
+    if os.getenv("DATABASE_URL"):
+        try:
+            from infrastructure.database import get_engine
+            from sqlalchemy import text
+
+            engine = get_engine()
+            if engine:
+                with engine.connect() as conn:
+                    conn.execute(text("SELECT 1"))
+                dependencies["database"] = "ready"
+            else:
+                dependencies["database"] = "uninitialized"
+                is_ready = False
+        except Exception as e:
+            logger.error("Readiness check database probe failed: %s", e)
+            dependencies["database"] = "unhealthy"
+            is_ready = False
+    else:
+        dependencies["database"] = "in-memory"
+
+    # Circuit breaker health check
+    if tier3_circuit_breaker:
+        cb_status = tier3_circuit_breaker.get_status()
+        dependencies["circuit_breaker"] = cb_status.get("state", "unknown")
+        if cb_status.get("state") == "open":
+            dependencies["tier3_service"] = "circuit_open_fallback_active"
+
+    if not is_ready:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
     return {
-        "status": "ready",
+        "status": "ready" if is_ready else "not_ready",
         "environment": CONFIG.env,
-        "timestamp": datetime.now().isoformat(),
-        "dependencies": {
-            "database": "ready",
-            "repository": "ready",
-            "weights": "ready",
-            "models": "ready",
-            "shadow_cascade": "ready" if ShadowCascadeManager else "disabled",
-        },
+        "version": os.getenv("ZEROPHISH_VERSION", "1.0.0"),
+        "commit_sha": os.getenv("GIT_COMMIT_SHA") or os.getenv("GITHUB_SHA", "dev-local"),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "dependencies": dependencies,
     }
 
 # ---------- Circuit Breaker Management ----------

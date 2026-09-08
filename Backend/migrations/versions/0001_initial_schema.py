@@ -104,7 +104,7 @@ def upgrade() -> None:
     op.create_table(
         "incident_comments",
         sa.Column("id", sa.String(length=64), primary_key=True),
-        sa.Column("incident_id", sa.String(length=64), nullable=False),
+        sa.Column("incident_id", sa.String(length=64), sa.ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False),
         sa.Column("author_id", sa.String(length=64), nullable=False),
         sa.Column("author_name", sa.String(length=256), nullable=False),
         sa.Column("body", sa.Text(), nullable=False),
@@ -112,19 +112,10 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     )
-    # Foreign key with cascade
-    op.create_foreign_key(
-        "fk_incident_comments_incident_id",
-        "incident_comments",
-        "incidents",
-        ["incident_id"],
-        ["id"],
-        ondelete="CASCADE",
-    )
     op.create_index("ix_incident_comments_id", "incident_comments", ["id"])
     op.create_index("ix_incident_comments_incident_id", "incident_comments", ["incident_id"])
     op.create_index(
-        "ix_incident_comments_incident_created",
+        "idx_incident_comments_incident_created",
         "incident_comments",
         ["incident_id", "created_at"],
     )
@@ -157,12 +148,12 @@ def upgrade() -> None:
     op.create_index("ix_scan_events_user_id", "scan_events", ["user_id"])
     # Composite indexes for common queries
     op.create_index(
-        "ix_scan_events_scan_ts",
+        "idx_scan_events_scan_ts",
         "scan_events",
         ["scan_id", "ts"],
     )
     op.create_index(
-        "ix_scan_events_sender_ts",
+        "idx_scan_events_sender_ts",
         "scan_events",
         ["sender_domain", "ts"],
     )
@@ -189,7 +180,7 @@ def upgrade() -> None:
     op.create_index("ix_false_positives_scan_id", "false_positives", ["scan_id"])
     op.create_index("ix_false_positives_reviewed", "false_positives", ["reviewed"])
     op.create_index(
-        "ix_fp_scan_reviewed",
+        "idx_fp_scan_reviewed",
         "false_positives",
         ["scan_id", "reviewed"],
     )
@@ -239,7 +230,7 @@ def upgrade() -> None:
     op.create_table(
         "webhook_deliveries",
         sa.Column("id", sa.String(length=64), primary_key=True),
-        sa.Column("subscription_id", sa.String(length=64), nullable=False),
+        sa.Column("subscription_id", sa.String(length=64), sa.ForeignKey("webhook_subscriptions.id", ondelete="CASCADE"), nullable=False),
         sa.Column("event_type", sa.String(length=64), nullable=False),
         sa.Column("payload_json", sa.Text(), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False),
@@ -252,14 +243,6 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     )
-    op.create_foreign_key(
-        "fk_webhook_deliveries_subscription_id",
-        "webhook_deliveries",
-        "webhook_subscriptions",
-        ["subscription_id"],
-        ["id"],
-        ondelete="CASCADE",
-    )
     op.create_index("ix_webhook_deliveries_id", "webhook_deliveries", ["id"])
     op.create_index(
         "ix_webhook_deliveries_subscription_id",
@@ -267,7 +250,7 @@ def upgrade() -> None:
         ["subscription_id"],
     )
     op.create_index(
-        "ix_delivery_subscription_status",
+        "idx_delivery_subscription_status",
         "webhook_deliveries",
         ["subscription_id", "status"],
     )
@@ -290,7 +273,7 @@ def upgrade() -> None:
         # sa.Column("expires_at", sa.Float(), nullable=True),
     )
     op.create_index("ix_scan_results_scan_id", "scan_results", ["scan_id"])
-    op.create_index("ix_scan_results_created", "scan_results", ["created_at"])
+    op.create_index("idx_scan_results_created", "scan_results", ["created_at"])
 
 
 def downgrade() -> None:

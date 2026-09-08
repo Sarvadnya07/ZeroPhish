@@ -65,6 +65,7 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         compare_type=True,  # Detect type changes (e.g., String -> DateTime)
         compare_server_default=True,  # Detect default value changes
+        render_as_batch=url.startswith("sqlite"),
     )
 
     with context.begin_transaction():
@@ -107,7 +108,7 @@ def run_migrations_online() -> None:
             target_metadata=target_metadata,
             compare_type=True,
             compare_server_default=True,
-            # For SQLite, we need to handle type differences carefully
+            render_as_batch=is_sqlite,
         )
 
         with context.begin_transaction():

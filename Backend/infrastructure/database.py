@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import logging
+from pathlib import Path
 from typing import Generator, Optional
 
 from sqlalchemy import create_engine, event  # type: ignore[reportMissingImports]
@@ -124,11 +125,52 @@ def get_db() -> Generator[Session, None, None]:
         session.close()
 
 
-def init_db() -> None:
-    """Create all tables if the engine is configured."""
-    if _engine:
-        logger.info("Creating database tables...")
-        Base.metadata.create_all(bind=_engine)
-        logger.info("Database tables created.")
-    else:
+_db_initialized: bool = False
+
+
+def init_db(force: bool = False) -> None:
+    """
+    Initialize database schema safely.
+
+    Prefers running Alembic migrations ('upgrade head') so that the alembic_version
+    table and all revision histories are properly tracked.
+    Falls back to Base.metadata.create_all if alembic is not configured or in unit test mocks.
+    """
+    global _db_initialized
+    if _db_initialized and not force:
+        return
+
+    if not _engine:
         logger.warning("Cannot initialize database: DATABASE_URL not set.")
+        return
+
+    env = (os.getenv("ZEROPHISH_ENV") or os.getenv("ENV", "development")).lower()
+    auto_migrate = os.getenv("AUTO_MIGRATE", "true").lower() in ("true", "1", "yes")
+
+    if env == "production" and not auto_migrate:
+        logger.info("Production mode: runtime auto-migration disabled. Relying on pre-deploy migration runner.")
+        _db_initialized = True
+        return
+
+    # Attempt Alembic migration first
+    backend_dir = Path(__file__).resolve().parents[1]
+    alembic_ini_path = backend_dir / "alembic.ini"
+
+    if alembic_ini_path.exists():
+        try:
+            from alembic import command
+            from alembic.config import Config
+
+            logger.info("Running database migrations via Alembic...")
+            cfg = Config(str(alembic_ini_path))
+            command.upgrade(cfg, "head")
+            logger.info("Alembic database migrations applied successfully.")
+            _db_initialized = True
+            return
+        except Exception as e:
+            logger.warning("Alembic migration failed (%s); falling back to metadata.create_all...", e)
+
+    logger.info("Creating database tables via Base.metadata.create_all...")
+    Base.metadata.create_all(bind=_engine)
+    logger.info("Database tables created.")
+    _db_initialized = True

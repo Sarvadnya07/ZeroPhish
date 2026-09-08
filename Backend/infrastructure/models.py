@@ -58,10 +58,10 @@ class UserDB(Base, TimestampMixin):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
     full_name: Mapped[str] = mapped_column(String(256), nullable=False)
     password_hash: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
-    role: Mapped[str] = mapped_column(String(32), default="user", nullable=False)
-    status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
-    scan_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    risk_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    role: Mapped[str] = mapped_column(String(32), default="user", server_default="user", nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="active", server_default="active", nullable=False)
+    scan_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    risk_score: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0", nullable=False)
     last_login: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships (if any)
@@ -89,7 +89,7 @@ class IncidentDB(Base, TimestampMixin):
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     severity: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(String(32), default="open", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="open", server_default="open", nullable=False, index=True)
     scan_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     reporter_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     assignee_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
@@ -98,7 +98,7 @@ class IncidentDB(Base, TimestampMixin):
     subject: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     evidence_json: Mapped[str] = mapped_column(Text, nullable=False, server_default="[]")
     tags_json: Mapped[str] = mapped_column(Text, nullable=False, server_default="[]")
-    false_positive: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    false_positive: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
@@ -152,9 +152,9 @@ class ScanEventDB(Base):
     final_score: Mapped[float] = mapped_column(Float, nullable=False)
     verdict: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     category: Mapped[str] = mapped_column(String(128), nullable=False)
-    tier1_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    tier2_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    tier3_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    tier1_score: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0", nullable=False)
+    tier2_score: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0", nullable=False)
+    tier3_score: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0", nullable=False)
     user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
     __table_args__ = (
@@ -176,7 +176,7 @@ class FalsePositiveDB(Base, TimestampMixin):
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     original_score: Mapped[float] = mapped_column(Float, nullable=False)
     original_verdict: Mapped[str] = mapped_column(String(32), nullable=False)
-    reviewed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    reviewed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False, index=True)
     reviewer_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     resolution: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
@@ -194,7 +194,7 @@ class PolicyRuleDB(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(64), primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
     condition_type: Mapped[str] = mapped_column(String(64), nullable=False)
     condition_value: Mapped[str] = mapped_column(String(500), nullable=False)
     action: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -212,7 +212,7 @@ class WebhookSubscriptionDB(Base, TimestampMixin):
     url: Mapped[str] = mapped_column(String(2048), nullable=False)
     events_json: Mapped[str] = mapped_column(Text, nullable=False)  # JSON list of event types
     secret: Mapped[str] = mapped_column(String(128), nullable=False)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
     owner_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     description: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     headers_json: Mapped[str] = mapped_column(Text, nullable=False, server_default="{}")
@@ -240,13 +240,13 @@ class WebhookDeliveryDB(Base, TimestampMixin):
         index=True,
     )
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    payload_json: Mapped[Text] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     http_status: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     response_body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     duration_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    retries: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    retries: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
 
     subscription: Mapped["WebhookSubscriptionDB"] = relationship(
         "WebhookSubscriptionDB", back_populates="deliveries"
@@ -266,8 +266,8 @@ class ScanResultDB(Base):
     partial_score: Mapped[float] = mapped_column(Float, nullable=False)
     final_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     verdict: Mapped[str] = mapped_column(String(32), nullable=False)
-    complete: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    layers_completed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    complete: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+    layers_completed: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     data_json: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[float] = mapped_column(Float, nullable=False)  # UNIX timestamp
     # Optionally add expires_at for cache TTL
