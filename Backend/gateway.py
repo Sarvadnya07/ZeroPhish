@@ -62,6 +62,7 @@ from models.gateway_models import (
     TierStatus,
     CleanStatus,
 )
+from models.tier1_report import Tier1ReportPayload
 from repositories.factory import get_cache_backend, get_scan_result_repository
 from security.middleware import (
     InputValidator,
@@ -339,6 +340,21 @@ def _publish_to_subscriber(sub_id: str, q: asyncio.Queue, payload: Any) -> bool:
         sse_metrics["sse_subscriber_evictions_total"] += 1
         return False
 
+
+def _broadcast_to_subscribers(payload: Any) -> None:
+    """
+    Send payload to every SSE subscriber and evict subscribers whose queue
+    repeatedly overflowed. Single owner of the eviction loop so the backpressure
+    policy cannot drift between call sites.
+    """
+    dead: List[str] = []
+    for sub_id, q in list(_sse_subscribers.items()):
+        if not _publish_to_subscriber(sub_id, q, payload):
+            dead.append(sub_id)
+    for sub_id in dead:
+        _sse_subscribers.pop(sub_id, None)
+        _sse_subscriber_overflows.pop(sub_id, None)
+
 # ---------- Helper Functions ----------
 def _calculate_scan_cache_key(sender: str, body: str, links: List[str], subject: Optional[str]) -> str:
     """Generate deterministic SHA‑256 cache key for identical email payload."""
@@ -452,13 +468,7 @@ async def _notify_live_dashboard(res: GatewayScanResponse, sender: str, subject:
     _latest_tier1_report = payload
 
     # Broadcast to SSE subscribers
-    dead: List[str] = []
-    for sub_id, q in list(_sse_subscribers.items()):
-        if not _publish_to_subscriber(sub_id, q, payload):
-            dead.append(sub_id)
-    for sub_id in dead:
-        _sse_subscribers.pop(sub_id, None)
-        _sse_subscriber_overflows.pop(sub_id, None)
+    _broadcast_to_subscribers(payload)
 
     logger.info(
         "Live dashboard notification sent for scan %s (%s / %s)",
@@ -986,18 +996,19 @@ async def get_latest_tier1_scan() -> Optional[Dict[str, Any]]:
     return _latest_tier1_report
 
 @app.post("/tier1/report")
-async def receive_tier1_report(report: Dict[str, Any]) -> Dict[str, Any]:
-    """Receive scan report from Chrome Extension or internal pipeline."""
-    global _latest_tier1_report
-    _latest_tier1_report = report
+async def receive_tier1_report(report: Tier1ReportPayload) -> Dict[str, Any]:
+    """
+    Receive scan report from Chrome Extension or internal pipeline.
 
-    dead: List[str] = []
-    for sub_id, q in list(_sse_subscribers.items()):
-        if not _publish_to_subscriber(sub_id, q, report):
-            dead.append(sub_id)
-    for sub_id in dead:
-        _sse_subscribers.pop(sub_id, None)
-        _sse_subscriber_overflows.pop(sub_id, None)
+    The payload is intentionally permissive (extra fields allowed, all fields
+    optional) so a malformed extension report can never 400-reject the live
+    dashboard update path; downstream consumers read it as a dict.
+    """
+    payload = report.model_dump(exclude_none=True, exclude_unset=False)
+    global _latest_tier1_report
+    _latest_tier1_report = payload
+
+    _broadcast_to_subscribers(report)
 
     return {"status": "success", "message": "Report received"}
 
