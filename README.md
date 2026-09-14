@@ -12,7 +12,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 
 [![CI](https://github.com/Sarvadnya07/ZeroPhish/actions/workflows/ci.yml/badge.svg)](https://github.com/Sarvadnya07/ZeroPhish/actions)
-[![Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen)](https://github.com/Sarvadnya07/ZeroPhish)
+[![Coverage](https://img.shields.io/badge/coverage-gate%2065%25-yellowgreen)](https://github.com/Sarvadnya07/ZeroPhish)
 [![Security](https://img.shields.io/badge/security-gitleaks%2Fsemgrep-blueviolet)](https://github.com/Sarvadnya07/ZeroPhish/security)
 
 *A production-grade, 3‑tier phishing detection system that analyzes Gmail emails in real‑time using heuristics, ML, and Gemini AI — all from a Chrome Side Panel.*
@@ -244,7 +244,7 @@ ZeroPhish enforces a multi‑stage quality gate process:
 
 1. **Local Development**  
   - Pre‑commit hooks run `gitleaks` and `semgrep`.  
-  - `pytest` with coverage (≥85% target).  
+  - `pytest` with coverage (CI gate: ≥65%, local target 85%).  
   - `pnpm test` and `pnpm build` for frontend.
 
 2. **Pull Request**  
@@ -348,18 +348,26 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 
 ## 📐 Scaling Considerations
 
-ZeroPhish is designed to scale horizontally:
+> [!IMPORTANT]
+> **Single-instance by default.** The gateway keeps scan results, SSE subscriber
+> registries, and circuit-breaker state in process memory. Run exactly one
+> gateway instance unless `DATABASE_URL` and `REDIS_URL` are both configured;
+> even then, SSE subscriber state remains instance-local, so put load-balanced
+> replicas behind sticky sessions or route SSE through a dedicated instance.
 
-- **Stateless API Gateway** – can be replicated behind a load balancer.
+Scaling posture by configuration:
+
+- **Single instance (default, no `DATABASE_URL`)** – in-memory scan repository and SSE subscribers; simplest and fully supported.
+- **Persistent single instance (`DATABASE_URL` + `REDIS_URL`)** – scan results and cached reports survive restarts; still run one gateway process.
 - **Stateful Components** – Redis for cache, SQL database for persistence.
 - **Asynchronous Processing** – Tier 3 AI calls are fire‑and‑forget with circuit breakers.
 - **ML Models** – loaded once per instance (CPU‑only inference is ~14ms per URL).
 - **Shadow Mode** – observational only; does not affect production decisions.
 
-For high throughput:
+For high throughput on a single instance:
 - Increase `MAX_SHADOW_CASCADE_CONCURRENCY` and `EXTERNAL_STAGING_CONCURRENCY`.
 - Tune Redis connection pool and TTL.
-- Use PostgreSQL with connection pooling (e.g., PgBouncer).
+- Use PostgreSQL with connection pooling (e.g., PgBouncer) when `DATABASE_URL` is set.
 
 ---
 
@@ -691,6 +699,16 @@ All configuration is driven by the `Backend/.env` file. Key variables:
 | `CIRCUIT_BREAKER_TIMEOUT` | `30` | Seconds before circuit attempts recovery |
 | `ZERO_PHISH_DISABLE_ML` | — | Set to `1` to disable local BERT |
 | `ZERO_PHISH_HF_MODEL` | `distilbert-base-uncased-finetuned-sst-2-english` | HuggingFace model ID |
+
+#### Environment variable precedence
+
+Some settings have multiple names for historical reasons. Precedence (highest first):
+
+| Setting | Primary | Legacy alias | Behavior |
+|---------|---------|--------------|----------|
+| Environment name | `ZEROPHISH_ENV` | `ENV` | Gateway uses `ZEROPHISH_ENV` only; production persistence checks fall back to `ENV`. |
+| Scan rate limit | `SCAN_RATE_LIMIT` | `GATEWAY_SCAN_RATE_LIMIT` | Primary wins; default is `1200/minute` (`20/minute` when `ZEROPHISH_ENV=production`). |
+| Status rate limit | `STATUS_RATE_LIMIT` | `GATEWAY_STATUS_RATE_LIMIT` | Primary wins; default `120/minute`. |
 
 ---
 
