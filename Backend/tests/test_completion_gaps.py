@@ -49,9 +49,10 @@ def sqlite_session_factory():
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def test_sql_scan_result_repository(sqlite_session_factory):
+@pytest.mark.asyncio
+async def test_sql_scan_result_repository(sqlite_session_factory):
     repo = SQLScanResultRepository(sqlite_session_factory)
-    assert repo.count() == 0
+    assert await repo.count() == 0
 
     scan = GatewayScanResponse(
         scan_id='scan-test-123',
@@ -78,22 +79,22 @@ def test_sql_scan_result_repository(sqlite_session_factory):
         subject='Urgent Wire',
     )
 
-    repo.save(scan.scan_id, scan)
-    assert repo.count() == 1
-    assert repo.count_pending() == 0
+    await repo.save(scan.scan_id, scan)
+    assert await repo.count() == 1
+    assert await repo.count_pending() == 0
 
-    retrieved = repo.get('scan-test-123')
+    retrieved = await repo.get('scan-test-123')
     assert retrieved is not None
     assert retrieved.scan_id == 'scan-test-123'
     assert retrieved.verdict == 'CRITICAL'
     assert retrieved.final_score == 75.0
 
-    all_scans = repo.list_all(limit=10)
+    all_scans = await repo.list_all(limit=10)
     assert len(all_scans) == 1
 
-    deleted = repo.delete('scan-test-123')
+    deleted = await repo.delete('scan-test-123')
     assert deleted is True
-    assert repo.count() == 0
+    assert await repo.count() == 0
 
 
 def test_sql_analytics_repository(sqlite_session_factory):

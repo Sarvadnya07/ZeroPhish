@@ -223,6 +223,23 @@ app.add_middleware(
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestSizeLimitMiddleware, max_size=1_000_000)  # 1 MB
 
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    start_time = time.perf_counter()
+    response = await call_next(request)
+    duration = time.perf_counter() - start_time
+    try:
+        from security.metrics import record_http_request
+        record_http_request(
+            method=request.method,
+            endpoint=request.url.path,
+            status_code=response.status_code,
+            duration_sec=duration,
+        )
+    except Exception:
+        pass
+    return response
+
 # ---------- Rate Limiting ----------
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
@@ -954,6 +971,13 @@ async def gateway_circuit_reset() -> dict:
         return {"enabled": False, "status": "disabled"}
     tier3_circuit_breaker.reset()
     return {"enabled": True, "status": "reset", **tier3_circuit_breaker.get_status()}
+
+# ---------- Metrics ----------
+@app.get("/metrics")
+async def gateway_metrics() -> Response:
+    """Prometheus exposition format telemetry endpoint."""
+    from security.metrics import get_metrics_response
+    return get_metrics_response()
 
 # ---------- SSE Streaming ----------
 @app.get("/tier1/latest")

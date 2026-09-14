@@ -32,7 +32,7 @@ npm run dev
 
 ```powershell
 # Test Tier 2 Health
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 
 # Test Gateway Health  
 curl http://localhost:8001/gateway/health
@@ -82,7 +82,7 @@ curl -X POST http://localhost:8001/gateway/scan `
 
 ```powershell
 # Test phishing email
-curl -X POST http://localhost:8000/scan `
+curl -X POST http://localhost:8001/scan `
   -H "Content-Type: application/json" `
   -d '{
     "sender":"urgent@suspicious-bank.com",
@@ -239,7 +239,7 @@ server {
 
 ```powershell
 # Check if ports are in use
-netstat -ano | findstr :8000
+netstat -ano | findstr :8001
 netstat -ano | findstr :8001
 
 # Kill process if needed

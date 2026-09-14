@@ -452,7 +452,7 @@ ADMIN_PASSWORD=CHANGE_ME_BEFORE_PRODUCTION
 TIER3_TIMEOUT=5
 
 # ── CORS Configuration ────────────────────────────────
-ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8000,http://127.0.0.1:3000,http://127.0.0.1:8000
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8001,http://127.0.0.1:3000,http://127.0.0.1:8001
 
 # ── External AI & Metadata (Tier 3) ───────────────────
 # Optional: Required for Gemini AI threat analysis
@@ -717,7 +717,7 @@ All configuration is driven by the `Backend/.env` file. Key variables:
 
 ```powershell
 # Tier 2 Backend
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 
 # API Gateway
 curl http://localhost:8001/gateway/health
@@ -729,7 +729,7 @@ curl http://localhost:8001/gateway/circuit/status
 ### Phishing Detection Test
 
 ```powershell
-curl -X POST http://localhost:8000/scan `
+curl -X POST http://localhost:8001/scan `
   -H "Content-Type: application/json" `
   -d '{
     "sender": "urgent@suspicious-bank.com",

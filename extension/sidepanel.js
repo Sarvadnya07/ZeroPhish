@@ -8,11 +8,9 @@ import { analyzeTier1 } from './tier1.js';
 
 // Configuration defaults
 const DEFAULT_GATEWAY_BASE = 'http://127.0.0.1:8001';
-const DEFAULT_BACKEND_BASE = 'http://127.0.0.1:8000';
 const DEFAULT_WEB_URL = 'http://localhost:3000';
 
 let GATEWAY_BASE = DEFAULT_GATEWAY_BASE;
-let BACKEND_BASE = DEFAULT_BACKEND_BASE;
 let WEB_URL = DEFAULT_WEB_URL;
 let currentAuthToken = null;
 let currentAuthUser = null;
@@ -24,7 +22,7 @@ function getEndpoints() {
     status: (id) => `${GATEWAY_BASE}/gateway/status/${id}`,
     result: (id) => `${GATEWAY_BASE}/gateway/result/${id}`,
     vision: `${GATEWAY_BASE}/vision/analyze`,
-    report: `${BACKEND_BASE}/tier1/report`,
+    report: `${GATEWAY_BASE}/tier1/report`,
     me: `${GATEWAY_BASE}/auth/me`,
   };
 }

@@ -21,6 +21,11 @@ from enum import Enum
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, TypeVar, Union, Awaitable, ParamSpec
 
+try:
+    import redis.asyncio as aioredis
+except ImportError:
+    aioredis = None
+
 logger = logging.getLogger(__name__)
 
 # ---------- Configuration from Environment ----------
@@ -153,9 +158,22 @@ class CircuitBreaker:
         self._lock = asyncio.Lock()
         self._metrics = CircuitBreakerMetrics()
 
+        self._redis_url = os.getenv("REDIS_URL")
+        self._redis_client = None
+        if self._redis_url and aioredis:
+            try:
+                self._redis_client = aioredis.from_url(
+                    self._redis_url,
+                    decode_responses=True,
+                    socket_connect_timeout=0.5,
+                    socket_timeout=0.5,
+                )
+            except Exception as e:
+                logger.warning("CircuitBreaker '%s': Redis connection setup error: %s", name, e)
+
         logger.info(
-            "CircuitBreaker '%s' initialized: threshold=%d, timeout=%.2fs, window=%.2fs",
-            name, failure_threshold, timeout, window,
+            "CircuitBreaker '%s' initialized: threshold=%d, timeout=%.2fs, window=%.2fs, distributed=%s",
+            name, failure_threshold, timeout, window, bool(self._redis_client),
         )
 
     @property
@@ -204,9 +222,17 @@ class CircuitBreaker:
             CircuitBreakerTimeoutError: If the call exceeds `timeout_seconds`.
             Exception: Any exception from `func` (unless handled by fallback).
         """
-        # 1. Check state under lock
+        # 1. Check state under lock (with distributed Redis synchronization if enabled)
         should_reject = False
         rejection_state = CircuitState.OPEN
+
+        if self._redis_client:
+            try:
+                dist_state_val = await self._redis_client.get(f"circuit:{self.name}:state")
+                if dist_state_val:
+                    self._state = CircuitState(dist_state_val)
+            except Exception as e:
+                logger.debug("Circuit '%s': Redis state poll failed: %s", self.name, e)
 
         async with self._lock:
             if self._state == CircuitState.OPEN:
@@ -319,6 +345,19 @@ class CircuitBreaker:
         self._state = new_state
         self._metrics.record_state_transition(old_state, new_state)
         logger.info("Circuit '%s': %s -> %s", self.name, old_state.value, new_state.value)
+
+        # Update Redis distributed key if active
+        if self._redis_client:
+            try:
+                asyncio.create_task(
+                    self._redis_client.set(
+                        f"circuit:{self.name}:state",
+                        new_state.value,
+                        ex=int(self.timeout * 2),
+                    )
+                )
+            except Exception as e:
+                logger.debug("Circuit '%s': Failed to publish distributed state to Redis: %s", self.name, e)
 
     def reset(self) -> None:
         """Manually reset the circuit to CLOSED state."""

@@ -355,7 +355,7 @@ class SQLScanResultRepository:
     def __init__(self, session_factory):
         self._session_factory = session_factory
 
-    def save(self, scan_id: str, scan_data: Any) -> None:
+    async def save(self, scan_id: str, scan_data: Any) -> None:
         try:
             data_dict = scan_data.model_dump(mode="json") if hasattr(scan_data, "model_dump") else scan_data
         except Exception:
@@ -392,7 +392,7 @@ class SQLScanResultRepository:
                 session.add(db_record)
             session.commit()
 
-    def get(self, scan_id: str) -> Optional[Any]:
+    async def get(self, scan_id: str) -> Optional[Any]:
         with self._session_factory() as session:
             row = session.query(ScanResultDB).filter(ScanResultDB.scan_id == scan_id).first()
             if not row or not row.data_json:
@@ -403,7 +403,7 @@ class SQLScanResultRepository:
             except Exception:
                 return None
 
-    def delete(self, scan_id: str) -> bool:
+    async def delete(self, scan_id: str) -> bool:
         with self._session_factory() as session:
             row = session.query(ScanResultDB).filter(ScanResultDB.scan_id == scan_id).first()
             if row:
@@ -412,7 +412,7 @@ class SQLScanResultRepository:
                 return True
             return False
 
-    def list_all(self, limit: int = 100) -> List[Any]:
+    async def list_all(self, limit: int = 100) -> List[Any]:
         with self._session_factory() as session:
             rows = (
                 session.query(ScanResultDB)
@@ -428,11 +428,11 @@ class SQLScanResultRepository:
                     continue
             return results
 
-    def count(self) -> int:
+    async def count(self) -> int:
         with self._session_factory() as session:
             return session.query(ScanResultDB).count()
 
-    def count_pending(self) -> int:
+    async def count_pending(self) -> int:
         with self._session_factory() as session:
             return session.query(ScanResultDB).filter(ScanResultDB.complete == False).count()
 

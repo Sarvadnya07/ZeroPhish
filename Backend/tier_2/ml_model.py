@@ -44,9 +44,24 @@ def _ensure_stub_module(name: str, *, is_package: bool = False):
 
 if sys.platform == "win32":
     # Prevent transformers from loading broken torchvision C-extension DLLs on Windows Python 3.13
-    # Insert dummy modules instead of None to satisfy type checkers expecting a module object
-    _ensure_stub_module("torchvision", is_package=True)
-    _ensure_stub_module("torchvision.transforms")
+    import enum
+    import types
+
+    class _StubInterpolationMode(enum.Enum):
+        NEAREST = "nearest"
+        NEAREST_EXACT = "nearest-exact"
+        BILINEAR = "bilinear"
+        BICUBIC = "bicubic"
+        BOX = "box"
+        HAMMING = "hamming"
+        LANCZOS = "lanczos"
+
+    tv = _ensure_stub_module("torchvision", is_package=True)
+    tt = _ensure_stub_module("torchvision.transforms")
+    setattr(tt, "InterpolationMode", _StubInterpolationMode)
+    tio = _ensure_stub_module("torchvision.io")
+    setattr(tv, "transforms", tt)
+    setattr(tv, "io", tio)
 
 # ---------- Optional imports ----------
 try:

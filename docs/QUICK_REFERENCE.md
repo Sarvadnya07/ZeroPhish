@@ -26,9 +26,9 @@ python test_install.py
 | API Gateway Docs (Orchestrator) | 8001 | http://localhost:8001/docs |
 | API Gateway Health | 8001 | http://localhost:8001/gateway/health |
 | Circuit Breaker Status | 8001 | http://localhost:8001/gateway/circuit/status |
-| Tier 2 Backend Docs (ML/OSINT) | 8000 | http://localhost:8000/docs |
-| Tier 2 Backend Health | 8000 | http://localhost:8000/health |
-| Cache Statistics | 8000 | http://localhost:8000/cache/stats |
+| Tier 2 Backend Docs (ML/OSINT) | 8000 | http://localhost:8001/docs |
+| Tier 2 Backend Health | 8000 | http://localhost:8001/health |
+| Cache Statistics | 8000 | http://localhost:8001/cache/stats |
 | Frontend Dashboard | 3000 | http://localhost:3000 |
 
 ---
@@ -44,12 +44,12 @@ $body = @{
     links = @("https://bit.ly/suspicious")
 } | ConvertTo-Json
 
-Invoke-RestMethod -Uri "http://localhost:8000/scan" -Method Post -Body $body -ContentType "application/json"
+Invoke-RestMethod -Uri "http://localhost:8001/scan" -Method Post -Body $body -ContentType "application/json"
 ```
 
 ```bash
 # Bash/curl
-curl -X POST http://localhost:8000/scan \
+curl -X POST http://localhost:8001/scan \
   -H "Content-Type: application/json" \
   -d '{
     "sender": "suspicious@newdomain.com",
@@ -60,12 +60,12 @@ curl -X POST http://localhost:8000/scan \
 
 ### Check Health
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:8000/health"
+Invoke-RestMethod -Uri "http://localhost:8001/health"
 ```
 
 ### Clear Cache
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:8000/cache/clear" -Method Delete
+Invoke-RestMethod -Uri "http://localhost:8001/cache/clear" -Method Delete
 ```
 
 ---
@@ -108,7 +108,7 @@ python --version
 
 **Check if port 8000 is in use:**
 ```powershell
-netstat -ano | findstr :8000
+netstat -ano | findstr :8001
 ```
 
 **Kill process on port 8000:**
@@ -126,7 +126,7 @@ taskkill /PID <PID> /F
 
 **Check backend connection:**
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:8000/health"
+Invoke-RestMethod -Uri "http://localhost:8001/health"
 ```
 
 **Check browser console:**
