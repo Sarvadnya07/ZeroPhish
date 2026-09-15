@@ -32,7 +32,7 @@
 #>
 
 param(
-    [int]$Port = 8000,
+    [int]$Port = 8001,
     [switch]$LocalProcess,
     [switch]$DockerCompose,
     [switch]$Background,

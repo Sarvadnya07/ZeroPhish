@@ -165,7 +165,7 @@ if ($Port) {
 
 # 7. Check port availability (if we can determine the port)
 $backendPort = [int](Get-Item -Path "env:PORT" -ErrorAction SilentlyContinue).Value
-if (-not $backendPort) { $backendPort = 8000 }  # default
+if (-not $backendPort) { $backendPort = 8001 }  # default canonical port
 
 $portInUse = Get-NetTCPConnection -LocalPort $backendPort -ErrorAction SilentlyContinue
 if ($portInUse) {
