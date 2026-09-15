@@ -29,7 +29,7 @@ from typing import Any, Dict, Optional, Tuple
 import requests
 
 # ---------- Configuration ----------
-DEFAULT_BASE_URL = os.getenv("ZEROPHISH_BASE_URL", "http://127.0.0.1:8000")
+DEFAULT_BASE_URL = os.getenv("ZEROPHISH_BASE_URL", "http://127.0.0.1:8001")
 DEFAULT_TIMEOUT = 5.0
 DEFAULT_RETRY_COUNT = 2
 DEFAULT_RETRY_DELAY = 1.0

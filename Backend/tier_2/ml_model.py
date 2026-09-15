@@ -184,8 +184,12 @@ class PhishingMLModel:
             logger.info("Cache directory: %s", self.cache_dir)
 
             def _load():
-                tokenizer = tokenizer_cls.from_pretrained(self.model_name, cache_dir=self.cache_dir)
-                model = model_cls.from_pretrained(self.model_name, cache_dir=self.cache_dir)
+                try:
+                    tokenizer = tokenizer_cls.from_pretrained(self.model_name, cache_dir=self.cache_dir, local_files_only=True)
+                    model = model_cls.from_pretrained(self.model_name, cache_dir=self.cache_dir, local_files_only=True)
+                except Exception:
+                    tokenizer = tokenizer_cls.from_pretrained(self.model_name, cache_dir=self.cache_dir)
+                    model = model_cls.from_pretrained(self.model_name, cache_dir=self.cache_dir)
                 if hasattr(model, "to"):
                     model.to(self.device)
                 if hasattr(model, "eval"):
@@ -312,10 +316,23 @@ class PhishingMLModel:
                 timeout=self.inference_timeout,
             )
 
-            if len(probs) == 2:
+            # Determine phishing probability from model output distribution.
+            # Check model config id2label for an explicit "phish" class label.
+            phishing_idx = None
+            if self.model is not None and hasattr(self.model, "config") and hasattr(self.model.config, "id2label"):
+                for idx, lbl in self.model.config.id2label.items():
+                    if "phish" in str(lbl).lower():
+                        phishing_idx = int(idx)
+                        break
+
+            if phishing_idx is not None and phishing_idx < len(probs):
+                phishing_prob = float(probs[phishing_idx])
+            elif len(probs) >= 2:
+                # In standard multi-class and binary email classifiers (e.g. DistilBERT),
+                # index 0 is benign/safe and index 1 is phishing.
                 phishing_prob = float(probs[1])
             else:
-                phishing_prob = float(max(probs))
+                phishing_prob = float(probs[0])
 
             phishing_score = phishing_prob * 100.0
 

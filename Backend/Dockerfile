@@ -55,11 +55,11 @@ RUN mkdir -p /app/data && chown -R appuser:appgroup /app/data
 # Drop privileges to non-root
 USER appuser
 
-EXPOSE 8000
+EXPOSE 8001
 
 # Container liveness & readiness health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:8001/gateway/health || exit 1
 
 # Production gateway launch with multi-worker ASGI server
-CMD ["uvicorn", "gateway:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+CMD ["uvicorn", "gateway:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "4"]

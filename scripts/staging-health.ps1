@@ -30,7 +30,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$BaseUrl = "http://127.0.0.1:8000",
+    [string]$BaseUrl = "http://127.0.0.1:8001",
     [switch]$NoConfigCheck,
     [switch]$NoConnectivityCheck,
     [int]$Timeout = 10

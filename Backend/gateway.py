@@ -355,15 +355,17 @@ def _broadcast_to_subscribers(payload: Any) -> None:
         _sse_subscribers.pop(sub_id, None)
         _sse_subscriber_overflows.pop(sub_id, None)
 
+SCAN_CACHE_VERSION = "v2.1"
+
 # ---------- Helper Functions ----------
 def _calculate_scan_cache_key(sender: str, body: str, links: List[str], subject: Optional[str]) -> str:
-    """Generate deterministic SHA‑256 cache key for identical email payload."""
+    """Generate deterministic SHA‑256 cache key scoped by detection version."""
     norm_sender = (sender or "").strip().lower()
     norm_body = (body or "").strip()
     norm_links = sorted((str(l) or "").strip().lower() for l in links)
     norm_subject = (subject or "").strip()
-    raw = f"{norm_sender}|{norm_subject}|{norm_body}|{','.join(norm_links)}"
-    return "scan:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    raw = f"{SCAN_CACHE_VERSION}|{norm_sender}|{norm_subject}|{norm_body}|{','.join(norm_links)}"
+    return f"scan:{SCAN_CACHE_VERSION}:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 def _clamp_score(score: float) -> float:
     return max(0.0, min(100.0, float(score)))
@@ -477,19 +479,20 @@ async def _notify_live_dashboard(res: GatewayScanResponse, sender: str, subject:
         subject,
     )
 
-    # Optional external webhook
+    # Optional external webhook notification (skips local loopback; strictly validated against SSRF)
     live_url = os.getenv("LIVE_DASHBOARD_URL")
-    if live_url and "8001" not in live_url:
+    if live_url and not any(h in live_url for h in ("localhost", "127.0.0.1", ":8000", ":8001")):
         try:
-            import httpx
-            payload_bytes = json.dumps(payload, default=str).encode("utf-8")
-            async with httpx.AsyncClient() as client:
-                await client.post(
-                    live_url,
-                    content=payload_bytes,
-                    headers={"Content-Type": "application/json"},
-                    timeout=2.0,
-                )
+            from security.middleware import is_safe_url
+            if is_safe_url(live_url, allow_http=False):
+                import httpx
+                payload_bytes = json.dumps(payload, default=str).encode("utf-8")
+                async with httpx.AsyncClient(timeout=2.0, follow_redirects=False) as client:
+                    await client.post(
+                        live_url,
+                        content=payload_bytes,
+                        headers={"Content-Type": "application/json"},
+                    )
         except (httpx.HTTPError, OSError, TimeoutError, ValueError, TypeError) as e:
             logger.debug("External dashboard notification failed: %s", e)
 
@@ -505,7 +508,11 @@ async def execute_tier2(sender: str, body: str, links: List[str]) -> Tier2Result
             domain_score, domain_status = 70.0, DomainStatus.UNKNOWN
             evidence.append("Could not parse sender domain.")
         else:
-            age_days = await asyncio.to_thread(get_domain_age, domain)
+            try:
+                age_days = await asyncio.wait_for(asyncio.to_thread(get_domain_age, domain), timeout=2.0)
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug("Domain age lookup timed out or failed for %s: %s", domain, e)
+                age_days = None
             domain_score, domain_status, msg = analyze_domain_age(age_days)
             evidence.append(msg)
 
@@ -603,9 +610,17 @@ async def _finalize_tier3(
                 logger.warning("Scan %s not found in repository; skipping finalization", scan_id)
                 return
 
-            final_score = _round_score(
+            calculated_score = _round_score(
                 _calculate_final_score(existing.tier1.score, existing.tier2.score, tier3_result.score)
             )
+            # Security Policy: Tier 3 AI cannot override or downgrade deterministic critical security findings.
+            if existing.partial_score >= 70.0:
+                final_score = max(calculated_score, existing.partial_score)
+            elif existing.verdict == "CRITICAL":
+                final_score = max(calculated_score, 70.0)
+            else:
+                final_score = calculated_score
+
             final_verdict = _determine_verdict(final_score)
             total_ms = None
             if scan_id in scan_started_at:
@@ -917,6 +932,7 @@ async def gateway_health() -> dict:
 
 @app.get("/ready")
 @app.get("/api/v1/ready")
+@app.get("/gateway/ready")
 async def gateway_readiness(response: Response) -> dict:
     """Active readiness probe for orchestration and load balancers."""
     dependencies = {
