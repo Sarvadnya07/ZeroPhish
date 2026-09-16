@@ -82,8 +82,7 @@ def test_webhook_cross_user_unsubscribe_denied(client, monkeypatch):
 
     res = client.post(
         "/webhooks",
-        json={
-            "url": "http://example.com/webhook",
+        json={                "url": "https://example.com/webhook",  # https: http:// is rejected in production mode (CI),
             "events": ["incident.created"],
             "secret": "test_secret",
         },
