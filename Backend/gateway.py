@@ -189,7 +189,18 @@ async def verify_api_key(api_key: str = Security(api_key_header)) -> str:
         )
     return api_key
 
-# ---------- Lifespan ----------
+# ---------- Lifespan & Background Tasks ----------
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_background_task(coro, name: Optional[str] = None) -> asyncio.Task:
+    """Spawn a background task, retaining a strong reference to prevent early garbage collection."""
+    task = asyncio.create_task(coro, name=name)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("=" * 60)
@@ -200,6 +211,37 @@ async def lifespan(app: FastAPI):
     logger.info("Environment: %s", CONFIG.env)
     yield
     logger.info("ZeroPhish API Gateway shutting down...")
+    # 1. Drain/cancel active background tasks
+    if _background_tasks:
+        logger.info("Draining %d active background tasks...", len(_background_tasks))
+        pending = list(_background_tasks)
+        for t in pending:
+            if not t.done():
+                t.cancel()
+        try:
+            await asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), timeout=5.0)
+        except (asyncio.TimeoutError, TimeoutError):
+            logger.warning("Timed out waiting for background tasks to drain.")
+        _background_tasks.clear()
+
+    # 2. Close webhook client
+    if EXTENSIONS_AVAILABLE:
+        try:
+            from webhooks.service import _close_client
+            await _close_client()
+        except Exception as e:
+            logger.debug("Error closing webhook client: %s", e)
+
+    # 3. Close cache backend
+    try:
+        from repositories.factory import close_cache_backend
+        await close_cache_backend()
+    except Exception as e:
+        logger.debug("Error closing cache backend: %s", e)
+
+    # 4. Clear SSE subscribers
+    _sse_subscribers.clear()
+    _sse_subscriber_overflows.clear()
 
 # ---------- FastAPI App ----------
 app = FastAPI(
@@ -374,11 +416,13 @@ def _round_score(score: float) -> float:
     return round(_clamp_score(score), 2)
 
 def _determine_verdict(score: float) -> str:
+    # Returns the Verdict enum member (a str subclass) rather than a bare literal,
+    # so Pydantic serializes the annotated `Verdict` field without a serializer warning.
     if score < 30:
-        return "SAFE"
+        return Verdict.SAFE
     if score < 70:
-        return "SUSPICIOUS"
-    return "CRITICAL"
+        return Verdict.SUSPICIOUS
+    return Verdict.CRITICAL
 
 def _determine_threat_status(score: float) -> str:
     if score >= 70:
@@ -657,20 +701,33 @@ async def _finalize_tier3(
 
             # Notify dashboard
             try:
-                asyncio.create_task(_notify_live_dashboard(updated, sender_meta, subject_meta))
+                _spawn_background_task(
+                    _notify_live_dashboard(updated, sender_meta, subject_meta),
+                    name=f"sse-dash-{scan_id}",
+                )
             except RuntimeError as exc:
                 logger.warning("Unable to schedule live dashboard task for scan %s: %s", scan_id, exc)
 
-        # Fire webhooks and record analytics (outside the lock)
+        # Fire webhooks in background and record analytics (outside the lock)
         if EXTENSIONS_AVAILABLE:
-            try:
-                payload = updated.model_dump()
-                await WebhookService.fire(WebhookEventType.SCAN_COMPLETE, payload)
-                if final_verdict == "CRITICAL":
-                    await WebhookService.fire(WebhookEventType.SCAN_CRITICAL, payload)
-                elif final_verdict == "SUSPICIOUS":
-                    await WebhookService.fire(WebhookEventType.SCAN_SUSPICIOUS, payload)
+            payload = updated.model_dump(mode="json")
 
+            async def _fire_webhooks(pl: dict, v: str) -> None:
+                try:
+                    await WebhookService.fire(WebhookEventType.SCAN_COMPLETE, pl)
+                    if v == "CRITICAL":
+                        await WebhookService.fire(WebhookEventType.SCAN_CRITICAL, pl)
+                    elif v == "SUSPICIOUS":
+                        await WebhookService.fire(WebhookEventType.SCAN_SUSPICIOUS, pl)
+                except Exception as wh_err:
+                    logger.warning("Background webhook delivery error for scan %s: %s", scan_id, wh_err)
+
+            try:
+                _spawn_background_task(_fire_webhooks(payload, final_verdict), name=f"webhook-fire-{scan_id}")
+            except Exception as task_err:
+                logger.warning("Unable to spawn webhook task for scan %s: %s", scan_id, task_err)
+
+            try:
                 await AnalyticsService.record_scan(
                     scan_id=scan_id,
                     sender=sender_meta,
@@ -683,7 +740,7 @@ async def _finalize_tier3(
                     tier3=float(tier3_result.score),
                 )
             except (TypeError, ValueError, RuntimeError, OSError) as e:
-                logger.error("Webhook/analytics error for scan %s: %s", scan_id, e)
+                logger.error("Analytics recording error for scan %s: %s", scan_id, e)
     finally:
         scan_started_at.pop(scan_id, None)
 
@@ -739,8 +796,9 @@ async def gateway_scan(
             async with scan_results_lock:
                 await scan_repo.save(scan_id, cached_res)
             try:
-                asyncio.create_task(
-                    _notify_live_dashboard(cached_res, scan_request.sender, scan_request.subject or "No Subject")
+                _spawn_background_task(
+                    _notify_live_dashboard(cached_res, scan_request.sender, scan_request.subject or "No Subject"),
+                    name=f"sse-cache-{scan_id}",
                 )
             except RuntimeError as exc:
                 logger.warning("Unable to schedule cache-hit dashboard notification for scan %s: %s", scan_id, exc)
@@ -765,7 +823,9 @@ async def gateway_scan(
     )
 
     partial_score = _round_score(_calculate_partial_score(tier1.score, tier2.score))
-    verdict_str = _determine_verdict(partial_score)
+    # _determine_verdict already returns a Verdict member; this lookup is now a cheap
+    # identity-preserving normalization kept for the (defensive) KeyError fallback below.
+    verdict_str = str(_determine_verdict(partial_score).value)
     try:
         verdict = Verdict[verdict_str]
     except KeyError:
@@ -800,8 +860,9 @@ async def gateway_scan(
 
     # 5. Notify dashboard (partial)
     try:
-        asyncio.create_task(
-            _notify_live_dashboard(response, scan_request.sender, scan_request.subject or "No Subject")
+        _spawn_background_task(
+            _notify_live_dashboard(response, scan_request.sender, scan_request.subject or "No Subject"),
+            name=f"sse-partial-{scan_id}",
         )
     except RuntimeError as exc:
         logger.warning("Unable to schedule live dashboard notification for scan %s: %s", scan_id, exc)

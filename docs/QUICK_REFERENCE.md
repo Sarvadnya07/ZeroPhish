@@ -178,7 +178,7 @@ REDIS_URL=redis://localhost:6379
 
 | File | Purpose |
 |------|---------|
-| `tier_2/main.py` | Main FastAPI backend server |
+| `Backend/gateway.py` | Canonical FastAPI backend (port 8001) — `tier_2/main.py` is deprecated |
 | `extension/sidepanel.js` | Extension UI logic |
 | `extension/content.js` | Gmail content extraction |
 | `extension/worker.js` | AI model worker |

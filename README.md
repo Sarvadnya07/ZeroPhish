@@ -42,6 +42,9 @@
 17. [Contributing](#contributing)
 18. [License](#license)
 
+> 📚 **Full documentation index:** [`docs/INDEX.md`](docs/INDEX.md) — runbooks,
+> architecture reports, testing/deployment guides, and quality-engineering history.
+
 ---
 
 ## 📖 Overview
@@ -74,7 +77,39 @@ The final threat score uses a **weighted 3‑tier formula**:
 
 ## 🏗️ Architecture
 
-*(unchanged, the mermaid diagrams and descriptions are excellent)*
+### Module Topology & Dependency Rules
+
+The backend is a **layered modular monolith** with a single canonical entrypoint (`Backend/gateway.py`, port 8001). The dependency direction below is **enforced by automated tests** (`Backend/tests/test_architecture_boundaries.py`) — violations fail CI:
+
+```
+                    ┌─────────────┐
+                    │  gateway.py  │  (orchestrator: scan, SSE, cache, circuit breaker)
+                    └──────┬───────┘
+        ┌──────────┬───────┼────────┬───────────┐
+        ▼          ▼       ▼        ▼           ▼
+   feature routers  tier_2  tier_3  ml      circuit_breaker
+   (auth, incidents,
+    webhooks, analytics,
+    awareness, email_scanner,
+    vision)
+        │          │       ▼
+        ▼          └──► (ml may use tier_2 analyzer)
+   repositories ◄──── (services own their repos via factory)
+        │
+        ▼
+   infrastructure  (SQLAlchemy engine, DB models, migrations)
+
+   security/ = foundation layer (imported by gateway, tier_2, features; imports none of them)
+   models/   = shared DTOs (gateway models, extension contract)
+```
+
+Enforced rules (see the boundary test module for the authoritative list):
+- `security/` → imports no feature/application modules (pure foundation)
+- `repositories/` → imports no gateway/tier/ml behavior modules (domain *models* allowed — shared value types)
+- `infrastructure/` → imports no domain or application modules (bottom of the graph)
+- feature routers → never import `gateway` (they are plugged *into* it)
+
+**Single entrypoint:** `tier_2/main.py` is a deprecated legacy standalone server retained only as a compatibility reference until v3.0. It is not started by any deployment config, CI job, or test; do not build new functionality against it. The sequence diagrams below describe request flow *through the gateway* — tier 2 analysis runs in-process via `tier_2.analyzer`, not as a separate service.
 
 ---
 
@@ -170,17 +205,13 @@ For detailed instructions, see [Installation & Setup](#installation--setup) abov
 | `GET` | `/cache/stats` | Cache backend statistics |
 | `DELETE` | `/cache/clear` | Clear cached scan reports |
 
-### Tier 2 Backend (Port 8000)
+### Tier 2 Backend (Port 8000) — ⚠️ Deprecated legacy entrypoint
+
+> **Deprecated.** The standalone Tier 2 server (`tier_2/main.py`) is retired as a deployment target. The canonical gateway (`Backend/gateway.py`, port 8001) exposes all of this functionality in-process. This table is retained only for operators of very old deployments; do not build against port 8000.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/scan` | Direct Tier 2 scan |
-| `POST` | `/tier1/report` | Receive scan report from extension |
-| `GET` | `/tier1/latest` | Most recent scan result |
-| `GET` | `/tier1/stream` | SSE stream for real‑time updates |
-| `GET` | `/health` | Service health check |
-| `GET` | `/cache/stats` | Redis cache statistics |
-| `DELETE` | `/cache/clear` | Clear all cached results |
 
 ### Example Scan Request
 
@@ -218,6 +249,14 @@ curl -X POST http://localhost:8001/gateway/scan \
 }
 ```
 
+#### Webhook Delivery Semantics
+
+Webhooks (`scan.complete`, `scan.critical`, `scan.suspicious`) are dispatched **asynchronously** when a scan finalizes — a slow or down webhook receiver never delays the scan response. Consequences of this design:
+
+- **At-most-once delivery:** a gateway restart or crash between scan finalization and background dispatch can lose a webhook event. There is currently **no retry and no delivery ledger**. Downstream SOC integrations must treat webhooks as best-effort signals; the authoritative record is the persisted scan result (`GET /gateway/result/{scan_id}`), which survives restarts.
+- Failed deliveries are logged with full exception detail (`Webhook delivery exception: ...`) for diagnosis.
+- Durable delivery (persist-before-dispatch outbox with retries) is a planned reliability increment, not yet implemented.
+
 ---
 
 ## 🛠️ Tech Stack
@@ -245,6 +284,7 @@ ZeroPhish enforces a multi‑stage quality gate process:
 1. **Local Development**  
   - Pre‑commit hooks run `gitleaks` and `semgrep`.  
   - `pytest` with coverage (CI gate: ≥65%, local target 85%).  
+  - Install the backend dev tooling once so bare `pytest` works locally: `pip install -e Backend[dev]` (adds pytest, pytest-asyncio, pytest-cov, httpx).  
   - `pnpm test` and `pnpm build` for frontend.
 
 2. **Pull Request**  
@@ -265,7 +305,7 @@ ZeroPhish enforces a multi‑stage quality gate process:
   - Gradual rollout (10% → 25% → 50% → 100%).  
   - Continuous monitoring of false‑positive/negative rates.
 
-For details, see the [Security Gate documentation](scripts/security-gate.ps1) and [Testing Guide](TESTING_AND_DEPLOYMENT.md).
+For details, see the [Security Gate documentation](scripts/security-gate.ps1) and [Testing Guide](docs/TESTING_AND_DEPLOYMENT.md).
 
 ---
 
@@ -391,6 +431,10 @@ We welcome contributions! Please follow these steps:
 - [ ] No secrets or credentials in the diff.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+
+> Note: `CONTRIBUTING.md` does not currently exist in this repository — the
+> contributing expectations are described in this section and in
+> [`docs/INDEX.md`](docs/INDEX.md).
 
 ---
 
@@ -630,7 +674,9 @@ For complete deployment details, topology maps, and operational guides, see:
 | `GET` | `/cache/stats` | Active cache backend statistics (Redis/In-Memory) |
 | `DELETE` | `/cache/clear` | Clear all cached scan reports |
 
-### Tier 2 Backend (Port 8000)
+### Tier 2 Backend (Port 8000) — ⚠️ Deprecated legacy entrypoint
+
+> **Deprecated.** See the note in [API Reference](#-api-reference): the standalone Tier 2 server is retired; the canonical gateway exposes this functionality in-process on port 8001.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -894,13 +940,15 @@ WantedBy=multi-user.target
 
 ## 📁 Related Documentation
 
+All project documentation is indexed in [`docs/INDEX.md`](docs/INDEX.md). Highlights:
+
 | File | Description |
 |------|-------------|
-| [`TESTING_AND_DEPLOYMENT.md`](./TESTING_AND_DEPLOYMENT.md) | Full testing checklist & deployment guide |
-| [`Backend/QUICK_REFERENCE.md`](./Backend/QUICK_REFERENCE.md) | Quick API & config reference |
-| [`Backend/GEMINI_INTEGRATION_STATUS.md`](./Backend/GEMINI_INTEGRATION_STATUS.md) | Tier 3 AI integration notes |
-| [`EXTENSION_FIX_GUIDE.md`](./EXTENSION_FIX_GUIDE.md) | Extension troubleshooting guide |
-| [`RELOAD_EXTENSION_INSTRUCTIONS.md`](./RELOAD_EXTENSION_INSTRUCTIONS.md) | How to reload the Chrome extension |
+| [`docs/TESTING_AND_DEPLOYMENT.md`](docs/TESTING_AND_DEPLOYMENT.md) | Full testing checklist & deployment guide |
+| [`docs/QUICK_REFERENCE.md`](docs/QUICK_REFERENCE.md) | Quick API & config reference |
+| [`docs/GEMINI_INTEGRATION_STATUS.md`](docs/GEMINI_INTEGRATION_STATUS.md) | Tier 3 AI integration notes |
+| [`docs/EXTENSION_FIX_GUIDE.md`](docs/EXTENSION_FIX_GUIDE.md) | Extension troubleshooting guide |
+| [`docs/RELOAD_EXTENSION_INSTRUCTIONS.md`](docs/RELOAD_EXTENSION_INSTRUCTIONS.md) | How to reload the Chrome extension |
 
 ---
 

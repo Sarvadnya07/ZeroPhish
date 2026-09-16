@@ -220,7 +220,10 @@ class WebhookService:
                 await WebhookService._deliver(sub, event_type, payload)
 
         tasks = [bounded_deliver(s) for s in targets]
-        await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for r in results:
+            if isinstance(r, Exception):
+                logger.error("Webhook delivery exception: %s", r, exc_info=r)
 
     @staticmethod
     async def _deliver(
@@ -244,7 +247,7 @@ class WebhookService:
             "timestamp": timestamp_str,
             "data": payload,
         }
-        body = json.dumps(envelope).encode()
+        body = json.dumps(envelope, default=str).encode()
         sig = _sign(sub.secret, body)
 
         headers = {
@@ -287,10 +290,8 @@ class WebhookService:
                 delivery.status = "failed"
                 delivery.response_body = "SSRF blocked: destination resolved to private, loopback, or reserved address"
                 delivery.http_status = 403
-                res = repo.record_delivery(delivery)
-                if asyncio.iscoroutine(res):
-                    await res
-                _delivery_log.append(delivery)
+                # Record via the finally block below (a manual record+return here would
+                # double-log the delivery — once here and once in finally).
                 return
 
             client = await _get_client()

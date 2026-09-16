@@ -98,31 +98,35 @@ class SQLUserRepository:
 
     def save(self, user: UserInDB) -> UserInDB:
         with self._session_factory() as session:
-            existing = session.query(UserDB).filter(UserDB.id == user.id).first()
-            if existing:
-                existing.clerk_user_id = user.clerk_user_id
-                existing.full_name = user.full_name
-                existing.role = user.role.value
-                existing.status = user.status.value
-                existing.scan_count = user.scan_count
-                existing.risk_score = user.risk_score
-                existing.last_login = user.last_login
-            else:
-                db_user = UserDB(
-                    id=user.id,
-                    clerk_user_id=user.clerk_user_id,
-                    email=user.email.lower().strip(),
-                    full_name=user.full_name,
-                    role=user.role.value,
-                    status=user.status.value,
-                    scan_count=user.scan_count,
-                    risk_score=user.risk_score,
-                    created_at=user.created_at,
-                    last_login=user.last_login,
-                )
-                session.add(db_user)
-            session.commit()
-            return user
+            try:
+                existing = session.query(UserDB).filter(UserDB.id == user.id).first()
+                if existing:
+                    existing.clerk_user_id = user.clerk_user_id
+                    existing.full_name = user.full_name
+                    existing.role = user.role.value
+                    existing.status = user.status.value
+                    existing.scan_count = user.scan_count
+                    existing.risk_score = user.risk_score
+                    existing.last_login = user.last_login
+                else:
+                    db_user = UserDB(
+                        id=user.id,
+                        clerk_user_id=user.clerk_user_id,
+                        email=user.email.lower().strip(),
+                        full_name=user.full_name,
+                        role=user.role.value,
+                        status=user.status.value,
+                        scan_count=user.scan_count,
+                        risk_score=user.risk_score,
+                        created_at=user.created_at,
+                        last_login=user.last_login,
+                    )
+                    session.add(db_user)
+                session.commit()
+                return user
+            except Exception:
+                session.rollback()
+                raise
 
     def list_all(self, role: Optional[UserRole] = None) -> List[UserInDB]:
         with self._session_factory() as session:
@@ -133,32 +137,44 @@ class SQLUserRepository:
 
     def update(self, user_id: str, update: UserUpdate) -> Optional[UserInDB]:
         with self._session_factory() as session:
-            u = session.query(UserDB).filter(UserDB.id == user_id).first()
-            if not u:
-                return None
-            if update.full_name is not None:
-                u.full_name = update.full_name
-            if update.role is not None:
-                u.role = update.role.value
-            if update.status is not None:
-                u.status = update.status.value
-            session.commit()
-            return self._to_user_in_db(u)
+            try:
+                u = session.query(UserDB).filter(UserDB.id == user_id).first()
+                if not u:
+                    return None
+                if update.full_name is not None:
+                    u.full_name = update.full_name
+                if update.role is not None:
+                    u.role = update.role.value
+                if update.status is not None:
+                    u.status = update.status.value
+                session.commit()
+                return self._to_user_in_db(u)
+            except Exception:
+                session.rollback()
+                raise
 
     def delete(self, user_id: str) -> bool:
         with self._session_factory() as session:
-            u = session.query(UserDB).filter(UserDB.id == user_id).first()
-            if u:
-                session.delete(u)
-                session.commit()
-                return True
-            return False
+            try:
+                u = session.query(UserDB).filter(UserDB.id == user_id).first()
+                if u:
+                    session.delete(u)
+                    session.commit()
+                    return True
+                return False
+            except Exception:
+                session.rollback()
+                raise
 
     def store_token(self, token: str, user_id: str, expires_at: float) -> None:
         with self._session_factory() as session:
-            rec = TokenRevocationDB(token=token, user_id=user_id, expires_at=expires_at)
-            session.merge(rec)
-            session.commit()
+            try:
+                rec = TokenRevocationDB(token=token, user_id=user_id, expires_at=expires_at)
+                session.merge(rec)
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
 
     def validate_token(self, token: str) -> Optional[UserInDB]:
         with self._session_factory() as session:
@@ -166,28 +182,39 @@ class SQLUserRepository:
             if not rec:
                 return None
             if time.time() > rec.expires_at:
-                session.delete(rec)
-                session.commit()
+                try:
+                    session.delete(rec)
+                    session.commit()
+                except Exception:
+                    session.rollback()
                 return None
             u = session.query(UserDB).filter(UserDB.id == rec.user_id).first()
             return self._to_user_in_db(u) if u else None
 
     def revoke_token(self, token: str) -> None:
         with self._session_factory() as session:
-            rec = session.query(TokenRevocationDB).filter(TokenRevocationDB.token == token).first()
-            if rec:
-                session.delete(rec)
-                session.commit()
+            try:
+                rec = session.query(TokenRevocationDB).filter(TokenRevocationDB.token == token).first()
+                if rec:
+                    session.delete(rec)
+                    session.commit()
+            except Exception:
+                session.rollback()
+                raise
 
     def increment_scan(self, user_id: str, final_score: float) -> None:
         with self._session_factory() as session:
-            u = session.query(UserDB).filter(UserDB.id == user_id).first()
-            if not u:
-                return
-            u.scan_count += 1
-            n = u.scan_count
-            u.risk_score = ((u.risk_score * (n - 1)) + final_score) / n
-            session.commit()
+            try:
+                u = session.query(UserDB).filter(UserDB.id == user_id).first()
+                if not u:
+                    return
+                u.scan_count += 1
+                n = u.scan_count
+                u.risk_score = ((u.risk_score * (n - 1)) + final_score) / n
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
 
 
 class SQLIncidentRepository:
@@ -227,28 +254,32 @@ class SQLIncidentRepository:
 
     def save(self, incident: Incident) -> Incident:
         with self._session_factory() as session:
-            db_inc = IncidentDB(
-                id=incident.id,
-                title=incident.title,
-                description=incident.description,
-                severity=incident.severity.value,
-                status=incident.status.value,
-                scan_id=incident.scan_id,
-                reporter_id=incident.reporter_id,
-                assignee_id=incident.assignee_id,
-                final_score=incident.final_score,
-                sender=incident.sender,
-                subject=incident.subject,
-                evidence_json=json.dumps(incident.evidence),
-                tags_json=json.dumps(incident.tags),
-                false_positive=incident.false_positive,
-                created_at=_to_datetime(incident.created_at) or _dt.datetime.now(_dt.timezone.utc),
-                updated_at=_to_datetime(incident.updated_at) or _dt.datetime.now(_dt.timezone.utc),
-                resolved_at=_to_datetime(incident.resolved_at),
-            )
-            session.merge(db_inc)
-            session.commit()
-            return incident
+            try:
+                db_inc = IncidentDB(
+                    id=incident.id,
+                    title=incident.title,
+                    description=incident.description,
+                    severity=incident.severity.value,
+                    status=incident.status.value,
+                    scan_id=incident.scan_id,
+                    reporter_id=incident.reporter_id,
+                    assignee_id=incident.assignee_id,
+                    final_score=incident.final_score,
+                    sender=incident.sender,
+                    subject=incident.subject,
+                    evidence_json=json.dumps(incident.evidence),
+                    tags_json=json.dumps(incident.tags),
+                    false_positive=incident.false_positive,
+                    created_at=_to_datetime(incident.created_at) or _dt.datetime.now(_dt.timezone.utc),
+                    updated_at=_to_datetime(incident.updated_at) or _dt.datetime.now(_dt.timezone.utc),
+                    resolved_at=_to_datetime(incident.resolved_at),
+                )
+                session.merge(db_inc)
+                session.commit()
+                return incident
+            except Exception:
+                session.rollback()
+                raise
 
     def get_by_id(self, incident_id: str) -> Optional[Incident]:
         with self._session_factory() as session:
@@ -277,60 +308,72 @@ class SQLIncidentRepository:
 
     def update(self, incident_id: str, update: IncidentUpdate) -> Optional[Incident]:
         with self._session_factory() as session:
-            inc = session.query(IncidentDB).filter(IncidentDB.id == incident_id).first()
-            if not inc:
-                return None
-            now = _dt.datetime.now(_dt.timezone.utc)
-            if update.title is not None:
-                inc.title = update.title
-            if update.description is not None:
-                inc.description = update.description
-            if update.severity is not None:
-                inc.severity = update.severity.value
-            if update.assignee_id is not None:
-                inc.assignee_id = update.assignee_id
-            if update.tags is not None:
-                inc.tags_json = json.dumps(update.tags)
-            if update.false_positive is not None:
-                inc.false_positive = update.false_positive
-            if update.status is not None:
-                inc.status = update.status.value
-                if update.status in (
-                    IncidentStatus.RESOLVED,
-                    IncidentStatus.CLOSED,
-                    IncidentStatus.FALSE_POS,
-                ):
-                    inc.resolved_at = now
-            inc.updated_at = now
-            session.commit()
-            return self._to_incident(inc)
+            try:
+                inc = session.query(IncidentDB).filter(IncidentDB.id == incident_id).first()
+                if not inc:
+                    return None
+                now = _dt.datetime.now(_dt.timezone.utc)
+                if update.title is not None:
+                    inc.title = update.title
+                if update.description is not None:
+                    inc.description = update.description
+                if update.severity is not None:
+                    inc.severity = update.severity.value
+                if update.assignee_id is not None:
+                    inc.assignee_id = update.assignee_id
+                if update.tags is not None:
+                    inc.tags_json = json.dumps(update.tags)
+                if update.false_positive is not None:
+                    inc.false_positive = update.false_positive
+                if update.status is not None:
+                    inc.status = update.status.value
+                    if update.status in (
+                        IncidentStatus.RESOLVED,
+                        IncidentStatus.CLOSED,
+                        IncidentStatus.FALSE_POS,
+                    ):
+                        inc.resolved_at = now
+                inc.updated_at = now
+                session.commit()
+                return self._to_incident(inc)
+            except Exception:
+                session.rollback()
+                raise
 
     def add_comment(self, incident_id: str, comment: IncidentComment) -> Optional[Incident]:
         with self._session_factory() as session:
-            inc = session.query(IncidentDB).filter(IncidentDB.id == incident_id).first()
-            if not inc:
-                return None
-            c = IncidentCommentDB(
-                id=comment.id,
-                incident_id=incident_id,
-                author_id=comment.author_id,
-                author_name=comment.author_name,
-                body=comment.body,
-                created_at=_to_datetime(comment.created_at) or _dt.datetime.now(_dt.timezone.utc),
-            )
-            session.add(c)
-            inc.updated_at = _dt.datetime.now(_dt.timezone.utc)
-            session.commit()
-            return self._to_incident(inc)
+            try:
+                inc = session.query(IncidentDB).filter(IncidentDB.id == incident_id).first()
+                if not inc:
+                    return None
+                c = IncidentCommentDB(
+                    id=comment.id,
+                    incident_id=incident_id,
+                    author_id=comment.author_id,
+                    author_name=comment.author_name,
+                    body=comment.body,
+                    created_at=_to_datetime(comment.created_at) or _dt.datetime.now(_dt.timezone.utc),
+                )
+                session.add(c)
+                inc.updated_at = _dt.datetime.now(_dt.timezone.utc)
+                session.commit()
+                return self._to_incident(inc)
+            except Exception:
+                session.rollback()
+                raise
 
     def delete(self, incident_id: str) -> bool:
         with self._session_factory() as session:
-            inc = session.query(IncidentDB).filter(IncidentDB.id == incident_id).first()
-            if inc:
-                session.delete(inc)
-                session.commit()
-                return True
-            return False
+            try:
+                inc = session.query(IncidentDB).filter(IncidentDB.id == incident_id).first()
+                if inc:
+                    session.delete(inc)
+                    session.commit()
+                    return True
+                return False
+            except Exception:
+                session.rollback()
+                raise
 
     def stats(self) -> Dict[str, Any]:
         with self._session_factory() as session:
@@ -369,28 +412,32 @@ class SQLScanResultRepository:
         ts_dt = _to_datetime(getattr(scan_data, "timestamp", None)) or _dt.datetime.now(_dt.timezone.utc)
 
         with self._session_factory() as session:
-            existing = session.query(ScanResultDB).filter(ScanResultDB.scan_id == scan_id).first()
-            if existing:
-                existing.partial_score = partial_score
-                existing.final_score = final_score
-                existing.verdict = verdict
-                existing.complete = complete
-                existing.layers_completed = layers_completed
-                existing.data_json = data_json
-            else:
-                db_record = ScanResultDB(
-                    scan_id=scan_id,
-                    timestamp=ts_dt,
-                    partial_score=partial_score,
-                    final_score=final_score,
-                    verdict=verdict,
-                    complete=complete,
-                    layers_completed=layers_completed,
-                    data_json=data_json,
-                    created_at=time.time(),
-                )
-                session.add(db_record)
-            session.commit()
+            try:
+                existing = session.query(ScanResultDB).filter(ScanResultDB.scan_id == scan_id).first()
+                if existing:
+                    existing.partial_score = partial_score
+                    existing.final_score = final_score
+                    existing.verdict = verdict
+                    existing.complete = complete
+                    existing.layers_completed = layers_completed
+                    existing.data_json = data_json
+                else:
+                    db_record = ScanResultDB(
+                        scan_id=scan_id,
+                        timestamp=ts_dt,
+                        partial_score=partial_score,
+                        final_score=final_score,
+                        verdict=verdict,
+                        complete=complete,
+                        layers_completed=layers_completed,
+                        data_json=data_json,
+                        created_at=time.time(),
+                    )
+                    session.add(db_record)
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
 
     async def get(self, scan_id: str) -> Optional[Any]:
         with self._session_factory() as session:
@@ -405,12 +452,16 @@ class SQLScanResultRepository:
 
     async def delete(self, scan_id: str) -> bool:
         with self._session_factory() as session:
-            row = session.query(ScanResultDB).filter(ScanResultDB.scan_id == scan_id).first()
-            if row:
-                session.delete(row)
-                session.commit()
-                return True
-            return False
+            try:
+                row = session.query(ScanResultDB).filter(ScanResultDB.scan_id == scan_id).first()
+                if row:
+                    session.delete(row)
+                    session.commit()
+                    return True
+                return False
+            except Exception:
+                session.rollback()
+                raise
 
     async def list_all(self, limit: int = 100) -> List[Any]:
         with self._session_factory() as session:
@@ -455,24 +506,28 @@ class SQLAnalyticsRepository:
 
     def record_scan_event(self, event: Dict[str, Any]) -> None:
         with self._session_factory() as session:
-            ev = ScanEventDB(
-                scan_id=str(event.get("scan_id", "")),
-                timestamp=_to_datetime(event.get("timestamp")) or _dt.datetime.now(_dt.timezone.utc),
-                ts=float(event.get("ts", time.time())),
-                hour=int(event.get("hour", 0)),
-                day=int(event.get("day", 0)),
-                sender_domain=str(event.get("sender_domain", "unknown")),
-                subject=str(event.get("subject", ""))[:500] if event.get("subject") else None,
-                final_score=float(event.get("final_score", 0.0)),
-                verdict=str(event.get("verdict", "SAFE")),
-                category=str(event.get("category", "General")),
-                tier1_score=float(event.get("tier1_score", 0.0)),
-                tier2_score=float(event.get("tier2_score", 0.0)),
-                tier3_score=float(event.get("tier3_score", 0.0)),
-                user_id=str(event.get("user_id")) if event.get("user_id") else None,
-            )
-            session.add(ev)
-            session.commit()
+            try:
+                ev = ScanEventDB(
+                    scan_id=str(event.get("scan_id", "")),
+                    timestamp=_to_datetime(event.get("timestamp")) or _dt.datetime.now(_dt.timezone.utc),
+                    ts=float(event.get("ts", time.time())),
+                    hour=int(event.get("hour", 0)),
+                    day=int(event.get("day", 0)),
+                    sender_domain=str(event.get("sender_domain", "unknown")),
+                    subject=str(event.get("subject", ""))[:500] if event.get("subject") else None,
+                    final_score=float(event.get("final_score", 0.0)),
+                    verdict=str(event.get("verdict", "SAFE")),
+                    category=str(event.get("category", "General")),
+                    tier1_score=float(event.get("tier1_score", 0.0)),
+                    tier2_score=float(event.get("tier2_score", 0.0)),
+                    tier3_score=float(event.get("tier3_score", 0.0)),
+                    user_id=str(event.get("user_id")) if event.get("user_id") else None,
+                )
+                session.add(ev)
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
         self._model_metrics.total_inferences += 1
 
     def get_scan_events(self, limit: int = 10000) -> List[Dict[str, Any]]:
@@ -618,27 +673,31 @@ class SQLAnalyticsRepository:
 
     def save_false_positive(self, report: FalsePositiveReport) -> FalsePositiveReport:
         with self._session_factory() as session:
-            existing = session.query(FalsePositiveDB).filter(FalsePositiveDB.id == report.id).first()
-            if existing:
-                existing.reviewed = report.reviewed
-                existing.reviewer_id = report.reviewer_id
-                existing.resolution = report.resolution
-            else:
-                row = FalsePositiveDB(
-                    id=report.id,
-                    scan_id=report.scan_id,
-                    reporter_id=report.reporter_id,
-                    reason=report.reason,
-                    original_score=report.original_score,
-                    original_verdict=report.original_verdict,
-                    reviewed=report.reviewed,
-                    reviewer_id=report.reviewer_id,
-                    resolution=report.resolution,
-                    created_at=report.created_at,
-                )
-                session.add(row)
-            session.commit()
-            return report
+            try:
+                existing = session.query(FalsePositiveDB).filter(FalsePositiveDB.id == report.id).first()
+                if existing:
+                    existing.reviewed = report.reviewed
+                    existing.reviewer_id = report.reviewer_id
+                    existing.resolution = report.resolution
+                else:
+                    row = FalsePositiveDB(
+                        id=report.id,
+                        scan_id=report.scan_id,
+                        reporter_id=report.reporter_id,
+                        reason=report.reason,
+                        original_score=report.original_score,
+                        original_verdict=report.original_verdict,
+                        reviewed=report.reviewed,
+                        reviewer_id=report.reviewer_id,
+                        resolution=report.resolution,
+                        created_at=report.created_at,
+                    )
+                    session.add(row)
+                session.commit()
+                return report
+            except Exception:
+                session.rollback()
+                raise
 
     def list_false_positives(self, reviewed: Optional[bool] = None) -> List[FalsePositiveReport]:
         with self._session_factory() as session:
@@ -666,52 +725,60 @@ class SQLAnalyticsRepository:
         self, fp_id: str, reviewer_id: str, resolution: str
     ) -> Optional[FalsePositiveReport]:
         with self._session_factory() as session:
-            row = session.query(FalsePositiveDB).filter(FalsePositiveDB.id == fp_id).first()
-            if not row:
-                return None
-            row.reviewed = True
-            row.reviewer_id = reviewer_id
-            row.resolution = resolution
-            session.commit()
-            self.update_model_metrics(fp_delta=1)
-            return FalsePositiveReport(
-                id=row.id,
-                scan_id=row.scan_id,
-                reporter_id=row.reporter_id,
-                reason=row.reason,
-                original_score=row.original_score,
-                original_verdict=row.original_verdict,
-                reviewed=row.reviewed,
-                reviewer_id=row.reviewer_id,
-                resolution=row.resolution,
-                created_at=row.created_at,
-            )
+            try:
+                row = session.query(FalsePositiveDB).filter(FalsePositiveDB.id == fp_id).first()
+                if not row:
+                    return None
+                row.reviewed = True
+                row.reviewer_id = reviewer_id
+                row.resolution = resolution
+                session.commit()
+                self.update_model_metrics(fp_delta=1)
+                return FalsePositiveReport(
+                    id=row.id,
+                    scan_id=row.scan_id,
+                    reporter_id=row.reporter_id,
+                    reason=row.reason,
+                    original_score=row.original_score,
+                    original_verdict=row.original_verdict,
+                    reviewed=row.reviewed,
+                    reviewer_id=row.reviewer_id,
+                    resolution=row.resolution,
+                    created_at=row.created_at,
+                )
+            except Exception:
+                session.rollback()
+                raise
 
     def save_policy_rule(self, rule: PolicyRule) -> PolicyRule:
         with self._session_factory() as session:
-            existing = session.query(PolicyRuleDB).filter(PolicyRuleDB.id == rule.id).first()
-            if existing:
-                existing.name = rule.name
-                existing.description = rule.description
-                existing.enabled = rule.enabled
-                existing.condition_type = rule.condition_type
-                existing.condition_value = rule.condition_value
-                existing.action = rule.action
-            else:
-                row = PolicyRuleDB(
-                    id=rule.id,
-                    name=rule.name,
-                    description=rule.description,
-                    enabled=rule.enabled,
-                    condition_type=rule.condition_type,
-                    condition_value=rule.condition_value,
-                    action=rule.action,
-                    created_by=rule.created_by,
-                    created_at=rule.created_at,
-                )
-                session.add(row)
-            session.commit()
-            return rule
+            try:
+                existing = session.query(PolicyRuleDB).filter(PolicyRuleDB.id == rule.id).first()
+                if existing:
+                    existing.name = rule.name
+                    existing.description = rule.description
+                    existing.enabled = rule.enabled
+                    existing.condition_type = rule.condition_type
+                    existing.condition_value = rule.condition_value
+                    existing.action = rule.action
+                else:
+                    row = PolicyRuleDB(
+                        id=rule.id,
+                        name=rule.name,
+                        description=rule.description,
+                        enabled=rule.enabled,
+                        condition_type=rule.condition_type,
+                        condition_value=rule.condition_value,
+                        action=rule.action,
+                        created_by=rule.created_by,
+                        created_at=rule.created_at,
+                    )
+                    session.add(row)
+                session.commit()
+                return rule
+            except Exception:
+                session.rollback()
+                raise
 
     def list_policy_rules(self) -> List[PolicyRule]:
         with self._session_factory() as session:
@@ -733,12 +800,16 @@ class SQLAnalyticsRepository:
 
     def delete_policy_rule(self, rule_id: str) -> bool:
         with self._session_factory() as session:
-            row = session.query(PolicyRuleDB).filter(PolicyRuleDB.id == rule_id).first()
-            if row:
-                session.delete(row)
-                session.commit()
-                return True
-            return False
+            try:
+                row = session.query(PolicyRuleDB).filter(PolicyRuleDB.id == rule_id).first()
+                if row:
+                    session.delete(row)
+                    session.commit()
+                    return True
+                return False
+            except Exception:
+                session.rollback()
+                raise
 
 
 class SQLWebhookRepository:
@@ -749,34 +820,38 @@ class SQLWebhookRepository:
         events_json = json.dumps([e.value if hasattr(e, "value") else str(e) for e in subscription.events])
         headers_json = json.dumps(subscription.headers)
         with self._session_factory() as session:
-            existing = (
-                session.query(WebhookSubscriptionDB)
-                .filter(WebhookSubscriptionDB.id == subscription.id)
-                .first()
-            )
-            if existing:
-                existing.url = str(subscription.url)
-                existing.events_json = events_json
-                existing.secret = subscription.secret
-                existing.enabled = subscription.enabled
-                existing.owner_id = subscription.owner_id
-                existing.description = subscription.description
-                existing.headers_json = headers_json
-            else:
-                row = WebhookSubscriptionDB(
-                    id=subscription.id,
-                    url=str(subscription.url),
-                    events_json=events_json,
-                    secret=subscription.secret,
-                    enabled=subscription.enabled,
-                    owner_id=subscription.owner_id,
-                    description=subscription.description,
-                    headers_json=headers_json,
-                    created_at=_to_datetime(subscription.created_at) or _dt.datetime.now(_dt.timezone.utc),
+            try:
+                existing = (
+                    session.query(WebhookSubscriptionDB)
+                    .filter(WebhookSubscriptionDB.id == subscription.id)
+                    .first()
                 )
-                session.add(row)
-            session.commit()
-            return subscription
+                if existing:
+                    existing.url = str(subscription.url)
+                    existing.events_json = events_json
+                    existing.secret = subscription.secret
+                    existing.enabled = subscription.enabled
+                    existing.owner_id = subscription.owner_id
+                    existing.description = subscription.description
+                    existing.headers_json = headers_json
+                else:
+                    row = WebhookSubscriptionDB(
+                        id=subscription.id,
+                        url=str(subscription.url),
+                        events_json=events_json,
+                        secret=subscription.secret,
+                        enabled=subscription.enabled,
+                        owner_id=subscription.owner_id,
+                        description=subscription.description,
+                        headers_json=headers_json,
+                        created_at=_to_datetime(subscription.created_at) or _dt.datetime.now(_dt.timezone.utc),
+                    )
+                    session.add(row)
+                session.commit()
+                return subscription
+            except Exception:
+                session.rollback()
+                raise
 
     def get_subscription(self, sub_id: str) -> Optional[WebhookSubscription]:
         with self._session_factory() as session:
@@ -818,31 +893,39 @@ class SQLWebhookRepository:
 
     def delete_subscription(self, sub_id: str, owner_id: Optional[str] = None) -> bool:
         with self._session_factory() as session:
-            r = session.query(WebhookSubscriptionDB).filter(WebhookSubscriptionDB.id == sub_id).first()
-            if not r:
-                return False
-            if owner_id and r.owner_id != owner_id:
-                return False
-            session.delete(r)
-            session.commit()
-            return True
+            try:
+                r = session.query(WebhookSubscriptionDB).filter(WebhookSubscriptionDB.id == sub_id).first()
+                if not r:
+                    return False
+                if owner_id and r.owner_id != owner_id:
+                    return False
+                session.delete(r)
+                session.commit()
+                return True
+            except Exception:
+                session.rollback()
+                raise
 
     def record_delivery(self, delivery: WebhookDelivery) -> None:
         with self._session_factory() as session:
-            row = WebhookDeliveryDB(
-                id=delivery.id,
-                subscription_id=delivery.subscription_id,
-                event_type=delivery.event_type.value if hasattr(delivery.event_type, "value") else str(delivery.event_type),
-                payload_json=json.dumps(delivery.payload),
-                status=delivery.status,
-                http_status=delivery.http_status,
-                response_body=delivery.response_body,
-                attempted_at=delivery.attempted_at,
-                duration_ms=delivery.duration_ms,
-                retries=delivery.retries,
-            )
-            session.add(row)
-            session.commit()
+            try:
+                row = WebhookDeliveryDB(
+                    id=delivery.id,
+                    subscription_id=delivery.subscription_id,
+                    event_type=delivery.event_type.value if hasattr(delivery.event_type, "value") else str(delivery.event_type),
+                    payload_json=json.dumps(delivery.payload),
+                    status=delivery.status,
+                    http_status=delivery.http_status,
+                    response_body=delivery.response_body,
+                    attempted_at=delivery.attempted_at,
+                    duration_ms=delivery.duration_ms,
+                    retries=delivery.retries,
+                )
+                session.add(row)
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
 
     def get_delivery_log(self, limit: int = 100) -> List[WebhookDelivery]:
         with self._session_factory() as session:
