@@ -69,6 +69,23 @@ python_functions = ["test_*"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
+[project]
+# Minimal metadata so the pytest tooling below can be installed as a dev extra:
+#   pip install -e .[dev]
+# (avoids the "pytest-cov missing" failure when running bare `pytest` locally;
+# CI installs these explicitly from requirements + the line in ci.yml.)
+name = "zerophish-backend"
+version = "1.0.0"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "httpx",
+]
+
 
 [tool.coverage.run]
 source = ["."]

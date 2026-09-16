@@ -416,11 +416,13 @@ def _round_score(score: float) -> float:
     return round(_clamp_score(score), 2)
 
 def _determine_verdict(score: float) -> str:
+    # Returns the Verdict enum member (a str subclass) rather than a bare literal,
+    # so Pydantic serializes the annotated `Verdict` field without a serializer warning.
     if score < 30:
-        return "SAFE"
+        return Verdict.SAFE
     if score < 70:
-        return "SUSPICIOUS"
-    return "CRITICAL"
+        return Verdict.SUSPICIOUS
+    return Verdict.CRITICAL
 
 def _determine_threat_status(score: float) -> str:
     if score >= 70:
@@ -821,7 +823,9 @@ async def gateway_scan(
     )
 
     partial_score = _round_score(_calculate_partial_score(tier1.score, tier2.score))
-    verdict_str = _determine_verdict(partial_score)
+    # _determine_verdict already returns a Verdict member; this lookup is now a cheap
+    # identity-preserving normalization kept for the (defensive) KeyError fallback below.
+    verdict_str = str(_determine_verdict(partial_score).value)
     try:
         verdict = Verdict[verdict_str]
     except KeyError:

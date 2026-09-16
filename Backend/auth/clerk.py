@@ -134,7 +134,19 @@ class ClerkTokenVerifier:
     - Authorized Party (azp) if provided and configured
     """
 
-    config: ClerkConfig = ClerkConfig.from_env()
+    # Configuration is resolved lazily on first verification instead of at import
+    # time: ClerkConfig.from_env() reads os.environ, and capturing it during module
+    # import makes behavior depend on import order (env vars set after import were
+    # silently ignored). Use _get_config() below.
+
+    _config: Optional[ClerkConfig] = None
+
+    @classmethod
+    def _get_config(cls) -> ClerkConfig:
+        """Resolve the verifier config once, on first use (not at import time)."""
+        if cls._config is None:
+            cls._config = ClerkConfig.from_env()
+        return cls._config
 
     @classmethod
     def verify_token(cls, token: str) -> Dict[str, Any]:
@@ -162,15 +174,15 @@ class ClerkTokenVerifier:
             raise ClerkVerificationError("Empty bearer token")
 
         # Test mode override
-        if cls.config.test_mode or os.getenv("ZEROPHISH_TEST_AUTH", "false").lower() == "true":
+        if cls._get_config().test_mode or os.getenv("ZEROPHISH_TEST_AUTH", "false").lower() == "true":
             return cls._verify_test_token(token)
 
         # Production path: use local public key if configured
-        if cls.config.jwt_key:
-            return cls._verify_with_key(token, cls.config.jwt_key)
+        if cls._get_config().jwt_key:
+            return cls._verify_with_key(token, cls._get_config().jwt_key)
 
         # Development fallback: verify claims only (no signature)
-        if cls.config.env != "production":
+        if cls._get_config().env != "production":
             logger.warning("⚠️  No CLERK_JWT_KEY set; verifying token structure only (not signature).")
             return cls._verify_claims_only(token)
 
@@ -205,9 +217,9 @@ class ClerkTokenVerifier:
                 raise ClerkVerificationError(f"Malformed JWT header: {e}")
 
             alg = unverified_headers.get("alg")
-            if alg not in cls.config.algorithm_whitelist:
+            if alg not in cls._get_config().algorithm_whitelist:
                 raise ClerkVerificationError(
-                    f"Unsupported token algorithm: {alg}. Allowed: {cls.config.algorithm_whitelist}"
+                    f"Unsupported token algorithm: {alg}. Allowed: {cls._get_config().algorithm_whitelist}"
                 )
 
             # Step 2: Prepare decode options
@@ -223,8 +235,8 @@ class ClerkTokenVerifier:
                 "algorithms": [alg],
                 "options": options,
             }
-            if cls.config.issuer:
-                decode_kwargs["issuer"] = cls.config.issuer
+            if cls._get_config().issuer:
+                decode_kwargs["issuer"] = cls._get_config().issuer
 
             # Step 3: Decode and verify
             payload = jwt.decode(token, **decode_kwargs)
@@ -291,7 +303,7 @@ class ClerkTokenVerifier:
         if not azp:
             return  # No azp claim -> no validation required
 
-        allowed_parties = cls.config.authorized_parties
+        allowed_parties = cls._get_config().authorized_parties
         if not allowed_parties:
             return  # No restriction configured
 

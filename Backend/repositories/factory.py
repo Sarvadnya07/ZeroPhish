@@ -180,8 +180,8 @@ def get_cache_backend() -> CacheBackend:
                         res = False
                         try:
                             res = bool(await self._client.delete(key))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("Redis delete error for %s: %s", key, e)
                         fb_res = await self._fallback.delete(key)
                         return res or fb_res
 
