@@ -68,7 +68,15 @@ def test_incident_comment_cross_user_denied(client):
     assert res_comment.status_code in [403, 404]
 
 
-def test_webhook_cross_user_unsubscribe_denied(client):
+def test_webhook_cross_user_unsubscribe_denied(client, monkeypatch):
+    # Webhook creation runs the SSRF check, which resolves the URL via DNS.
+    # Mock resolution to a public IP so the test is deterministic in CI
+    # sandboxes where real DNS may be unavailable (same pattern as test_webhooks.py).
+    import socket
+
+    monkeypatch.setattr(
+        socket, "getaddrinfo", lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))]
+    )
     user_a_id, token_a = create_user_and_token(client, role=UserRole.ANALYST)
     user_b_id, token_b = create_user_and_token(client, role=UserRole.USER)
 
