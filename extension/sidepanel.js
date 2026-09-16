@@ -30,8 +30,11 @@ function getEndpoints() {
 // Load custom base URLs & session token from storage
 if (typeof chrome !== 'undefined' && chrome.storage?.sync) {
   chrome.storage.sync.get(['gatewayBase', 'backendBase', 'webUrl', 'clerkSessionToken'], (cfg) => {
-    if (cfg?.gatewayBase) GATEWAY_BASE = cfg.gatewayBase.replace(/\/+$/, '');
-    if (cfg?.backendBase) BACKEND_BASE = cfg.backendBase.replace(/\/+$/, '');
+    if (cfg?.gatewayBase) {
+      GATEWAY_BASE = cfg.gatewayBase.replace(/\/+$/, '');
+    } else if (cfg?.backendBase) {
+      GATEWAY_BASE = cfg.backendBase.replace(/\/+$/, '');
+    }
     if (cfg?.webUrl) WEB_URL = cfg.webUrl.replace(/\/+$/, '');
     if (cfg?.clerkSessionToken) {
       currentAuthToken = cfg.clerkSessionToken;

@@ -81,8 +81,9 @@ async def _get_client() -> Any:
                 _client = httpx.AsyncClient(  # type: ignore[attr-defined]
                     timeout=TimeoutCls(TIMEOUT_SEC, connect=5.0),
                     limits=LimitsCls(max_keepalive_connections=MAX_CONCURRENT, max_connections=MAX_CONCURRENT),
+                    follow_redirects=False,
                 )
-                logger.info("Webhook HTTP client initialized (max_connections=%d)", MAX_CONCURRENT)
+                logger.info("Webhook HTTP client initialized (max_connections=%d, follow_redirects=False)", MAX_CONCURRENT)
     return _client
 
 
@@ -219,7 +220,10 @@ class WebhookService:
                 await WebhookService._deliver(sub, event_type, payload)
 
         tasks = [bounded_deliver(s) for s in targets]
-        await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for r in results:
+            if isinstance(r, Exception):
+                logger.error("Webhook delivery exception: %s", r, exc_info=r)
 
     @staticmethod
     async def _deliver(
@@ -243,7 +247,7 @@ class WebhookService:
             "timestamp": timestamp_str,
             "data": payload,
         }
-        body = json.dumps(envelope).encode()
+        body = json.dumps(envelope, default=str).encode()
         sig = _sign(sub.secret, body)
 
         headers = {
@@ -280,8 +284,18 @@ class WebhookService:
 
         start = time.perf_counter()
         try:
+            from security.middleware import is_safe_webhook_url
+            if not is_safe_webhook_url(str(sub.url), allow_http=False):
+                logger.error("SSRF blocked webhook delivery to forbidden target: sub=%s, url=%s", sub.id, str(sub.url)[:50])
+                delivery.status = "failed"
+                delivery.response_body = "SSRF blocked: destination resolved to private, loopback, or reserved address"
+                delivery.http_status = 403
+                # Record via the finally block below (a manual record+return here would
+                # double-log the delivery — once here and once in finally).
+                return
+
             client = await _get_client()
-            resp = await client.post(sub.url, content=body, headers=headers)
+            resp = await client.post(str(sub.url), content=body, headers=headers)
             delivery.http_status = resp.status_code
             delivery.response_body = resp.text[:512]
             delivery.status = "success" if 200 <= resp.status_code < 300 else "failed"

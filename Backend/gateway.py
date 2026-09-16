@@ -62,6 +62,7 @@ from models.gateway_models import (
     TierStatus,
     CleanStatus,
 )
+from models.tier1_report import Tier1ReportPayload
 from repositories.factory import get_cache_backend, get_scan_result_repository
 from security.middleware import (
     InputValidator,
@@ -188,7 +189,18 @@ async def verify_api_key(api_key: str = Security(api_key_header)) -> str:
         )
     return api_key
 
-# ---------- Lifespan ----------
+# ---------- Lifespan & Background Tasks ----------
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_background_task(coro, name: Optional[str] = None) -> asyncio.Task:
+    """Spawn a background task, retaining a strong reference to prevent early garbage collection."""
+    task = asyncio.create_task(coro, name=name)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("=" * 60)
@@ -199,6 +211,37 @@ async def lifespan(app: FastAPI):
     logger.info("Environment: %s", CONFIG.env)
     yield
     logger.info("ZeroPhish API Gateway shutting down...")
+    # 1. Drain/cancel active background tasks
+    if _background_tasks:
+        logger.info("Draining %d active background tasks...", len(_background_tasks))
+        pending = list(_background_tasks)
+        for t in pending:
+            if not t.done():
+                t.cancel()
+        try:
+            await asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), timeout=5.0)
+        except (asyncio.TimeoutError, TimeoutError):
+            logger.warning("Timed out waiting for background tasks to drain.")
+        _background_tasks.clear()
+
+    # 2. Close webhook client
+    if EXTENSIONS_AVAILABLE:
+        try:
+            from webhooks.service import _close_client
+            await _close_client()
+        except Exception as e:
+            logger.debug("Error closing webhook client: %s", e)
+
+    # 3. Close cache backend
+    try:
+        from repositories.factory import close_cache_backend
+        await close_cache_backend()
+    except Exception as e:
+        logger.debug("Error closing cache backend: %s", e)
+
+    # 4. Clear SSE subscribers
+    _sse_subscribers.clear()
+    _sse_subscriber_overflows.clear()
 
 # ---------- FastAPI App ----------
 app = FastAPI(
@@ -339,15 +382,32 @@ def _publish_to_subscriber(sub_id: str, q: asyncio.Queue, payload: Any) -> bool:
         sse_metrics["sse_subscriber_evictions_total"] += 1
         return False
 
+
+def _broadcast_to_subscribers(payload: Any) -> None:
+    """
+    Send payload to every SSE subscriber and evict subscribers whose queue
+    repeatedly overflowed. Single owner of the eviction loop so the backpressure
+    policy cannot drift between call sites.
+    """
+    dead: List[str] = []
+    for sub_id, q in list(_sse_subscribers.items()):
+        if not _publish_to_subscriber(sub_id, q, payload):
+            dead.append(sub_id)
+    for sub_id in dead:
+        _sse_subscribers.pop(sub_id, None)
+        _sse_subscriber_overflows.pop(sub_id, None)
+
+SCAN_CACHE_VERSION = "v2.1"
+
 # ---------- Helper Functions ----------
 def _calculate_scan_cache_key(sender: str, body: str, links: List[str], subject: Optional[str]) -> str:
-    """Generate deterministic SHA‑256 cache key for identical email payload."""
+    """Generate deterministic SHA‑256 cache key scoped by detection version."""
     norm_sender = (sender or "").strip().lower()
     norm_body = (body or "").strip()
     norm_links = sorted((str(l) or "").strip().lower() for l in links)
     norm_subject = (subject or "").strip()
-    raw = f"{norm_sender}|{norm_subject}|{norm_body}|{','.join(norm_links)}"
-    return "scan:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    raw = f"{SCAN_CACHE_VERSION}|{norm_sender}|{norm_subject}|{norm_body}|{','.join(norm_links)}"
+    return f"scan:{SCAN_CACHE_VERSION}:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 def _clamp_score(score: float) -> float:
     return max(0.0, min(100.0, float(score)))
@@ -356,11 +416,13 @@ def _round_score(score: float) -> float:
     return round(_clamp_score(score), 2)
 
 def _determine_verdict(score: float) -> str:
+    # Returns the Verdict enum member (a str subclass) rather than a bare literal,
+    # so Pydantic serializes the annotated `Verdict` field without a serializer warning.
     if score < 30:
-        return "SAFE"
+        return Verdict.SAFE
     if score < 70:
-        return "SUSPICIOUS"
-    return "CRITICAL"
+        return Verdict.SUSPICIOUS
+    return Verdict.CRITICAL
 
 def _determine_threat_status(score: float) -> str:
     if score >= 70:
@@ -452,13 +514,7 @@ async def _notify_live_dashboard(res: GatewayScanResponse, sender: str, subject:
     _latest_tier1_report = payload
 
     # Broadcast to SSE subscribers
-    dead: List[str] = []
-    for sub_id, q in list(_sse_subscribers.items()):
-        if not _publish_to_subscriber(sub_id, q, payload):
-            dead.append(sub_id)
-    for sub_id in dead:
-        _sse_subscribers.pop(sub_id, None)
-        _sse_subscriber_overflows.pop(sub_id, None)
+    _broadcast_to_subscribers(payload)
 
     logger.info(
         "Live dashboard notification sent for scan %s (%s / %s)",
@@ -467,19 +523,20 @@ async def _notify_live_dashboard(res: GatewayScanResponse, sender: str, subject:
         subject,
     )
 
-    # Optional external webhook
+    # Optional external webhook notification (skips local loopback; strictly validated against SSRF)
     live_url = os.getenv("LIVE_DASHBOARD_URL")
-    if live_url and "8001" not in live_url:
+    if live_url and not any(h in live_url for h in ("localhost", "127.0.0.1", ":8000", ":8001")):
         try:
-            import httpx
-            payload_bytes = json.dumps(payload, default=str).encode("utf-8")
-            async with httpx.AsyncClient() as client:
-                await client.post(
-                    live_url,
-                    content=payload_bytes,
-                    headers={"Content-Type": "application/json"},
-                    timeout=2.0,
-                )
+            from security.middleware import is_safe_url
+            if is_safe_url(live_url, allow_http=False):
+                import httpx
+                payload_bytes = json.dumps(payload, default=str).encode("utf-8")
+                async with httpx.AsyncClient(timeout=2.0, follow_redirects=False) as client:
+                    await client.post(
+                        live_url,
+                        content=payload_bytes,
+                        headers={"Content-Type": "application/json"},
+                    )
         except (httpx.HTTPError, OSError, TimeoutError, ValueError, TypeError) as e:
             logger.debug("External dashboard notification failed: %s", e)
 
@@ -495,7 +552,11 @@ async def execute_tier2(sender: str, body: str, links: List[str]) -> Tier2Result
             domain_score, domain_status = 70.0, DomainStatus.UNKNOWN
             evidence.append("Could not parse sender domain.")
         else:
-            age_days = await asyncio.to_thread(get_domain_age, domain)
+            try:
+                age_days = await asyncio.wait_for(asyncio.to_thread(get_domain_age, domain), timeout=2.0)
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug("Domain age lookup timed out or failed for %s: %s", domain, e)
+                age_days = None
             domain_score, domain_status, msg = analyze_domain_age(age_days)
             evidence.append(msg)
 
@@ -593,9 +654,17 @@ async def _finalize_tier3(
                 logger.warning("Scan %s not found in repository; skipping finalization", scan_id)
                 return
 
-            final_score = _round_score(
+            calculated_score = _round_score(
                 _calculate_final_score(existing.tier1.score, existing.tier2.score, tier3_result.score)
             )
+            # Security Policy: Tier 3 AI cannot override or downgrade deterministic critical security findings.
+            if existing.partial_score >= 70.0:
+                final_score = max(calculated_score, existing.partial_score)
+            elif existing.verdict == "CRITICAL":
+                final_score = max(calculated_score, 70.0)
+            else:
+                final_score = calculated_score
+
             final_verdict = _determine_verdict(final_score)
             total_ms = None
             if scan_id in scan_started_at:
@@ -632,20 +701,33 @@ async def _finalize_tier3(
 
             # Notify dashboard
             try:
-                asyncio.create_task(_notify_live_dashboard(updated, sender_meta, subject_meta))
+                _spawn_background_task(
+                    _notify_live_dashboard(updated, sender_meta, subject_meta),
+                    name=f"sse-dash-{scan_id}",
+                )
             except RuntimeError as exc:
                 logger.warning("Unable to schedule live dashboard task for scan %s: %s", scan_id, exc)
 
-        # Fire webhooks and record analytics (outside the lock)
+        # Fire webhooks in background and record analytics (outside the lock)
         if EXTENSIONS_AVAILABLE:
-            try:
-                payload = updated.model_dump()
-                await WebhookService.fire(WebhookEventType.SCAN_COMPLETE, payload)
-                if final_verdict == "CRITICAL":
-                    await WebhookService.fire(WebhookEventType.SCAN_CRITICAL, payload)
-                elif final_verdict == "SUSPICIOUS":
-                    await WebhookService.fire(WebhookEventType.SCAN_SUSPICIOUS, payload)
+            payload = updated.model_dump(mode="json")
 
+            async def _fire_webhooks(pl: dict, v: str) -> None:
+                try:
+                    await WebhookService.fire(WebhookEventType.SCAN_COMPLETE, pl)
+                    if v == "CRITICAL":
+                        await WebhookService.fire(WebhookEventType.SCAN_CRITICAL, pl)
+                    elif v == "SUSPICIOUS":
+                        await WebhookService.fire(WebhookEventType.SCAN_SUSPICIOUS, pl)
+                except Exception as wh_err:
+                    logger.warning("Background webhook delivery error for scan %s: %s", scan_id, wh_err)
+
+            try:
+                _spawn_background_task(_fire_webhooks(payload, final_verdict), name=f"webhook-fire-{scan_id}")
+            except Exception as task_err:
+                logger.warning("Unable to spawn webhook task for scan %s: %s", scan_id, task_err)
+
+            try:
                 await AnalyticsService.record_scan(
                     scan_id=scan_id,
                     sender=sender_meta,
@@ -658,7 +740,7 @@ async def _finalize_tier3(
                     tier3=float(tier3_result.score),
                 )
             except (TypeError, ValueError, RuntimeError, OSError) as e:
-                logger.error("Webhook/analytics error for scan %s: %s", scan_id, e)
+                logger.error("Analytics recording error for scan %s: %s", scan_id, e)
     finally:
         scan_started_at.pop(scan_id, None)
 
@@ -714,8 +796,9 @@ async def gateway_scan(
             async with scan_results_lock:
                 await scan_repo.save(scan_id, cached_res)
             try:
-                asyncio.create_task(
-                    _notify_live_dashboard(cached_res, scan_request.sender, scan_request.subject or "No Subject")
+                _spawn_background_task(
+                    _notify_live_dashboard(cached_res, scan_request.sender, scan_request.subject or "No Subject"),
+                    name=f"sse-cache-{scan_id}",
                 )
             except RuntimeError as exc:
                 logger.warning("Unable to schedule cache-hit dashboard notification for scan %s: %s", scan_id, exc)
@@ -740,7 +823,9 @@ async def gateway_scan(
     )
 
     partial_score = _round_score(_calculate_partial_score(tier1.score, tier2.score))
-    verdict_str = _determine_verdict(partial_score)
+    # _determine_verdict already returns a Verdict member; this lookup is now a cheap
+    # identity-preserving normalization kept for the (defensive) KeyError fallback below.
+    verdict_str = str(_determine_verdict(partial_score).value)
     try:
         verdict = Verdict[verdict_str]
     except KeyError:
@@ -775,8 +860,9 @@ async def gateway_scan(
 
     # 5. Notify dashboard (partial)
     try:
-        asyncio.create_task(
-            _notify_live_dashboard(response, scan_request.sender, scan_request.subject or "No Subject")
+        _spawn_background_task(
+            _notify_live_dashboard(response, scan_request.sender, scan_request.subject or "No Subject"),
+            name=f"sse-partial-{scan_id}",
         )
     except RuntimeError as exc:
         logger.warning("Unable to schedule live dashboard notification for scan %s: %s", scan_id, exc)
@@ -907,6 +993,7 @@ async def gateway_health() -> dict:
 
 @app.get("/ready")
 @app.get("/api/v1/ready")
+@app.get("/gateway/ready")
 async def gateway_readiness(response: Response) -> dict:
     """Active readiness probe for orchestration and load balancers."""
     dependencies = {
@@ -986,18 +1073,19 @@ async def get_latest_tier1_scan() -> Optional[Dict[str, Any]]:
     return _latest_tier1_report
 
 @app.post("/tier1/report")
-async def receive_tier1_report(report: Dict[str, Any]) -> Dict[str, Any]:
-    """Receive scan report from Chrome Extension or internal pipeline."""
-    global _latest_tier1_report
-    _latest_tier1_report = report
+async def receive_tier1_report(report: Tier1ReportPayload) -> Dict[str, Any]:
+    """
+    Receive scan report from Chrome Extension or internal pipeline.
 
-    dead: List[str] = []
-    for sub_id, q in list(_sse_subscribers.items()):
-        if not _publish_to_subscriber(sub_id, q, report):
-            dead.append(sub_id)
-    for sub_id in dead:
-        _sse_subscribers.pop(sub_id, None)
-        _sse_subscriber_overflows.pop(sub_id, None)
+    The payload is intentionally permissive (extra fields allowed, all fields
+    optional) so a malformed extension report can never 400-reject the live
+    dashboard update path; downstream consumers read it as a dict.
+    """
+    payload = report.model_dump(exclude_none=True, exclude_unset=False)
+    global _latest_tier1_report
+    _latest_tier1_report = payload
+
+    _broadcast_to_subscribers(report)
 
     return {"status": "success", "message": "Report received"}
 

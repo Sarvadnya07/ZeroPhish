@@ -12,7 +12,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 
 [![CI](https://github.com/Sarvadnya07/ZeroPhish/actions/workflows/ci.yml/badge.svg)](https://github.com/Sarvadnya07/ZeroPhish/actions)
-[![Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen)](https://github.com/Sarvadnya07/ZeroPhish)
+[![Coverage](https://img.shields.io/badge/coverage-gate%2065%25-yellowgreen)](https://github.com/Sarvadnya07/ZeroPhish)
 [![Security](https://img.shields.io/badge/security-gitleaks%2Fsemgrep-blueviolet)](https://github.com/Sarvadnya07/ZeroPhish/security)
 
 *A production-grade, 3‑tier phishing detection system that analyzes Gmail emails in real‑time using heuristics, ML, and Gemini AI — all from a Chrome Side Panel.*
@@ -41,6 +41,9 @@
 16. [Scaling Considerations](#scaling-considerations)
 17. [Contributing](#contributing)
 18. [License](#license)
+
+> 📚 **Full documentation index:** [`docs/INDEX.md`](docs/INDEX.md) — runbooks,
+> architecture reports, testing/deployment guides, and quality-engineering history.
 
 ---
 
@@ -74,7 +77,39 @@ The final threat score uses a **weighted 3‑tier formula**:
 
 ## 🏗️ Architecture
 
-*(unchanged, the mermaid diagrams and descriptions are excellent)*
+### Module Topology & Dependency Rules
+
+The backend is a **layered modular monolith** with a single canonical entrypoint (`Backend/gateway.py`, port 8001). The dependency direction below is **enforced by automated tests** (`Backend/tests/test_architecture_boundaries.py`) — violations fail CI:
+
+```
+                    ┌─────────────┐
+                    │  gateway.py  │  (orchestrator: scan, SSE, cache, circuit breaker)
+                    └──────┬───────┘
+        ┌──────────┬───────┼────────┬───────────┐
+        ▼          ▼       ▼        ▼           ▼
+   feature routers  tier_2  tier_3  ml      circuit_breaker
+   (auth, incidents,
+    webhooks, analytics,
+    awareness, email_scanner,
+    vision)
+        │          │       ▼
+        ▼          └──► (ml may use tier_2 analyzer)
+   repositories ◄──── (services own their repos via factory)
+        │
+        ▼
+   infrastructure  (SQLAlchemy engine, DB models, migrations)
+
+   security/ = foundation layer (imported by gateway, tier_2, features; imports none of them)
+   models/   = shared DTOs (gateway models, extension contract)
+```
+
+Enforced rules (see the boundary test module for the authoritative list):
+- `security/` → imports no feature/application modules (pure foundation)
+- `repositories/` → imports no gateway/tier/ml behavior modules (domain *models* allowed — shared value types)
+- `infrastructure/` → imports no domain or application modules (bottom of the graph)
+- feature routers → never import `gateway` (they are plugged *into* it)
+
+**Single entrypoint:** `tier_2/main.py` is a deprecated legacy standalone server retained only as a compatibility reference until v3.0. It is not started by any deployment config, CI job, or test; do not build new functionality against it. The sequence diagrams below describe request flow *through the gateway* — tier 2 analysis runs in-process via `tier_2.analyzer`, not as a separate service.
 
 ---
 
@@ -170,17 +205,13 @@ For detailed instructions, see [Installation & Setup](#installation--setup) abov
 | `GET` | `/cache/stats` | Cache backend statistics |
 | `DELETE` | `/cache/clear` | Clear cached scan reports |
 
-### Tier 2 Backend (Port 8000)
+### Tier 2 Backend (Port 8000) — ⚠️ Deprecated legacy entrypoint
+
+> **Deprecated.** The standalone Tier 2 server (`tier_2/main.py`) is retired as a deployment target. The canonical gateway (`Backend/gateway.py`, port 8001) exposes all of this functionality in-process. This table is retained only for operators of very old deployments; do not build against port 8000.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/scan` | Direct Tier 2 scan |
-| `POST` | `/tier1/report` | Receive scan report from extension |
-| `GET` | `/tier1/latest` | Most recent scan result |
-| `GET` | `/tier1/stream` | SSE stream for real‑time updates |
-| `GET` | `/health` | Service health check |
-| `GET` | `/cache/stats` | Redis cache statistics |
-| `DELETE` | `/cache/clear` | Clear all cached results |
 
 ### Example Scan Request
 
@@ -218,6 +249,14 @@ curl -X POST http://localhost:8001/gateway/scan \
 }
 ```
 
+#### Webhook Delivery Semantics
+
+Webhooks (`scan.complete`, `scan.critical`, `scan.suspicious`) are dispatched **asynchronously** when a scan finalizes — a slow or down webhook receiver never delays the scan response. Consequences of this design:
+
+- **At-most-once delivery:** a gateway restart or crash between scan finalization and background dispatch can lose a webhook event. There is currently **no retry and no delivery ledger**. Downstream SOC integrations must treat webhooks as best-effort signals; the authoritative record is the persisted scan result (`GET /gateway/result/{scan_id}`), which survives restarts.
+- Failed deliveries are logged with full exception detail (`Webhook delivery exception: ...`) for diagnosis.
+- Durable delivery (persist-before-dispatch outbox with retries) is a planned reliability increment, not yet implemented.
+
 ---
 
 ## 🛠️ Tech Stack
@@ -244,7 +283,8 @@ ZeroPhish enforces a multi‑stage quality gate process:
 
 1. **Local Development**  
   - Pre‑commit hooks run `gitleaks` and `semgrep`.  
-  - `pytest` with coverage (≥85% target).  
+  - `pytest` with coverage (CI gate: ≥65%, local target 85%).  
+  - Install the backend dev tooling once so bare `pytest` works locally: `pip install -e Backend[dev]` (adds pytest, pytest-asyncio, pytest-cov, httpx).  
   - `pnpm test` and `pnpm build` for frontend.
 
 2. **Pull Request**  
@@ -265,7 +305,7 @@ ZeroPhish enforces a multi‑stage quality gate process:
   - Gradual rollout (10% → 25% → 50% → 100%).  
   - Continuous monitoring of false‑positive/negative rates.
 
-For details, see the [Security Gate documentation](scripts/security-gate.ps1) and [Testing Guide](TESTING_AND_DEPLOYMENT.md).
+For details, see the [Security Gate documentation](scripts/security-gate.ps1) and [Testing Guide](docs/TESTING_AND_DEPLOYMENT.md).
 
 ---
 
@@ -348,18 +388,26 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 
 ## 📐 Scaling Considerations
 
-ZeroPhish is designed to scale horizontally:
+> [!IMPORTANT]
+> **Single-instance by default.** The gateway keeps scan results, SSE subscriber
+> registries, and circuit-breaker state in process memory. Run exactly one
+> gateway instance unless `DATABASE_URL` and `REDIS_URL` are both configured;
+> even then, SSE subscriber state remains instance-local, so put load-balanced
+> replicas behind sticky sessions or route SSE through a dedicated instance.
 
-- **Stateless API Gateway** – can be replicated behind a load balancer.
+Scaling posture by configuration:
+
+- **Single instance (default, no `DATABASE_URL`)** – in-memory scan repository and SSE subscribers; simplest and fully supported.
+- **Persistent single instance (`DATABASE_URL` + `REDIS_URL`)** – scan results and cached reports survive restarts; still run one gateway process.
 - **Stateful Components** – Redis for cache, SQL database for persistence.
 - **Asynchronous Processing** – Tier 3 AI calls are fire‑and‑forget with circuit breakers.
 - **ML Models** – loaded once per instance (CPU‑only inference is ~14ms per URL).
 - **Shadow Mode** – observational only; does not affect production decisions.
 
-For high throughput:
+For high throughput on a single instance:
 - Increase `MAX_SHADOW_CASCADE_CONCURRENCY` and `EXTERNAL_STAGING_CONCURRENCY`.
 - Tune Redis connection pool and TTL.
-- Use PostgreSQL with connection pooling (e.g., PgBouncer).
+- Use PostgreSQL with connection pooling (e.g., PgBouncer) when `DATABASE_URL` is set.
 
 ---
 
@@ -383,6 +431,10 @@ We welcome contributions! Please follow these steps:
 - [ ] No secrets or credentials in the diff.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+
+> Note: `CONTRIBUTING.md` does not currently exist in this repository — the
+> contributing expectations are described in this section and in
+> [`docs/INDEX.md`](docs/INDEX.md).
 
 ---
 
@@ -622,7 +674,9 @@ For complete deployment details, topology maps, and operational guides, see:
 | `GET` | `/cache/stats` | Active cache backend statistics (Redis/In-Memory) |
 | `DELETE` | `/cache/clear` | Clear all cached scan reports |
 
-### Tier 2 Backend (Port 8000)
+### Tier 2 Backend (Port 8000) — ⚠️ Deprecated legacy entrypoint
+
+> **Deprecated.** See the note in [API Reference](#-api-reference): the standalone Tier 2 server is retired; the canonical gateway exposes this functionality in-process on port 8001.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -691,6 +745,16 @@ All configuration is driven by the `Backend/.env` file. Key variables:
 | `CIRCUIT_BREAKER_TIMEOUT` | `30` | Seconds before circuit attempts recovery |
 | `ZERO_PHISH_DISABLE_ML` | — | Set to `1` to disable local BERT |
 | `ZERO_PHISH_HF_MODEL` | `distilbert-base-uncased-finetuned-sst-2-english` | HuggingFace model ID |
+
+#### Environment variable precedence
+
+Some settings have multiple names for historical reasons. Precedence (highest first):
+
+| Setting | Primary | Legacy alias | Behavior |
+|---------|---------|--------------|----------|
+| Environment name | `ZEROPHISH_ENV` | `ENV` | Gateway uses `ZEROPHISH_ENV` only; production persistence checks fall back to `ENV`. |
+| Scan rate limit | `SCAN_RATE_LIMIT` | `GATEWAY_SCAN_RATE_LIMIT` | Primary wins; default is `1200/minute` (`20/minute` when `ZEROPHISH_ENV=production`). |
+| Status rate limit | `STATUS_RATE_LIMIT` | `GATEWAY_STATUS_RATE_LIMIT` | Primary wins; default `120/minute`. |
 
 ---
 
@@ -876,13 +940,15 @@ WantedBy=multi-user.target
 
 ## 📁 Related Documentation
 
+All project documentation is indexed in [`docs/INDEX.md`](docs/INDEX.md). Highlights:
+
 | File | Description |
 |------|-------------|
-| [`TESTING_AND_DEPLOYMENT.md`](./TESTING_AND_DEPLOYMENT.md) | Full testing checklist & deployment guide |
-| [`Backend/QUICK_REFERENCE.md`](./Backend/QUICK_REFERENCE.md) | Quick API & config reference |
-| [`Backend/GEMINI_INTEGRATION_STATUS.md`](./Backend/GEMINI_INTEGRATION_STATUS.md) | Tier 3 AI integration notes |
-| [`EXTENSION_FIX_GUIDE.md`](./EXTENSION_FIX_GUIDE.md) | Extension troubleshooting guide |
-| [`RELOAD_EXTENSION_INSTRUCTIONS.md`](./RELOAD_EXTENSION_INSTRUCTIONS.md) | How to reload the Chrome extension |
+| [`docs/TESTING_AND_DEPLOYMENT.md`](docs/TESTING_AND_DEPLOYMENT.md) | Full testing checklist & deployment guide |
+| [`docs/QUICK_REFERENCE.md`](docs/QUICK_REFERENCE.md) | Quick API & config reference |
+| [`docs/GEMINI_INTEGRATION_STATUS.md`](docs/GEMINI_INTEGRATION_STATUS.md) | Tier 3 AI integration notes |
+| [`docs/EXTENSION_FIX_GUIDE.md`](docs/EXTENSION_FIX_GUIDE.md) | Extension troubleshooting guide |
+| [`docs/RELOAD_EXTENSION_INSTRUCTIONS.md`](docs/RELOAD_EXTENSION_INSTRUCTIONS.md) | How to reload the Chrome extension |
 
 ---
 

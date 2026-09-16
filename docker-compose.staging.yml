@@ -12,10 +12,10 @@ services:
     container_name: zerophish-staging-backend
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8001:8001"
     environment:
       - ZEROPHISH_ENV=staging
-      - ZEROPHISH_STAGING_BASE_URL=http://127.0.0.1:8000
+      - ZEROPHISH_STAGING_BASE_URL=http://127.0.0.1:8001
       - ZEROPHISH_STAGING_ALLOWED_HOSTS=127.0.0.1,localhost,staging.zerophish.internal
       - DATABASE_URL=sqlite:///./staging_data/staging_zerophish.db
       - REDIS_URL=redis://staging-redis:6379/1
@@ -29,7 +29,7 @@ services:
     depends_on:
       - staging-redis
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/gateway/health')"]
       interval: 10s
       timeout: 5s
       retries: 3

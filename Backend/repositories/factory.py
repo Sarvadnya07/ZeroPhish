@@ -7,6 +7,7 @@ Enforces explicit fail‑closed error if DATABASE_URL is missing in production.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import os
 from typing import Any, Dict, Optional, cast
@@ -179,8 +180,8 @@ def get_cache_backend() -> CacheBackend:
                         res = False
                         try:
                             res = bool(await self._client.delete(key))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("Redis delete error for %s: %s", key, e)
                         fb_res = await self._fallback.delete(key)
                         return res or fb_res
 
@@ -190,10 +191,21 @@ def get_cache_backend() -> CacheBackend:
                             keys = await self._client.keys(f"{prefix}*")
                             if keys:
                                 cleared = await self._client.delete(*keys)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("Redis keys/delete error for prefix %s: %s", prefix, e)
                         cleared_fb = await self._fallback.clear_prefix(prefix)
                         return max(cleared, cleared_fb)
+
+                    async def close(self) -> None:
+                        try:
+                            if hasattr(self._client, "aclose"):
+                                await self._client.aclose()
+                            elif hasattr(self._client, "close"):
+                                res = self._client.close()
+                                if inspect.isawaitable(res):
+                                    await res
+                        except Exception as e:
+                            logger.debug("Redis cache close error: %s", e)
 
                     async def get_stats(self) -> Dict[str, Any]:
                         try:
@@ -221,6 +233,18 @@ def get_cache_backend() -> CacheBackend:
             _cache_backend = cast(CacheBackend, InMemoryCacheBackend())
             logger.info("Using InMemoryCacheBackend (no REDIS_URL).")
     return _cache_backend
+
+
+async def close_cache_backend() -> None:
+    """Close the singleton cache backend connection if open."""
+    global _cache_backend
+    if _cache_backend is not None and hasattr(_cache_backend, "close"):
+        try:
+            res = _cache_backend.close()
+            if inspect.isawaitable(res):
+                await res
+        except Exception as e:
+            logger.debug("Error closing cache backend: %s", e)
 
 
 # Setter functions for dependency injection in tests

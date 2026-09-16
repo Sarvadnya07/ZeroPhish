@@ -1,0 +1,190 @@
+﻿{
+  "phase": "P1",
+  "name": "Reliability & Production Hardening",
+  "base_commit": "1c9d35fac75249bb1fc5a2114b38a012c262fe2d",
+  "timestamp": "2026-09-15T00:30:00Z",
+  "overall_status": "VERIFIED",
+  "total_requirements": 20,
+  "requirements": [
+    {
+      "id": "P1.1",
+      "category": "Persistence",
+      "title": "Database & Transaction Durability",
+      "status": "VERIFIED",
+      "components_affected": ["Backend/repositories/sql_repositories.py"],
+      "test_files": ["Backend/tests/test_p1_reliability.py"],
+      "verification_evidence": "Explicit try-rollback-raise blocks on all SQL repositories; 5 rollback failure tests pass."
+    },
+    {
+      "id": "P1.2",
+      "category": "Caching",
+      "title": "Cache Degradation & Lifecycle",
+      "status": "VERIFIED",
+      "components_affected": ["Backend/repositories/factory.py"],
+      "test_files": ["Backend/tests/test_p1_reliability.py"],
+      "verification_evidence": "_RedisCache transparent fallback to in-memory on error; close_cache_backend cleans up client."
+    },
+    {
+      "id": "P1.3",
+      "category": "Resilience",
+      "title": "Circuit Breaker State Transitions",
+      "status": "VERIFIED",
+      "components_affected": ["Backend/circuit_breaker.py", "Backend/gateway_circuit_wrapper.py"],
+      "test_files": ["Backend/tests/test_p1_reliability.py"],
+      "verification_evidence": "Deterministic CLOSED -> OPEN -> HALF_OPEN -> CLOSED state machine; microsecond fast-rejection."
+    },
+    {
+      "id": "P1.4",
+      "category": "Streaming",
+      "title": "SSE Backpressure & Bounded Streaming",
+      "status": "VERIFIED",
+      "components_affected": ["Backend/gateway.py"],
+      "test_files": ["Backend/tests/test_p1_reliability.py"],
+      "verification_evidence": "Bounded FIFO queue with drop-oldest policy and automatic slow-subscriber eviction after threshold."
+    },
+    {
+      "id": "P1.5",
+      "category": "Lifecycle",
+      "title": "Background Task Lifecycle & Graceful Shutdown",
+      "status": "VERIFIED",
+      "components_affected": ["Backend/gateway.py"],
+      "test_files": ["Backend/tests/test_p1_reliability.py"],
+      "verification_evidence": "_background_tasks set tracks tasks to prevent GC; lifespan drains active tasks within 5s timeout."
+    },
+    {
+      "id": "P1.6",
+      "category": "Integration",
+      "title": "Webhook Decoupling & Failure Isolation",
+      "status": "VERIFIED",
+      "components_affected": ["Backend/gateway.py", "Backend/webhooks/service.py"],
+      "test_files": ["Backend/tests/test_p1_reliability.py"],
+      "verification_evidence": "Webhooks spawned in detached background task; receiver timeout does not block scan finalization."
+    },
+    {
+      "id": "P1.7",
+      "category": "Traffic",
+      "title": "Tiered Rate Limiting",
+      "status": "VERIFIED",
+      "components_affected": ["Backend/gateway.py"],
+      "test_files": ["Backend/tests/test_gateway_security.py"],
+      "verification_evidence": "SlowAPI limits enforced per route and remote IP with standardized 429 response."
+    },
+    {
+      "id": "P1.8",
+      "category": "Security",
+      "title": "Request Sizing & SSRF Defense",
+      "status": "VERIFIED",
+      "components_affected": ["Backend/security/middleware.py"],
+      "test_files": ["Backend/tests/test_email_scanner.py", "Backend/tests/test_p0_remediation.py"],
+      "verification_evidence": "1MB payload limit, pre-connection IP resolution blocks private and loopback addresses."
+    },
+    {
+      "id": "P1.9",
+      "category": "Error Handling",
+      "title": "Consistent Error Handling & Bounded Latency",
+      "status": "VERIFIED",
+      "components_affected": ["Backend/gateway.py"],
+      "test_files": ["Backend/tests/test_gateway.py"],
+      "verification_evidence": "Tier 3 timeout bounded at 7.0s; structured JSON error responses without raw tracebacks."
+    },
+    {
+      "id": "P1.10",
+      "category": "Scoring",
+      "title": "Multi-Tier Scoring Formula Integrity",
+      "status": "VERIFIED",
+      "components_affected": ["Backend/gateway.py"],
+      "test_files": ["Backend/tests/test_scoring.py", "Backend/tests/test_p0_remediation.py"],
+      "verification_evidence": "Formula T1*0.2 + T2*0.3 + T3*0.5 enforced; critical findings cannot be downgraded by Tier 3."
+    },
+    {
+      "id": "P1.11",
+      "category": "Auth",
+      "title": "Authentication & Token Revocation",
+      "status": "VERIFIED",
+      "components_affected": ["Backend/auth/service.py", "Backend/repositories/sql_repositories.py"],
+      "test_files": ["Backend/tests/test_auth.py"],
+      "verification_evidence": "Clerk JWT decoding, revocation table check, RBAC permissions verified."
+    },
+    {
+      "id": "P1.12",
+      "category": "Observability",
+      "title": "Prometheus Metrics & Health Checks",
+      "status": "VERIFIED",
+      "components_affected": ["Backend/security/metrics.py", "Backend/gateway.py"],
+      "test_files": ["Backend/tests/test_security_metrics.py"],
+      "verification_evidence": "Request duration histogram, status code counters, and SSE metrics exposed."
+    },
+    {
+      "id": "P1.13",
+      "category": "ML",
+      "title": "Model Inference Durability",
+      "status": "VERIFIED",
+      "components_affected": ["Backend/tier_2.py", "Backend/tier_3/main.py"],
+      "test_files": ["Backend/tests/test_tier_2.py", "Backend/tests/test_p0_remediation.py"],
+      "verification_evidence": "DistilBERT runs locally with heuristic fallbacks; Gemini AI guarded by circuit breaker."
+    },
+    {
+      "id": "P1.14",
+      "category": "Parser",
+      "title": "MIME Parsing & File Upload Protection",
+      "status": "VERIFIED",
+      "components_affected": ["Backend/email_scanner/service.py"],
+      "test_files": ["Backend/tests/test_email_scanner.py"],
+      "verification_evidence": "Streaming upload size enforcement and malformed MIME safe parsing."
+    },
+    {
+      "id": "P1.15",
+      "category": "Incidents",
+      "title": "Incident State Durability & Audit Trail",
+      "status": "VERIFIED",
+      "components_affected": ["Backend/incidents/service.py", "Backend/repositories/sql_repositories.py"],
+      "test_files": ["Backend/tests/test_incidents.py", "Backend/tests/test_p1_reliability.py"],
+      "verification_evidence": "Foreign key referential integrity, atomic status updates, immutable audit comments."
+    },
+    {
+      "id": "P1.16",
+      "category": "Analytics",
+      "title": "Analytics Aggregation & Heatmap Bounds",
+      "status": "VERIFIED",
+      "components_affected": ["Backend/analytics/service.py", "Backend/repositories/sql_repositories.py"],
+      "test_files": ["Backend/tests/test_analytics.py", "Backend/tests/test_p1_reliability.py"],
+      "verification_evidence": "Division-by-zero protection, 7x24 zero-filled grid, resilient scan event recording."
+    },
+    {
+      "id": "P1.17",
+      "category": "Vision",
+      "title": "Vision Module Degradation",
+      "status": "VERIFIED",
+      "components_affected": ["Backend/vision/router.py"],
+      "test_files": ["Backend/tests/test_gateway.py"],
+      "verification_evidence": "Graceful route disablement when computer vision libraries are not installed."
+    },
+    {
+      "id": "P1.18",
+      "category": "Extension",
+      "title": "Browser Extension API Contract",
+      "status": "VERIFIED",
+      "components_affected": ["Backend/gateway.py", "extension/"],
+      "test_files": ["Frontend/lib/extension-pipeline.test.ts"],
+      "verification_evidence": "Least privilege extension manifest, backward-compatible gateway routes."
+    },
+    {
+      "id": "P1.19",
+      "category": "Deployment",
+      "title": "Staging Environment Contracts",
+      "status": "VERIFIED",
+      "components_affected": [".env.staging.example", "docker-compose.staging.yml"],
+      "test_files": ["Backend/tests/test_p1_reliability.py"],
+      "verification_evidence": "Production configuration fail-closed validation when DATABASE_URL missing."
+    },
+    {
+      "id": "P1.20",
+      "category": "CI/CD",
+      "title": "Determinism & Automated Regression",
+      "status": "VERIFIED",
+      "components_affected": [".github/workflows/ci.yml"],
+      "test_files": ["Backend/tests/"],
+      "verification_evidence": "395 backend tests + 38 frontend vitest tests execute deterministically with 100% pass."
+    }
+  ]
+}
