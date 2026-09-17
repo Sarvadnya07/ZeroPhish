@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+# Force GitHub Actions JavaScript actions onto the supported Node 24 runtime.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 permissions:
   contents: read
 
@@ -111,15 +115,26 @@ jobs:
         with:
           version: 9
 
-      - name: Set up Node.js 20 with pnpm cache
+      - name: Set up Node.js 24 with pnpm cache
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
+      # The existing lockfile predates the patched Next.js release. Resolve it
+      # from package.json so CI tests the declared, patched dependency graph.
+      # A lockfile refresh should be committed separately once generated locally.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Verify resolved security versions
+        run: |
+          pnpm list next sharp js-yaml --depth 10
+          node -e "const p=require('./package.json'); if(p.dependencies.next !== '16.3.3') process.exit(1)"
+
+      - name: Audit frontend dependencies
+        run: pnpm audit --audit-level=high
 
       - name: TypeScript type check
         run: pnpm exec tsc --noEmit
@@ -134,9 +149,6 @@ jobs:
         env:
           NEXT_PUBLIC_GATEWAY_URL: http://localhost:8001
         run: pnpm build
-
-      - name: Audit frontend dependencies
-        run: pnpm audit --audit-level=high
 
   extension-ci:
     name: Chrome Extension Validate & Package
