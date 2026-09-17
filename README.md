@@ -2,976 +2,722 @@
 
 # 🛡️ ZeroPhish
 
-### **AI-Powered Phishing Detection for Gmail**
+### Browser-Centric Phishing Detection for Gmail
 
-[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Next.js](https://img.shields.io/badge/Next.js-16-000000?style=for-the-badge&logo=next.js&logoColor=white)](https://nextjs.org)
-[![Chrome Extension](https://img.shields.io/badge/Chrome-Extension%20MV3-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/mv3/)
-[![Gemini AI](https://img.shields.io/badge/Gemini-1.5%20Flash-8E75B2?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
+Detect suspicious emails using layered heuristics, machine learning, and AI through a Chrome Side Panel.
+
+[![Python](https://img.shields.io/badge/Python-3.13%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.141%2B-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Next.js](https://img.shields.io/badge/Next.js-16-000000?style=for-the-badge&logo=next.js&logoColor=white)](https://nextjs.org/)
+[![Chrome Extension](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/)
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 
 [![CI](https://github.com/Sarvadnya07/ZeroPhish/actions/workflows/ci.yml/badge.svg)](https://github.com/Sarvadnya07/ZeroPhish/actions)
-[![Coverage](https://img.shields.io/badge/coverage-gate%2065%25-yellowgreen)](https://github.com/Sarvadnya07/ZeroPhish)
-[![Security](https://img.shields.io/badge/security-gitleaks%2Fsemgrep-blueviolet)](https://github.com/Sarvadnya07/ZeroPhish/security)
-
-*A production-grade, 3‑tier phishing detection system that analyzes Gmail emails in real‑time using heuristics, ML, and Gemini AI — all from a Chrome Side Panel.*
 
 </div>
 
 ---
 
-## 📖 Table of Contents
+## Project Status
 
-1. [Overview](#overview)
-2. [Key Features](#key-features)
-3. [Architecture](#architecture)
-4. [Installation & Setup](#installation--setup)
-5. [Usage](#usage)
-6. [API Reference](#api-reference)
-7. [Tech Stack](#tech-stack)
-8. [Configuration Reference](#configuration-reference)
-9. [Performance Benchmarks](#performance-benchmarks)
-10. [Testing & Quality Gates](#testing--quality-gates)
-11. [Security Architecture](#security-architecture)
-12. [Production Deployment](#production-deployment)
-13. [Chrome Extension Development](#chrome-extension-development)
-14. [Troubleshooting](#troubleshooting)
-15. [Monitoring & Observability](#monitoring--observability)
-16. [Scaling Considerations](#scaling-considerations)
-17. [Contributing](#contributing)
-18. [License](#license)
+**Stage:** production-oriented security and reliability hardening.
 
-> 📚 **Full documentation index:** [`docs/INDEX.md`](docs/INDEX.md) — runbooks,
-> architecture reports, testing/deployment guides, and quality-engineering history.
+ZeroPhish is a security-focused phishing detection platform built around a three-tier detection cascade, a canonical FastAPI gateway, a Chrome extension, and a Next.js dashboard. The repository includes automated security, reliability, backend, and frontend validation.
+
+> **Security note:** Detection results are signals for investigation. No phishing detector should be treated as infallible.
 
 ---
 
-## 📖 Overview
+## What Is ZeroPhish?
 
-**ZeroPhish** is an enterprise‑quality email threat detection platform that protects users from phishing, spam, and social engineering attacks in real time. It is composed of three tightly integrated components:
+ZeroPhish is a browser-centric phishing detection platform for Gmail. The Chrome extension captures email context and presents the result through a Side Panel while the FastAPI gateway orchestrates layered analysis.
 
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Chrome Extension** | Manifest V3, Vanilla JS | Email scraping & Tier 1 heuristic scoring in‑browser |
-| **Backend API** | Python, FastAPI, uvicorn | Tier 2 metadata analysis (WHOIS, ML, threat patterns) & Tier 3 AI (Gemini) |
-| **Frontend Dashboard** | Next.js 16, React 19, TypeScript | Real‑time scan visualization using Server‑Sent Events |
-
-The final threat score uses a **weighted 3‑tier formula**:
-
-> **Final Score = (T1 × 0.20) + (T2 × 0.30) + (T3 × 0.50)**
-
-| Score Range | Verdict |
-|-------------|---------|
-| 0 – 29      | ✅ **SAFE** |
-| 30 – 69     | ⚠️ **SUSPICIOUS** |
-| 70 – 100    | 🚨 **CRITICAL / PHISHING** |
-
----
-
-## ✨ Key Features
-
-*(unchanged, your existing list is comprehensive)*
-
----
-
-## 🏗️ Architecture
-
-### Module Topology & Dependency Rules
-
-The backend is a **layered modular monolith** with a single canonical entrypoint (`Backend/gateway.py`, port 8001). The dependency direction below is **enforced by automated tests** (`Backend/tests/test_architecture_boundaries.py`) — violations fail CI:
-
-```
-                    ┌─────────────┐
-                    │  gateway.py  │  (orchestrator: scan, SSE, cache, circuit breaker)
-                    └──────┬───────┘
-        ┌──────────┬───────┼────────┬───────────┐
-        ▼          ▼       ▼        ▼           ▼
-   feature routers  tier_2  tier_3  ml      circuit_breaker
-   (auth, incidents,
-    webhooks, analytics,
-    awareness, email_scanner,
-    vision)
-        │          │       ▼
-        ▼          └──► (ml may use tier_2 analyzer)
-   repositories ◄──── (services own their repos via factory)
-        │
-        ▼
-   infrastructure  (SQLAlchemy engine, DB models, migrations)
-
-   security/ = foundation layer (imported by gateway, tier_2, features; imports none of them)
-   models/   = shared DTOs (gateway models, extension contract)
+```text
+Gmail
+  │
+  ▼
+Chrome Extension
+  │
+  │ Email context
+  ▼
+FastAPI Gateway :8001
+  │
+  ├── Tier 1 — Deterministic heuristics
+  ├── Tier 2 — URL / domain / ML analysis
+  └── Tier 3 — Contextual AI analysis
+          │
+          ▼
+      Final assessment
+          │
+          ├──────────────► SSE
+          │
+          ▼
+     Next.js Dashboard
 ```
 
-Enforced rules (see the boundary test module for the authoritative list):
-- `security/` → imports no feature/application modules (pure foundation)
-- `repositories/` → imports no gateway/tier/ml behavior modules (domain *models* allowed — shared value types)
-- `infrastructure/` → imports no domain or application modules (bottom of the graph)
-- feature routers → never import `gateway` (they are plugged *into* it)
-
-**Single entrypoint:** `tier_2/main.py` is a deprecated legacy standalone server retained only as a compatibility reference until v3.0. It is not started by any deployment config, CI job, or test; do not build new functionality against it. The sequence diagrams below describe request flow *through the gateway* — tier 2 analysis runs in-process via `tier_2.analyzer`, not as a separate service.
+The architecture deliberately avoids making one model or one external provider the sole detection authority.
 
 ---
 
-## ⚙️ Installation & Setup
+## Why ZeroPhish?
+
+Phishing messages can combine deceptive URLs, impersonated domains, social engineering, redirects, suspicious infrastructure, and obfuscated or AI-generated content.
+
+ZeroPhish therefore treats email content, URLs, redirect targets, remote responses, uploaded messages, external intelligence, and AI inputs as untrusted data. Detection is performed through multiple layers so that deterministic signals and deeper analysis can complement one another.
+
+---
+
+## Core Features
+
+| Capability | Description |
+|---|---|
+| Gmail Chrome Extension | Manifest V3 extension with a browser Side Panel workflow |
+| Tier 1 Heuristics | Fast deterministic analysis of suspicious email and URL patterns |
+| Tier 2 Analysis | URL/domain analysis, metadata, threat indicators, and ML classification |
+| Tier 3 AI Analysis | Contextual Gemini analysis when configured and available |
+| Three-Tier Cascade | Combines different evidence sources in a single scan flow |
+| Real-Time Updates | Server-Sent Events for live scan progress |
+| SSRF Protection | Outbound destinations and redirects are validated before access |
+| Authentication & RBAC | Protected application routes enforce authentication and role checks |
+| Redis Cache | Optional Redis cache with in-memory fallback |
+| Persistence | SQL-backed repositories for durable application state |
+| Circuit Breaker | Protects external Tier 3 dependency paths from repeated failures |
+| SSE Backpressure | Bounded subscriber queues with slow-consumer handling |
+| Background Task Lifecycle | Tracks asynchronous work and bounds shutdown handling |
+| Webhook Isolation | Webhook dispatch does not block scan finalization |
+| Observability | Health, readiness, metrics, logging, and runtime diagnostics |
+
+---
+
+## Detection Pipeline
+
+### Tier 1 — Deterministic Heuristics
+
+The first layer is optimized for fast, explainable signals, including suspicious URL structure, IP-based URLs, urgency indicators, suspicious domains, brand/domain mismatches, and other deterministic phishing indicators implemented by the extension and gateway.
+
+### Tier 2 — URL, Domain & ML Analysis
+
+Tier 2 performs deeper analysis such as URL normalization, redirect-aware inspection, domain metadata, threat patterns, and machine-learning classification.
+
+### Tier 3 — Contextual AI Analysis
+
+Tier 3 uses Gemini for contextual analysis when configured. It can assess phishing context, social-engineering signals, suspicious intent, and related evidence. Tier 3 output is constrained by the surrounding security and scoring pipeline rather than being treated as an unrestricted authority.
+
+---
+
+## Scoring
+
+The current application configuration uses the following default weighting:
+
+```text
+T1 = 20%
+T2 = 30%
+T3 = 50%
+```
+
+Conceptually:
+
+```text
+Final Score = (T1 × 0.20) + (T2 × 0.30) + (T3 × 0.50)
+```
+
+The current configured verdict ranges are:
+
+| Score | Verdict |
+|---:|---|
+| `0–29` | SAFE |
+| `30–69` | SUSPICIOUS |
+| `70–100` | CRITICAL |
+
+These thresholds are application configuration, not calibrated probabilities of maliciousness.
+
+---
+
+## Architecture
+
+ZeroPhish uses a layered modular-monolith backend with one canonical API gateway.
+
+```text
+                         ┌─────────────────┐
+                         │  Chrome Gmail   │
+                         │   Extension     │
+                         └────────┬────────┘
+                                  │
+                                  ▼
+                    ┌────────────────────────┐
+                    │ Backend/gateway.py     │
+                    │ Canonical API :8001    │
+                    └───────────┬────────────┘
+                                │
+             ┌──────────────────┼──────────────────┐
+             ▼                  ▼                  ▼
+          Tier 1              Tier 2             Tier 3
+       Heuristics          URL / Domain / ML      Gemini
+             │                  │                  │
+             └──────────────────┼──────────────────┘
+                                ▼
+                         Scan Result / SSE
+                                │
+                                ▼
+                         Next.js Dashboard
+```
+
+### Backend topology
+
+```text
+Backend/
+├── gateway.py
+├── tier_2/
+├── tier_3/
+├── ml/
+├── repositories/
+├── infrastructure/
+├── security/
+├── auth/
+├── models/
+└── tests/
+```
+
+The repository also contains automated architecture-boundary checks covering important dependency directions between security, repositories, infrastructure, feature routers, and application orchestration.
+
+### Legacy Tier 2 entrypoint
+
+`tier_2/main.py` is retained as a deprecated compatibility reference. It is not the supported deployment entrypoint.
+
+> **Supported gateway:** `Backend/gateway.py` on port `8001`.
+
+Do not build new integrations against the legacy standalone port `8000` service.
+
+---
+
+## Security Model
+
+ZeroPhish treats external data and remote destinations as untrusted.
+
+### Security boundaries
+
+- SSRF validation before outbound connections
+- Redirect-by-redirect destination validation
+- Authentication and RBAC
+- Bounded input/payload handling
+- Rate limiting where configured by the application
+- Cache controls
+- Circuit-breaker protection for external dependencies
+- Bounded SSE queues and slow-consumer handling
+- Secret scanning and dependency auditing
+- Static security analysis
+- Constrained AI/Tier 3 authority
+
+Security tooling in the repository includes the configured Gitleaks, Semgrep, dependency, and CodeQL workflows where enabled by the current CI configuration.
+
+---
+
+## Components
+
+### Chrome Extension
+
+The Manifest V3 extension provides the Gmail integration and Side Panel workflow. It performs browser-side Tier 1 analysis and communicates with the canonical backend gateway.
+
+Current extension permissions include the capabilities required for the product workflow, such as:
+
+- `activeTab`
+- `sidePanel`
+- `storage`
+- `scripting`
+
+Host access is intentionally constrained rather than granting unrestricted access to arbitrary websites.
+
+### Backend
+
+Primary technologies include:
+
+- Python
+- FastAPI
+- Uvicorn
+- SQLAlchemy
+- Pydantic
+- Redis
+- SQL persistence
+- ONNX Runtime / Transformers / PyTorch components used by the ML path
+- Gemini integration
+
+Canonical entrypoint:
+
+```text
+Backend/gateway.py
+```
+
+Canonical development port:
+
+```text
+8001
+```
+
+### Frontend
+
+The dashboard uses Next.js, React, TypeScript, and Server-Sent Events to visualize scan state and results.
+
+---
+
+## Repository Structure
+
+```text
+ZeroPhish/
+├── Backend/
+│   ├── gateway.py
+│   ├── tier_2/
+│   ├── tier_3/
+│   ├── ml/
+│   ├── repositories/
+│   ├── infrastructure/
+│   ├── security/
+│   ├── auth/
+│   ├── models/
+│   └── tests/
+├── Frontend/
+├── extension/
+├── scripts/
+├── docs/
+├── LICENSE
+└── README.md
+```
+
+Detailed engineering documentation is indexed in [`docs/INDEX.md`](docs/INDEX.md).
+
+---
+
+## Quick Start
 
 ### Prerequisites
 
-- **Python 3.11+** (3.13 recommended)
-- **Node.js 20+** (v22/v26 recommended) and **pnpm** (`pnpm@10+`)
-- **Google Chrome** (for the Sentinel Chrome Extension)
-- **Git**
-- **Redis** *(Optional)* – falls back to in‑memory caching.
-- **Google Gemini API Key** *(Optional)* – falls back to neutral score if omitted.
-
-### Quick Start
-
-1. **Clone the repository**
-  ```bash
-  git clone https://github.com/Sarvadnya07/ZeroPhish.git
-  cd ZeroPhish
-  ```
-
-2. **Set up Python virtual environment**
-  ```bash
-  python3 -m venv .venv
-  source .venv/bin/activate          # Linux/macOS
-  # or .\.venv\Scripts\Activate.ps1  # Windows
-  ```
-
-3. **Install backend dependencies**
-  ```bash
-  pip install -r Backend/requirements.txt
-  ```
-
-4. **Configure environment**
-  ```bash
-  cp Backend/.env.example Backend/.env
-  # Edit Backend/.env with your settings
-  ```
-
-5. **Start the API Gateway**
-  ```bash
-  cd Backend
-  python gateway.py
-  ```
-
-6. **Start the Frontend Dashboard** (in a new terminal)
-  ```bash
-  cd Frontend
-  pnpm install
-  pnpm dev
-  ```
-
-7. **Load the Chrome Extension**
-  - Open `chrome://extensions/`
-  - Enable **Developer mode**
-  - Click **"Load unpacked"** and select the `extension/` folder.
-
-8. **Verify Installation**
-  ```bash
-  # Run backend tests
-  pytest Backend/tests/
-  # Run frontend tests
-  cd Frontend && pnpm test
-  # Run security gate
-  powershell -File scripts/security-gate.ps1
-  ```
-
-For detailed instructions, see [Installation & Setup](#installation--setup) above.
-
----
-
-## 🚀 Usage
-
-*(unchanged, your usage instructions are clear)*
-
----
-
-## 🔌 API Reference
-
-### Gateway Orchestrator (Port 8001)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/gateway/scan` | Submit email for full 3‑tier analysis |
-| `GET` | `/gateway/status/{scan_id}` | Poll scan status |
-| `GET` | `/gateway/result/{scan_id}` | Retrieve completed scan result |
-| `GET` | `/gateway/health` | Health & circuit breaker status |
-| `POST` | `/vision/analyze` | Visual heuristics & Gemini multimodal scoring |
-| `GET` | `/auth/me` | Fetch active user/RBAC context |
-| `POST` | `/email/scan-eml` | Upload and sanitize raw .eml file |
-| `GET` | `/analytics/threat-feed` | Live IOCs and heuristics |
-| `GET` | `/cache/stats` | Cache backend statistics |
-| `DELETE` | `/cache/clear` | Clear cached scan reports |
-
-### Tier 2 Backend (Port 8000) — ⚠️ Deprecated legacy entrypoint
-
-> **Deprecated.** The standalone Tier 2 server (`tier_2/main.py`) is retired as a deployment target. The canonical gateway (`Backend/gateway.py`, port 8001) exposes all of this functionality in-process. This table is retained only for operators of very old deployments; do not build against port 8000.
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/scan` | Direct Tier 2 scan |
-
-### Example Scan Request
-
-```bash
-curl -X POST http://localhost:8001/gateway/scan \
-  -H "Content-Type: application/json" \
-  -d '{
-   "sender": "security@suspicious-bank.xyz",
-   "subject": "URGENT: Verify your account now",
-   "body": "Your account has been suspended. Click here immediately to verify your credentials.",
-   "links": ["http://192.168.1.1/verify", "http://paypa1.com/secure"],
-   "tier1_score": 72,
-   "tier1_evidence": ["Urgency keyword", "IP-based URL", "Brand mismatch"]
-  }'
-```
-
-#### Response (200 OK)
-
-```json
-{
-  "scan_id": "scan_abc123",
-  "timestamp": "2026-09-03T12:34:56Z",
-  "partial_score": 45.2,
-  "final_score": 78.5,
-  "verdict": "CRITICAL",
-  "tier1": { "score": 72, "evidence": [...], "status": "Suspicious" },
-  "tier2": { "score": 65.2, "domain_analysis": {...}, "threat_analysis": {...} },
-  "tier3": { "score": 90, "category": "BEC", "reasoning": "..." },
-  "tier3_status": "complete",
-  "complete": true,
-  "layers_completed": 3,
-  "combined_evidence": [...],
-  "weights": { "tier1": 0.2, "tier2": 0.3, "tier3": 0.5 },
-  "cached": false
-}
-```
-
-#### Webhook Delivery Semantics
-
-Webhooks (`scan.complete`, `scan.critical`, `scan.suspicious`) are dispatched **asynchronously** when a scan finalizes — a slow or down webhook receiver never delays the scan response. Consequences of this design:
-
-- **At-most-once delivery:** a gateway restart or crash between scan finalization and background dispatch can lose a webhook event. There is currently **no retry and no delivery ledger**. Downstream SOC integrations must treat webhooks as best-effort signals; the authoritative record is the persisted scan result (`GET /gateway/result/{scan_id}`), which survives restarts.
-- Failed deliveries are logged with full exception detail (`Webhook delivery exception: ...`) for diagnosis.
-- Durable delivery (persist-before-dispatch outbox with retries) is a planned reliability increment, not yet implemented.
-
----
-
-## 🛠️ Tech Stack
-
-*(unchanged – your table is comprehensive)*
-
----
-
-## 🔧 Configuration Reference
-
-*(unchanged – your .env table is excellent)*
-
----
-
-## 📊 Performance Benchmarks
-
-*(unchanged – your latency table is clear)*
-
----
-
-## 🧪 Testing & Quality Gates
-
-ZeroPhish enforces a multi‑stage quality gate process:
-
-1. **Local Development**  
-  - Pre‑commit hooks run `gitleaks` and `semgrep`.  
-  - `pytest` with coverage (CI gate: ≥65%, local target 85%).  
-  - Install the backend dev tooling once so bare `pytest` works locally: `pip install -e Backend[dev]` (adds pytest, pytest-asyncio, pytest-cov, httpx).  
-  - `pnpm test` and `pnpm build` for frontend.
-
-2. **Pull Request**  
-  - GitHub Actions run the full CI suite:  
-    - Backend unit + integration tests (322+ tests).  
-    - Frontend Vitest tests (30+).  
-    - `security-gate.ps1` (Gitleaks, dependency audit, static analysis).  
-    - CodeQL and Semgrep security scanning.  
-  - Required status checks must pass before merging.
-
-3. **Staging**  
-  - Full end‑to‑end tests with real staging environment.  
-  - Performance benchmarks (vision, cascade, shadow).  
-  - Observability checks (logs, metrics, traces).
-
-4. **Production**  
-  - Canary deployments with shadow mode.  
-  - Gradual rollout (10% → 25% → 50% → 100%).  
-  - Continuous monitoring of false‑positive/negative rates.
-
-For details, see the [Security Gate documentation](scripts/security-gate.ps1) and [Testing Guide](docs/TESTING_AND_DEPLOYMENT.md).
-
----
-
-## 🔒 Security Architecture
-
-*(unchanged – your security section is robust)*
-
----
-
-## 🚀 Production Deployment
-
-*(unchanged – your Nginx and systemd examples are good)*
-
----
-
-## 🧩 Chrome Extension Development
-
-### Debugging
-
-1. Open `chrome://extensions/`
-2. Find ZeroPhish Sentinel and click **"background page"** to open DevTools for the service worker.
-3. Use `console.log()` and breakpoints in `content.js`, `sidepanel.js`, `tier1.js`.
-
-### Hot Reload
-
-After making changes to `extension/`, click the refresh icon on the extension card in `chrome://extensions/`. No need to reload the page.
-
-### Permissions
-
-The extension requires:
-- `activeTab`: To access the current Gmail tab.
-- `sidePanel`: To display the side panel.
-- `storage`: For local settings.
-- `scripting`: To inject content scripts.
-
-### Build
-
-The extension is vanilla JS (no build step). Simply edit the files in `extension/`.
-
----
-
-## 🛠️ Troubleshooting
-
-### Common Issues
-
-| Issue | Solution |
-|-------|----------|
-| **Port 8000/8001 already in use** | Change port in `.env` or stop the conflicting process: `netstat -ano | findstr :8001` and `taskkill /PID <pid> /F`. |
-| **Redis connection refused** | Redis is optional – the system falls back to in‑memory caching. If you want Redis, ensure it's running (`redis-server`). |
-| **Gemini API key missing** | Tier 3 will gracefully fall back to neutral scores. Obtain a key from [Google AI Studio](https://ai.google.dev/) and set `GEMINI_API_KEY` in `.env`. |
-| **Extension not loading** | Ensure `manifest.json` is valid. Check console errors in the background page. |
-| **Frontend build fails** | Clear `node_modules` and reinstall: `rm -rf node_modules && pnpm install`. Ensure Node.js ≥20. |
-| **PyTorch CPU wheel not found** | Install CPU‑only version: `pip install torch --index-url https://download.pytorch.org/whl/cpu`. |
-
-### Logs
-
-- Backend logs: `Backend/logs/` (if configured) or console output.
-- Frontend logs: Browser DevTools console.
-- Extension logs: Background page console.
-
----
-
-## 📈 Monitoring & Observability
-
-ZeroPhish exposes the following observability signals:
-
-- **Structured Logs**: All security events are logged via `security.audit_logger` in `key=value` format.
-- **Metrics**: Prometheus‑compatible metrics on `/metrics` (if enabled).
-- **Traces**: OpenTelemetry integration (optional) for distributed tracing.
-- **Health Checks**: `/health` and `/ready` endpoints for container orchestration.
-- **SSE Streams**: `/tier1/stream` provides live scan progress for dashboards.
-
-Enable monitoring by setting:
-```env
-ENABLE_METRICS=true
-OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-```
-
----
-
-## 📐 Scaling Considerations
-
-> [!IMPORTANT]
-> **Single-instance by default.** The gateway keeps scan results, SSE subscriber
-> registries, and circuit-breaker state in process memory. Run exactly one
-> gateway instance unless `DATABASE_URL` and `REDIS_URL` are both configured;
-> even then, SSE subscriber state remains instance-local, so put load-balanced
-> replicas behind sticky sessions or route SSE through a dedicated instance.
-
-Scaling posture by configuration:
-
-- **Single instance (default, no `DATABASE_URL`)** – in-memory scan repository and SSE subscribers; simplest and fully supported.
-- **Persistent single instance (`DATABASE_URL` + `REDIS_URL`)** – scan results and cached reports survive restarts; still run one gateway process.
-- **Stateful Components** – Redis for cache, SQL database for persistence.
-- **Asynchronous Processing** – Tier 3 AI calls are fire‑and‑forget with circuit breakers.
-- **ML Models** – loaded once per instance (CPU‑only inference is ~14ms per URL).
-- **Shadow Mode** – observational only; does not affect production decisions.
-
-For high throughput on a single instance:
-- Increase `MAX_SHADOW_CASCADE_CONCURRENCY` and `EXTERNAL_STAGING_CONCURRENCY`.
-- Tune Redis connection pool and TTL.
-- Use PostgreSQL with connection pooling (e.g., PgBouncer) when `DATABASE_URL` is set.
-
----
-
-## 🤝 Contributing
-
-We welcome contributions! Please follow these steps:
-
-1. **Fork** the repository.
-2. **Create a feature branch** (`git checkout -b feature/amazing-feature`).
-3. **Commit** your changes (`git commit -m 'Add amazing feature'`).
-4. **Push** to your fork (`git push origin feature/amazing-feature`).
-5. **Open a Pull Request** against the `main` branch.
-
-### PR Checklist
-
-- [ ] Code follows the project style (use `black` and `prettier`).
-- [ ] Unit tests added for new functionality.
-- [ ] All tests pass locally (`pytest Backend/tests/`, `pnpm test`).
-- [ ] Security gate passes (`scripts/security-gate.ps1`).
-- [ ] Documentation updated (if applicable).
-- [ ] No secrets or credentials in the diff.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
-
-> Note: `CONTRIBUTING.md` does not currently exist in this repository — the
-> contributing expectations are described in this section and in
-> [`docs/INDEX.md`](docs/INDEX.md).
-
----
-
-## 📝 License
-
-This project is open‑source and available under the [MIT License](LICENSE).
-
----
-
-<div align="center">
-
-**Built with ❤️ to keep inboxes safe.**
-
-*ZeroPhish — Zero tolerance for phishing.*
-
-</div>
-
-### 1. Clone the Repository
+- Python 3.13+
+- Node.js 20+
+- pnpm 10+
+- Google Chrome
+- Git
+- Redis (optional for the cache-backed deployment path)
+- Gemini API credentials when Tier 3 is required
+
+### 1. Clone
 
 ```bash
 git clone https://github.com/Sarvadnya07/ZeroPhish.git
 cd ZeroPhish
 ```
 
----
+### 2. Backend setup
 
-### 2. Create and Activate Python Virtual Environment
+#### Windows PowerShell
 
-Always install ZeroPhish backend dependencies inside a dedicated virtual environment.
-
-**Windows (PowerShell):**
 ```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
+Copy-Item Backend\.env.example Backend\.env
+pip install -r Backend\requirements.txt
 ```
 
-**Unix / macOS (Bash / Zsh):**
+#### Linux/macOS
+
 ```bash
 python3.13 -m venv .venv
 source .venv/bin/activate
-```
-
----
-
-### 3. Configure Backend Environment
-
-Copy the environment template to create your local `.env` configuration:
-
-**Windows (PowerShell):**
-```powershell
-Copy-Item Backend\.env.example Backend\.env
-```
-
-**Unix / macOS:**
-```bash
 cp Backend/.env.example Backend/.env
+pip install -r Backend/requirements.txt
 ```
 
-Edit `Backend/.env` to configure your environment settings:
+Edit `Backend/.env` for your environment.
 
-```env
-# ── General Server Configuration ─────────────────────
-ENV=development
-GATEWAY_PORT=8001
-ADMIN_EMAIL=admin@example.com
-ADMIN_PASSWORD=CHANGE_ME_BEFORE_PRODUCTION
-TIER3_TIMEOUT=5
+### 3. Start the gateway
 
-# ── CORS Configuration ────────────────────────────────
-ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8001,http://127.0.0.1:3000,http://127.0.0.1:8001
-
-# ── External AI & Metadata (Tier 3) ───────────────────
-# Optional: Required for Gemini AI threat analysis
-GEMINI_API_KEY=your_actual_gemini_api_key_here
-
-# ── Caching & Persistent Stores ───────────────────────
-# Optional: Falls back to in-memory caching if Redis is offline
-REDIS_URL=redis://localhost:6379
-
-# ── WHOIS Provider ────────────────────────────────────
-WHOIS_API_PROVIDER=whoisxml
-WHOIS_API_KEY=
-```
-
-> [!IMPORTANT]
-> Never commit `.env` or `.env.staging` files to Git. All secret variables must remain outside source control. Refer to [SECURITY.md](SECURITY.md) for full secret hygiene guidelines.
-
----
-
-### 4. Install Backend Dependencies
-
-From the repository root, install backend requirements into your active virtual environment:
-
-```powershell
-python -m pip install --upgrade pip
-python -m pip install -r Backend\requirements.txt
-```
-
-Verify dependency integrity:
-```powershell
-python -m pip check
-```
-
----
-
-### 5. Start the Backend API Gateway
-
-The API Gateway (`Backend/gateway.py`) is the canonical single entrypoint for all scan orchestration, heuristic analysis, ML predictors, and SSE streams.
-
-From the repository root:
-```powershell
-python -m uvicorn Backend.gateway:app --host 0.0.0.0 --port 8001 --reload
-```
-
-Or from the `Backend/` directory:
-```powershell
+```bash
 cd Backend
 python gateway.py
 ```
 
-Verify the backend service is healthy:
-```powershell
-curl http://localhost:8001/health
-curl http://localhost:8001/ready
+The canonical gateway is:
+
+```text
+http://127.0.0.1:8001
 ```
 
----
+Verify it with:
 
-### 6. Install & Run the Frontend Dashboard
+```bash
+curl http://127.0.0.1:8001/health
+```
 
-The ZeroPhish SOC Dashboard is a Next.js 16 (Turbopack) and React 19 application.
+### 4. Start the frontend
 
-In a **new terminal window**:
-```powershell
+In another terminal:
+
+```bash
 cd Frontend
 pnpm install
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+### 5. Load the extension
+
+1. Open `chrome://extensions/`.
+2. Enable **Developer mode**.
+3. Select **Load unpacked**.
+4. Select the repository's `extension/` directory.
+5. Reload the extension after extension source changes.
 
 ---
 
-### 7. Load the Chrome Extension
+## Configuration
 
-1. Open **Google Chrome** and navigate to `chrome://extensions/`
-2. Enable **Developer mode** via the top-right toggle
-3. Click **"Load unpacked"**
-4. Select the `extension/` folder located in the root of the ZeroPhish repository
-5. The **ZeroPhish Sentinel** icon will appear in your Chrome toolbar / side panel
+The primary backend template is:
 
----
-
-### 8. Verify the Installation
-
-Run the complete automated test suites to ensure all systems are functioning properly:
-
-```powershell
-# 1. Run Backend Unit & Integration Tests (322+ tests, 0 warnings)
-python -W error::RuntimeWarning -m pytest Backend/tests/ -q
-
-# 2. Run Frontend Vitest Suite (30/30 tests)
-cd Frontend
-pnpm test
-
-# 3. Verify Master Security Gate (Gitleaks, coverage, secret hygiene)
-cd ..
-powershell -ExecutionPolicy Bypass -File scripts\security-gate.ps1
+```text
+Backend/.env.example
 ```
 
----
+Important configuration areas include:
 
-### 9. Optional: Isolated Staging Environment
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Persistent database configuration |
+| `REDIS_URL` | Redis cache and supported shared state |
+| `GEMINI_API_KEY` | Gemini Tier 3 configuration |
+| `ENV` | Runtime environment |
+| Metrics settings | Prometheus-compatible runtime metrics |
+| OpenTelemetry settings | Optional tracing |
 
-ZeroPhish includes an isolated staging environment with Docker Compose orchestration, separated database namespaces, and an observational cascade shadow pipeline.
-
-To start the staging environment:
-```powershell
-.\scripts\staging-up.ps1
-```
-
-Verify staging connectivity:
-```powershell
-.\scripts\staging-health.ps1
-```
-
-For complete deployment details, topology maps, and operational guides, see:
-- [Staging Architecture Guide](docs/staging/architecture.md)
-- [Staging Deployment Guide](docs/staging/deployment.md)
-- [Staging Operations Manual](docs/staging/operations.md)
+Never commit API keys, credentials, or `.env` files.
 
 ---
 
-### 🛠️ Troubleshooting
+## API
 
-- **PowerShell Script Execution:** If `Activate.ps1` or staging scripts fail to execute, run:
-  ```powershell
-  Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-  ```
-- **Port Conflicts (8001 / 3000):** If port 8001 is already in use, override it via `GATEWAY_PORT=8002` in `Backend/.env` or pass `--port 8002` to uvicorn.
-- **PyTorch CPU Wheel:** If running on Windows without a dedicated GPU, install the CPU-optimized PyTorch build:
-  ```powershell
-  python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-  ```
-- **Chrome Extension Reloading:** After making modifications to `extension/`, click the refresh icon on `chrome://extensions/` to apply changes.
+The supported API is exposed through `Backend/gateway.py` on port `8001`.
 
----
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `POST` | `/gateway/scan` | Submit an email for analysis |
+| `GET` | `/gateway/status/{scan_id}` | Retrieve scan status |
+| `GET` | `/gateway/result/{scan_id}` | Retrieve a completed result |
+| `GET` | `/gateway/health` | Gateway health information |
+| `POST` | `/vision/analyze` | Vision analysis |
+| `GET` | `/auth/me` | Authentication context |
+| `POST` | `/email/scan-eml` | Analyze a raw `.eml` message |
+| `GET` | `/analytics/threat-feed` | Threat-feed information |
+| `GET` | `/cache/stats` | Cache statistics |
+| `DELETE` | `/cache/clear` | Clear cached scan reports |
 
-## 🚀 Usage
-
-1. **Open Gmail** in Chrome
-2. **Click the ZeroPhish icon** in the Chrome toolbar to open the Side Panel
-3. **Open any email** in Gmail
-4. **Click "Initialize Scan"** in the side panel
-5. ZeroPhish will:
-   - Run **Tier 1** heuristics instantly (client-side)
-   - Send data to the **Gateway** for Tier 2 & Tier 3 analysis
-   - Display a live **threat score**, **verdict**, and **evidence breakdown**
-6. **Open the Dashboard** at [http://localhost:3000](http://localhost:3000) to see real-time scan results with a full forensics view
-
----
-
-## 🔌 API Reference
-
-### Gateway Orchestrator (Port 8001)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/gateway/scan` | Submit email for full 3-tier analysis |
-| `GET` | `/gateway/status/{scan_id}` | Poll scan status (Tier 3 pending) |
-| `GET` | `/gateway/result/{scan_id}` | Retrieve completed scan result |
-| `GET` | `/gateway/health` | Gateway health & circuit breaker status |
-| `POST` | `/vision/analyze` | Submit image for visual heuristics and Gemini multimodal scoring |
-| `GET` | `/auth/me` | Fetch active User/RBAC context |
-| `POST` | `/email/scan-eml` | Upload and sanitize raw .eml file traces |
-| `GET` | `/analytics/threat-feed` | Fetch live IOCs and heuristics across the platform |
-| `GET` | `/cache/stats` | Active cache backend statistics (Redis/In-Memory) |
-| `DELETE` | `/cache/clear` | Clear all cached scan reports |
-
-### Tier 2 Backend (Port 8000) — ⚠️ Deprecated legacy entrypoint
-
-> **Deprecated.** See the note in [API Reference](#-api-reference): the standalone Tier 2 server is retired; the canonical gateway exposes this functionality in-process on port 8001.
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/scan` | Direct Tier 2 scan (WHOIS + patterns + ML) |
-| `POST` | `/tier1/report` | Receive scan report from extension |
-| `GET` | `/tier1/latest` | Get the most recent scan result |
-| `GET` | `/tier1/stream` | SSE stream for real-time dashboard updates |
-| `GET` | `/health` | Service health check |
-| `GET` | `/cache/stats` | Redis cache statistics |
-| `DELETE` | `/cache/clear` | Clear all cached results |
-
-### Example Scan Request
+### Example scan request
 
 ```bash
-curl -X POST http://localhost:8001/gateway/scan \
+curl -X POST http://127.0.0.1:8001/gateway/scan \
   -H "Content-Type: application/json" \
   -d '{
     "sender": "security@suspicious-bank.xyz",
     "subject": "URGENT: Verify your account now",
-    "body": "Your account has been suspended. Click here immediately to verify your credentials and avoid losing access.",
-    "links": ["http://192.168.1.1/verify", "http://paypa1.com/secure"],
+    "body": "Your account has been suspended. Verify your credentials immediately.",
+    "links": [
+      "http://192.168.1.1/verify",
+      "http://paypa1.com/secure"
+    ],
     "tier1_score": 72,
-    "tier1_evidence": ["Urgency keyword", "IP-based URL", "Brand mismatch"]
+    "tier1_evidence": [
+      "Urgency keyword",
+      "IP-based URL",
+      "Brand mismatch"
+    ]
   }'
 ```
 
----
-
-## 🛠️ Tech Stack
-
-| Layer | Technology | Version |
-|-------|-----------|---------|
-| **API Framework** | FastAPI + Uvicorn | 0.115.6 / 0.32.1 |
-| **AI (Tier 3)** | Google Gemini 1.5 Flash | `google-generativeai` 0.8.3 |
-| **ML (Tier 2)** | HuggingFace Transformers + DistilBERT | 4.47.1 |
-| **Deep Learning** | PyTorch | 2.5.1+ |
-| **Data Models** | Pydantic | 2.10.5 |
-| **Caching** | Redis (asyncio) | 5.2.1 |
-| **Rate Limiting** | SlowAPI | 0.1.9 |
-| **Domain Analysis** | python-whois | 0.9.4 |
-| **HTTP Client** | httpx | 0.28.1 |
-| **Reliability** | tenacity | 9.0.0 |
-| **Frontend** | Next.js 16 + React 19 + TypeScript | 16.1.6 |
-| **Styling** | Tailwind CSS + Radix UI | 3.4.x |
-| **Animation** | Framer Motion | 11.x |
-| **Charts** | Recharts | 2.15.0 |
-| **Extension** | Chrome Manifest V3 | — |
+A completed response contains the scan identifier, tier results, evidence, score, verdict, completion state, and cache state where applicable.
 
 ---
 
-## 🔧 Configuration Reference
+## Webhook Semantics
 
-All configuration is driven by the `Backend/.env` file. Key variables:
+Webhook events can include:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GEMINI_API_KEY` | — | Google Gemini API key (required for Tier 3) |
-| `GATEWAY_PORT` | `8001` | Gateway server port |
-| `TIER3_TIMEOUT` | `5` | Max seconds to wait for Gemini AI response |
-| `ALLOWED_ORIGINS` | `http://localhost:3000` | CORS-allowed origins (comma-separated) |
-| `ALLOW_ORIGIN_REGEX` | — | Regex to allow specific Chrome extension IDs |
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection URL |
-| `ML_ENABLED` | `true` | Enable/disable DistilBERT ML model |
-| `CIRCUIT_BREAKER_ENABLED` | `true` | Enable Tier 3 circuit breaker |
-| `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | `5` | Failures before circuit opens |
-| `CIRCUIT_BREAKER_TIMEOUT` | `30` | Seconds before circuit attempts recovery |
-| `ZERO_PHISH_DISABLE_ML` | — | Set to `1` to disable local BERT |
-| `ZERO_PHISH_HF_MODEL` | `distilbert-base-uncased-finetuned-sst-2-english` | HuggingFace model ID |
+- `scan.complete`
+- `scan.critical`
+- `scan.suspicious`
 
-#### Environment variable precedence
+Webhook dispatch is asynchronous so slow or unavailable receivers do not block scan finalization.
 
-Some settings have multiple names for historical reasons. Precedence (highest first):
+### Current delivery model
 
-| Setting | Primary | Legacy alias | Behavior |
-|---------|---------|--------------|----------|
-| Environment name | `ZEROPHISH_ENV` | `ENV` | Gateway uses `ZEROPHISH_ENV` only; production persistence checks fall back to `ENV`. |
-| Scan rate limit | `SCAN_RATE_LIMIT` | `GATEWAY_SCAN_RATE_LIMIT` | Primary wins; default is `1200/minute` (`20/minute` when `ZEROPHISH_ENV=production`). |
-| Status rate limit | `STATUS_RATE_LIMIT` | `GATEWAY_STATUS_RATE_LIMIT` | Primary wins; default `120/minute`. |
+Webhook delivery is currently **best-effort / at-most-once**.
+
+A gateway restart or process failure between scan finalization and background dispatch can lose an event. The current implementation does not provide a durable delivery ledger or transactional outbox.
+
+The persisted scan result is the authoritative record.
+
+Durable webhook delivery and guaranteed retry behavior are not represented as implemented functionality unless the current repository adds those guarantees.
 
 ---
 
-## 📊 Performance Benchmarks
+## Reliability
 
-| Tier | Component | Expected Latency |
-|------|-----------|-----------------|
-| **Tier 1** | Chrome Extension (heuristics) | < 50ms |
-| **Tier 2** | Pattern matching + ML inference | 200 – 500ms |
-| **Tier 3** | Gemini API call | 1 – 3 seconds |
-| **Total** | Full 3-tier scan | 1.5 – 3.5 seconds |
-| **Cache hit** | Redis cached result | < 10ms |
+The reliability layer focuses on controlled failure behavior and recovery.
 
-**Resource Usage:**
-- Memory: ~500MB – 1GB (with ML model loaded)
-- CPU: 10–30% during active scans
-- Disk: ~2GB for ML model weights + cache
+### Database
+
+- Explicit transaction commit/rollback handling
+- Rollback on failed mutations
+- Persistent repository support
+- Recovery after transactional failure
+
+### Redis
+
+- Optional Redis-backed cache
+- Connection-failure fallback
+- In-memory fallback path
+- Cache lifecycle management
+
+### Circuit breaker
+
+The Tier 3 dependency path uses circuit-breaker behavior to reduce repeated calls while an external dependency is failing.
+
+```text
+CLOSED
+  │ repeated failures
+  ▼
+ OPEN
+  │ recovery timeout
+  ▼
+HALF_OPEN
+  │
+  ├── success ──► CLOSED
+  └── failure ──► OPEN
+```
+
+Distributed state behavior depends on the configured shared-state mechanism. Process-local behavior remains relevant to the deployment model.
+
+### SSE
+
+Subscriber queues are bounded and support backpressure handling so slow consumers do not cause unbounded queue growth.
+
+### Background work
+
+Asynchronous tasks are tracked so application shutdown can cancel and drain active work within a bounded shutdown window.
 
 ---
 
-## 🧪 Testing
+## Scaling Model
 
-### Health Checks
+ZeroPhish currently favors explicit state ownership over assuming automatic horizontal scalability.
+
+### Single instance
+
+The simplest deployment keeps application and SSE subscriber state in one gateway process.
+
+### Persistent single instance
+
+Configure the database and Redis integrations when durable persistence and cache-backed operation are required.
+
+### Multiple instances
+
+Multi-instance deployment requires explicit treatment of shared state:
+
+- database state must be shared
+- Redis should be configured where shared state is required
+- SSE subscribers remain instance-local
+- load-balanced SSE traffic requires appropriate routing or a dedicated SSE strategy
+
+Adding more gateway processes does not by itself make SSE state distributed.
+
+---
+
+## Observability
+
+Current observability surfaces include:
+
+- structured security/application logs
+- health checks
+- readiness checks
+- Prometheus-compatible metrics where enabled
+- optional OpenTelemetry tracing
+- cache statistics
+- circuit-breaker state
+- SSE runtime metrics
+
+Typical operational endpoints include:
+
+```text
+/health
+/ready
+/metrics
+```
+
+Exact availability depends on runtime configuration.
+
+---
+
+## Chrome Extension Development
+
+The extension is a Manifest V3 application.
+
+### Debugging
+
+1. Open `chrome://extensions/`.
+2. Inspect the ZeroPhish extension service worker.
+3. Use browser DevTools for content-script, Side Panel, and messaging diagnostics.
+
+### Hot reload
+
+After changing extension files, reload the extension from the Chrome extensions page.
+
+### Build
+
+The extension uses the repository's current vanilla JavaScript extension structure and does not require a conventional application build pipeline.
+
+---
+
+## Testing & Quality
+
+ZeroPhish uses multiple verification layers:
+
+```text
+Unit Tests
+    │
+    ▼
+Integration Tests
+    │
+    ▼
+Runtime / Network Verification
+    │
+    ▼
+Deployment / Staging Verification
+```
+
+### Backend
 
 ```powershell
-# Tier 2 Backend
-curl http://localhost:8001/health
-
-# API Gateway
-curl http://localhost:8001/gateway/health
-
-# Circuit Breaker Status
-curl http://localhost:8001/gateway/circuit/status
+python -m pytest Backend/tests/
 ```
 
-### Phishing Detection Test
+### Frontend
 
 ```powershell
-curl -X POST http://localhost:8001/scan `
-  -H "Content-Type: application/json" `
-  -d '{
-    "sender": "urgent@suspicious-bank.com",
-    "body": "URGENT: Your account will be suspended. Verify your password immediately!",
-    "links": ["http://phishing-site.com/verify"]
-  }'
-# Expected: threat score 70+, verdict: CRITICAL
+cd Frontend
+pnpm test
 ```
 
-### Security Tests
+### TypeScript
 
 ```powershell
-# Rate limiting (expect 429 after 20 req/min)
-for ($i=1; $i -le 25; $i++) {
-    curl -X POST http://localhost:8001/gateway/scan `
-      -H "Content-Type: application/json" `
-      -d '{"sender":"t@t.com","body":"test","links":[],"tier1_score":0,"tier1_evidence":[]}'
-}
+npx tsc --noEmit
+```
 
-# Request size limit (expect 413)
-$largeBody = "A" * 2000000
-curl -X POST http://localhost:8001/gateway/scan `
-  -H "Content-Type: application/json" `
-  -d "{`"sender`":`"t@t.com`",`"body`":`"$largeBody`",`"links`":[],`"tier1_score`":0,`"tier1_evidence`":[]}"
+### Production build
+
+```powershell
+pnpm build
+```
+
+### Security checks
+
+```powershell
+powershell -File scripts/security-gate.ps1
+```
+
+The repository separates mocked/unit evidence from runtime and network evidence. A passing unit test is not treated as proof of distributed production behavior.
+
+---
+
+## Troubleshooting
+
+### Port 8001 is already in use
+
+Windows:
+
+```powershell
+netstat -ano | findstr :8001
+taskkill /PID <PID> /F
+```
+
+The supported gateway port is `8001`. Port `8000` is the deprecated standalone Tier 2 entrypoint.
+
+### Redis connection refused
+
+Redis is optional for configurations that support the cache fallback. When Redis is required, verify that the configured `REDIS_URL` is reachable.
+
+### Gemini configuration
+
+When Tier 3 is required, configure the Gemini credentials in the backend environment. Never commit the key.
+
+### Extension not loading
+
+Check `manifest.json` and the service-worker/content-script consoles in Chrome DevTools.
+
+### Frontend dependency problems
+
+Windows PowerShell:
+
+```powershell
+Remove-Item -Recurse -Force node_modules
+pnpm install
+pnpm test
+pnpm build
+```
+
+### Backend dependency problems
+
+Use a clean virtual environment:
+
+```powershell
+py -3.13 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r Backend\requirements.txt
+pip check
 ```
 
 ---
 
-## 🔒 Security Architecture
+## Documentation
 
-ZeroPhish adheres to strict secure coding principles. The security subsystem intercepts all scan executions through modular filters before they can consume deep learning inference servers or cloud AI endpoints.
+Detailed engineering documentation is maintained under [`docs/`](docs/).
 
-### 🛡️ Request Validation & Parallel Processing Sequence
-
-The sequence diagram below displays the step-by-step security interception, caching bypass logic, and parallel execution pipeline:
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Client as Chrome Extension
-    participant GW as API Gateway (Port 8001)
-    participant Cache as Redis Speed Layer
-    participant T2 as Tier 2 Service (Port 8000)
-    participant T3 as Gemini Tier 3
-
-    Client->>GW: POST /gateway/scan (Payload < 1MB)
-    Note over GW: Security Pipeline:<br/>1. Rate Limiter Checks IP<br/>2. Size Guard Check<br/>3. XSS Input Scrubbing<br/>4. CORS Validation
-    
-    GW->>Cache: SHA-256 Cache Key Lookup
-    alt Cache Hit (⚡ Speed Layer)
-        Cache-->>GW: Return cached threat score (<10ms)
-        GW-->>Client: Final Scan Report (Fast Path)
-    else Cache Miss
-        GW-->>Client: Stream SSE: Scan Initialized (Partial Score)
-        
-        par Parallel Analysis
-            GW->>T2: Execute Domain Heuristics + DistilBERT ML
-            T2-->>GW: Tier 2 Result (Score + Evidence)
-        and Parallel Analysis (Circuit Breaker Guarded)
-            GW->>T3: Semantic Scan (Gemini 1.5 Flash)
-            T3-->>GW: Tier 3 Result (BEC & CEO Fraud Details)
-        end
-        
-        Note over GW: Weighted Scoring Engine:<br/>(T1 * 0.2) + (T2 * 0.3) + (T3 * 0.5)
-        GW->>Cache: Cache completed report (SHA-256)
-        GW->>Client: Stream SSE: Final Threat Score & Verdict
-        Note over GW: Dispatch Enterprise Webhooks<br/>& Telemetry Logs
-    end
-```
-
-### ⚙️ Production Hardening Security Controls
-
-ZeroPhish implements a robust, multi-layer security posture:
-
-- **🛡️ Rate Limiting:** Enforced via `slowapi` at the gateway level. Rates are capped at `20 requests/minute` per IP address for scans, and `120 requests/minute` for status queries to prevent Denial of Service (DoS) and API abuse.
-- **📏 Strict Size Constraints:** Integrates a custom FastAPI request size limiting middleware, rejecting any request bodies larger than `1MB` at the network level.
-- **🧼 XSS & Linguistic Sanitization:** An active `InputValidator` scrubs all text elements, blocking cross-site scripting attempts and validating email addresses and URLs against pre-compiled regex limits.
-- **🔒 Security Header Middleware:** Injects modern security-hardening response headers:
-  - `Strict-Transport-Security (HSTS)` to force HTTPS connections
-  - `Content-Security-Policy (CSP)` defining strict trusted script origins
-  - `X-Frame-Options: DENY` to block clickjacking attacks
-  - `X-Content-Type-Options: nosniff` to prevent MIME-type sniffing
-- **🌍 Dynamic CORS Protection:** REST API endpoints only respond to origins mapped in the `ALLOWED_ORIGINS` environment setup or specific Chrome Extension ID regex configurations (`ALLOW_ORIGIN_REGEX`).
-- **⚡ SHA-256 Caching Hashing:** Scan payloads are hashed securely. Only hashes are stored as keys in Redis, protecting user data from exposed scanning records.
-- **🔌 Fault-Tolerant Circuit Breakers:** Tier 3 AI integrations are protected by a state-machine based circuit breaker. If Google Gemini experiences high latencies or API failures, the gateway isolates the endpoint automatically, protecting local ML and scanning features.
+Start with [`docs/INDEX.md`](docs/INDEX.md), then use the relevant architecture, testing, reliability, security, deployment, and operations documents.
 
 ---
 
-## 🚀 Production Deployment
+## Contributing
 
-### Environment Setup
+Contributions should preserve the project's security and reliability boundaries.
 
-```env
-# Production .env
-GATEWAY_PORT=443
-TIER3_TIMEOUT=5
-ALLOWED_ORIGINS=https://yourdomain.com
-GEMINI_API_KEY=your_production_key
-REDIS_URL=redis://your-redis-host:6379
-CIRCUIT_BREAKER_ENABLED=true
-ML_ENABLED=true
+```bash
+git checkout -b feature/your-change
 ```
 
-### Nginx Reverse Proxy
+Before opening a pull request, run the relevant validation:
 
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name api.yourdomain.com;
-
-    ssl_certificate /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
-
-    location / {
-        proxy_pass http://localhost:8001;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
+```powershell
+python -m pytest Backend/tests/
+cd Frontend
+pnpm test
+npx tsc --noEmit
+pnpm build
 ```
 
-### Systemd Service
+For security-sensitive changes:
 
-```ini
-[Unit]
-Description=ZeroPhish API Gateway
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/path/to/ZeroPhish/Backend
-Environment="PATH=/path/to/venv/bin"
-ExecStart=/path/to/venv/bin/python gateway.py
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
+```powershell
+powershell -File scripts/security-gate.ps1
 ```
+
+Pull requests should include appropriate tests and documentation, avoid unnecessary permissions, and contain no secrets or credentials.
 
 ---
 
-## 📁 Related Documentation
+## License
 
-All project documentation is indexed in [`docs/INDEX.md`](docs/INDEX.md). Highlights:
-
-| File | Description |
-|------|-------------|
-| [`docs/TESTING_AND_DEPLOYMENT.md`](docs/TESTING_AND_DEPLOYMENT.md) | Full testing checklist & deployment guide |
-| [`docs/QUICK_REFERENCE.md`](docs/QUICK_REFERENCE.md) | Quick API & config reference |
-| [`docs/GEMINI_INTEGRATION_STATUS.md`](docs/GEMINI_INTEGRATION_STATUS.md) | Tier 3 AI integration notes |
-| [`docs/EXTENSION_FIX_GUIDE.md`](docs/EXTENSION_FIX_GUIDE.md) | Extension troubleshooting guide |
-| [`docs/RELOAD_EXTENSION_INSTRUCTIONS.md`](docs/RELOAD_EXTENSION_INSTRUCTIONS.md) | How to reload the Chrome extension |
-
----
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch: `git checkout -b feature/amazing-feature`
-3. Commit your changes: `git commit -m 'Add amazing feature'`
-4. Push to the branch: `git push origin feature/amazing-feature`
-5. Open a Pull Request
-
----
-
-## 📝 License
-
-This project is open-source and available under the [MIT License](LICENSE).
+ZeroPhish is released under the [MIT License](LICENSE).
 
 ---
 
 <div align="center">
 
-**Built with ❤️ to keep inboxes safe.**
+**ZeroPhish — security-focused phishing detection for the browser.**
 
-*ZeroPhish — Zero tolerance for phishing.*
+Built with Python, FastAPI, Next.js, Chrome APIs, machine learning, and AI.
 
 </div>
