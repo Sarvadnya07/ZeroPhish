@@ -33,9 +33,7 @@ jobs:
       - name: Verify refreshed lockfile
         working-directory: Frontend
         run: |
-          test "$(pnpm list next --depth 0 --json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const x=JSON.parse(s)[0];process.stdout.write(x.dependencies.next.version)})")" = "16.3.3"
-          grep -q "sharp@0.35.4" ../pnpm-lock.yaml
-          grep -q "js-yaml@4.3.2" ../pnpm-lock.yaml
+          node -e "const fs=require('fs'); const s=fs.readFileSync('../pnpm-lock.yaml','utf8'); if(!s.includes('next@16.3.3')) process.exit(1); if(!s.includes('specifier: 16.3.3')) process.exit(1); if(!s.includes('sharp@0.35.4')) process.exit(1); if(!s.includes('js-yaml@4.3.2')) process.exit(1); console.log('Frontend lockfile contains patched dependency graph.')"
 
       - name: Commit refreshed lockfile
         run: |
