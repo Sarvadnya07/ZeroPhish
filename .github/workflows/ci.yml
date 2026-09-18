@@ -122,11 +122,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
-      # The existing lockfile predates the patched Next.js release. Resolve it
-      # from package.json so CI tests the declared, patched dependency graph.
-      # A lockfile refresh should be committed separately once generated locally.
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Verify resolved security versions
         run: |
