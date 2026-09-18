@@ -31,10 +31,11 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: Verify refreshed lockfile
+        working-directory: Frontend
         run: |
-          grep -q "specifier: 16.3.3" Frontend/pnpm-lock.yaml
-          grep -q "sharp@0.35.4" Frontend/pnpm-lock.yaml
-          grep -q "js-yaml@4.3.2" Frontend/pnpm-lock.yaml
+          test "$(pnpm list next --depth 0 --json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const x=JSON.parse(s)[0];process.stdout.write(x.dependencies.next.version)})")" = "16.3.3"
+          grep -q "sharp@0.35.4" ../pnpm-lock.yaml
+          grep -q "js-yaml@4.3.2" ../pnpm-lock.yaml
 
       - name: Commit refreshed lockfile
         run: |
