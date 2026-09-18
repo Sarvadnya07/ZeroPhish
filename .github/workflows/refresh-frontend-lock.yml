@@ -26,7 +26,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
-      - name: Regenerate lockfile from repository manifests
+      - name: Regenerate lockfile from Frontend manifest
+        working-directory: Frontend
         run: pnpm install --no-frozen-lockfile
 
       - name: Verify refreshed lockfile
