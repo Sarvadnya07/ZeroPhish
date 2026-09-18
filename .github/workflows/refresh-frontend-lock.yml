@@ -1,6 +1,8 @@
 name: Refresh Frontend Lockfile
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -8,25 +10,39 @@ permissions:
 
 jobs:
   refresh:
+    # Prevent the refresh commit from recursively running this job.
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
         with:
-          version: 9
+          version: 11
+
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "24"
           cache: pnpm
-          cache-dependency-path: Frontend/pnpm-lock.yaml
-      - name: Regenerate lockfile
-        working-directory: Frontend
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Regenerate lockfile from repository manifests
         run: pnpm install --no-frozen-lockfile
+
+      - name: Verify refreshed lockfile
+        run: |
+          grep -q "specifier: 16.3.3" Frontend/pnpm-lock.yaml
+          grep -q "sharp@0.35.4" Frontend/pnpm-lock.yaml
+          grep -q "js-yaml@4.3.2" Frontend/pnpm-lock.yaml
+
       - name: Commit refreshed lockfile
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Frontend/pnpm-lock.yaml
-          git diff --cached --quiet && exit 0
+          git add pnpm-lock.yaml
+          if git diff --cached --quiet; then
+            echo "Lockfile already synchronized."
+            exit 0
+          fi
           git commit -m "chore: refresh frontend lockfile"
-          git push
+          git push origin main
