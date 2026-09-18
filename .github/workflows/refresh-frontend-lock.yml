@@ -32,7 +32,9 @@ jobs:
 
       - name: Verify refreshed lockfile
         run: |
-          node -e "const fs=require('fs'); const s=fs.readFileSync('pnpm-lock.yaml','utf8'); if(!s.includes('next@16.3.3')) process.exit(1); if(!s.includes('specifier: 16.3.3')) process.exit(1); if(!s.includes('sharp@0.35.4')) process.exit(1); if(!s.includes('js-yaml@4.3.2')) process.exit(1); console.log('Root workspace lockfile contains patched dependency graph.')"
+          node -e "const fs=require('fs'); const s=fs.readFileSync('pnpm-lock.yaml','utf8'); if(!s.includes('next@16.3.3')) process.exit(1); if(!s.includes('specifier: 16.3.3')) process.exit(1); console.log('Root workspace lockfile contains patched Next.js graph.')"
+          pnpm --dir Frontend list sharp js-yaml --depth 20
+          node -e "const fs=require('fs'); const s=fs.readFileSync('pnpm-lock.yaml','utf8'); if(s.includes('sharp@0.35.3') || s.includes('js-yaml@4.3.1')) { console.log('Detected stale vulnerable transitive versions in lockfile'); process.exit(1); }"
 
       - name: Commit refreshed lockfile
         run: |
