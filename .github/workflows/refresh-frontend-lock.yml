@@ -31,9 +31,8 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: Verify refreshed lockfile
-        working-directory: Frontend
         run: |
-          node -e "const fs=require('fs'); const s=fs.readFileSync('../pnpm-lock.yaml','utf8'); if(!s.includes('next@16.3.3')) process.exit(1); if(!s.includes('specifier: 16.3.3')) process.exit(1); if(!s.includes('sharp@0.35.4')) process.exit(1); if(!s.includes('js-yaml@4.3.2')) process.exit(1); console.log('Frontend lockfile contains patched dependency graph.')"
+          node -e "const fs=require('fs'); const s=fs.readFileSync('pnpm-lock.yaml','utf8'); if(!s.includes('next@16.3.3')) process.exit(1); if(!s.includes('specifier: 16.3.3')) process.exit(1); if(!s.includes('sharp@0.35.4')) process.exit(1); if(!s.includes('js-yaml@4.3.2')) process.exit(1); console.log('Root workspace lockfile contains patched dependency graph.')"
 
       - name: Commit refreshed lockfile
         run: |
