@@ -81,11 +81,5 @@
   },
   "engines": {
     "node": ">=20.9.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "sharp": "0.35.4",
-      "js-yaml": "4.3.2"
-    }
   }
 }

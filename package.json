@@ -1,5 +1,5 @@
 {
-	"dependencies": {
-		"next": "16.3.1"
-	}
+  "private": true,
+  "name": "zerophish-workspace",
+  "version": "1.0.0"
 }
