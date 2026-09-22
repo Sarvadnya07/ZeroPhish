@@ -1,0 +1,20 @@
+{
+  "source_name": "Tranco Research Top 1M",
+  "source_key": "tranco",
+  "operational_mode": "AdapterOperationalMode.SAMPLE",
+  "sync_timestamp": "2026-09-21T20:07:45.524707+00:00",
+  "payload_hash": "cf3da1d831fb9b238f75a8b38420c77e0148376a4537db171ee0ec8dddd8e1bc",
+  "records_count": 15,
+  "bytes": 3269,
+  "telemetry": {
+    "dns_tls_connect_ms": 0.0,
+    "network_fetch_ms": 0.0,
+    "bytes_downloaded": 3269,
+    "http_status": 200,
+    "content_parse_ms": 0.0,
+    "normalization_ms": 0.0,
+    "deduplication_ms": 0.0,
+    "snapshot_write_ms": 0.0,
+    "total_sync_ms": 0.1
+  }
+}

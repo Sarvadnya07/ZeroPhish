@@ -1,5 +1,28 @@
 # ZeroPhish — Master Authentication & Login Security Architecture
 
+> **⚠️ SUPERSEDED — DO NOT USE FOR SECURITY ASSESSMENT (Phase 1.10 correction).**
+>
+> This document describes a **local credential-management system that is not
+> implemented in this repository.** Nothing below is an accurate description of
+> the shipped system. Specifically, the following described controls **do not
+> exist** in the codebase:
+>
+> - `POST /auth/login`, `/auth/register`, `/auth/logout`, `/auth/mfa/verify`,
+>   `/auth/password/change` — not implemented.
+> - PBKDF2-HMAC-SHA256 password hashing, `secrets.token_urlsafe(48)` token
+>   generation, and the `zp_session` HttpOnly cookie — not implemented.
+> - TOTP MFA and the per-endpoint authentication rate limits listed here — not
+>   implemented.
+>
+> **Actual implementation:** ZeroPhish delegates identity to **Clerk**; the
+> server verifies Clerk JWTs (`Backend/auth/middleware.py`,
+> `Backend/auth/clerk.py`) and owns RBAC/provisioning only. The authoritative
+> description is [`authentication.md`](./authentication.md). The only routes in
+> `Backend/auth/router.py` are `GET/PATCH /auth/me` and the `/admin/users`
+> endpoints.
+>
+> Historical document retained for audit trail only.
+
 ## 1. Authentication Architecture & Overview
 
 ZeroPhish implements a multi-tier, zero-trust authentication and access-control architecture supporting both interactive web dashboard users (via HttpOnly session cookies with CSRF defense) and programmatic API / Chrome extension clients (via Bearer token authorization headers).

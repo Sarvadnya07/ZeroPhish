@@ -21,6 +21,14 @@ pydantic-settings==2.7.1
 email-validator==2.2.0
 
 # ==============================
+# Image Decoding (Vision security boundary)
+# ==============================
+# Imported directly by vision/security.py (ImageSecurityValidator / ImagePixelDecoder).
+# Was previously satisfied only transitively; declared explicitly so a clean
+# install from this file cannot silently disable the vision router.
+Pillow==12.3.0
+
+# ==============================
 # Domain & Network Analysis
 # ==============================
 python-whois==0.9.4
@@ -47,6 +55,7 @@ asyncio-throttle==1.0.2
 tenacity==9.0.0
 aiofiles==24.1.0
 slowapi==0.1.9
+prometheus-client>=0.20.0
 
 # ==============================
 # Logging

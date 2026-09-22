@@ -126,3 +126,6 @@ Backend/ml/benchmarks/*/latency_audit.json
 Backend/ml/benchmarks/*/final_audit_report.md
 Backend/ml/benchmarks/dataset_manifest_v3.json
 
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

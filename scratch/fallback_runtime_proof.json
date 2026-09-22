@@ -1,0 +1,17 @@
+{
+  "scenario_1": {
+    "primary_provider": "gemini_primary",
+    "primary_failure": "Gemini upstream latency exceeded 2.5s",
+    "fallback_provider": "openai_fallback",
+    "fallback_model": "openai_fallback-v1",
+    "fallback_score": 85,
+    "final_verdict": "Verdict.SUSPICIOUS"
+  },
+  "scenario_2": {
+    "all_providers_failed": true,
+    "tier3_category": "AI_UNAVAILABLE",
+    "initial_partial_score": 82.5,
+    "final_score": 82.5,
+    "final_verdict": "Verdict.CRITICAL"
+  }
+}

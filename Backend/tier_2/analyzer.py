@@ -47,10 +47,14 @@ logger = logging.getLogger(__name__)
 # ---------- Constants ----------
 ML_AVAILABLE = False
 try:
-    from tier_2.ml_model import get_ml_model
+    from .ml_model import get_ml_model
     ML_AVAILABLE = True
 except ImportError:
-    get_ml_model = None  # type: ignore[assignment]
+    try:
+        from tier_2.ml_model import get_ml_model
+        ML_AVAILABLE = True
+    except ImportError:
+        get_ml_model = None  # type: ignore[assignment]
 
 # Default weights
 PATTERN_WEIGHTS = {
@@ -126,7 +130,10 @@ class ThreatAnalyzer:
             return url, []
 
         import urllib.parse
-        from security.middleware import is_safe_url
+        try:
+            from security.middleware import is_safe_url
+        except ImportError:
+            from Backend.security.middleware import is_safe_url
 
         # Validate initial URL
         if not is_safe_url(url, allow_http=True):
@@ -271,12 +278,16 @@ class ThreatAnalyzer:
         sender_score = 0
         flagged: List[str] = []
 
-        if "@" not in sender_lower:
+        import email.utils
+        _, addr = email.utils.parseaddr(sender_lower)
+        clean_sender = addr if addr else sender_lower
+
+        if "@" not in clean_sender:
             sender_score += 10
             flagged.append("invalid_sender_format")
         else:
-            sender_domain = sender_lower.split("@")[-1]
-            if any(term in sender_lower for term in ("security", "support", "admin", "billing")):
+            sender_domain = clean_sender.split("@")[-1].strip().strip("<>[]{}'\"").rstrip(".")
+            if any(term in clean_sender for term in ("security", "support", "admin", "billing")):
                 sender_score += 5
                 flagged.append("suspicious_sender_keyword")
 
@@ -376,9 +387,16 @@ class ThreatAnalyzer:
 
         try:
             ml_model = await get_ml_model()  # type: ignore[call-arg]
-            if ml_model.is_loaded():
+            if ml_model and ml_model.is_loaded():
                 ml_score, ml_confidence = await ml_model.predict(email_body)
                 logger.debug("ML prediction: score=%.2f, confidence=%s", ml_score, ml_confidence)
+
+                if ml_confidence in ("timeout", "error", "unknown"):
+                    # Degradation invariant: ML failure/timeout cannot silently suppress or downgrade base rule threat
+                    combined_threat = max(base_threat, (ml_score * ML_WEIGHT) + (base_threat * PATTERN_WEIGHT))
+                    deg_cat = f"{category}/ML:Degraded" if category != "Safe" else "ML:Degraded"
+                    deg_reason = f"{reasoning}. ML inference degraded ({ml_confidence})."
+                    return min(100.0, max(0.0, combined_threat)), deg_cat, deg_reason
 
                 combined_threat = (ml_score * ML_WEIGHT) + (base_threat * PATTERN_WEIGHT)
 
@@ -386,9 +404,11 @@ class ThreatAnalyzer:
                     category = f"{category}/ML:Phishing" if category != "Safe" else "ML:Phishing"
 
                 reasoning = f"{reasoning}. ML confidence: {ml_confidence} ({ml_score:.1f}%)"
-                return combined_threat, category, reasoning
+                return min(100.0, max(0.0, combined_threat)), category, reasoning
         except Exception as e:
             logger.warning("ML inference failed in analyzer: %s", e)
+            unavail_cat = f"{category}/ML:Unavailable" if category != "Safe" else "ML:Unavailable"
+            return base_threat, unavail_cat, f"{reasoning}. ML unavailable ({type(e).__name__})."
 
         return base_threat, category, reasoning
 

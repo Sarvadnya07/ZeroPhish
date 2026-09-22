@@ -2,15 +2,15 @@
 
 ## 🚀 Quick Start Commands
 
-### Start Backend Server
+### Start Backend Server (Canonical Gateway - Port 8001)
 ```powershell
-# Automated (Recommended)
-.\start_backend.ps1
+# From Backend directory:
+python gateway.py
 
-# Manual
-cd tier_2
-python main.py
+# Or using uvicorn:
+uvicorn gateway:app --host 127.0.0.1 --port 8001
 ```
+
 
 ### Test Installation
 ```powershell

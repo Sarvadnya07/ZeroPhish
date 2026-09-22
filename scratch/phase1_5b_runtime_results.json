@@ -1,0 +1,52 @@
+{
+  "health_check": "PASSED",
+  "benign_scan": {
+    "verdict": "SAFE",
+    "final_score": 9.0,
+    "tier3": {
+      "score": 50,
+      "category": "AI_TIMEOUT",
+      "reasoning": "Semantic analysis failed (AI_TIMEOUT): Gemini call timed out after 2.5s.",
+      "flagged_phrases": [],
+      "confidence": 0.0,
+      "requires_visual_check": false,
+      "execution_time_ms": 3014.691899999889,
+      "status": "timeout",
+      "provider": "gemini",
+      "model": "gemini-1.5-flash"
+    }
+  },
+  "suspicious_scan": {
+    "verdict": "SUSPICIOUS",
+    "final_score": 34.22,
+    "tier3": {
+      "score": 50,
+      "category": "AI_TIMEOUT",
+      "reasoning": "Semantic analysis failed (AI_TIMEOUT): Gemini call timed out after 2.5s.",
+      "flagged_phrases": [],
+      "confidence": 0.0,
+      "requires_visual_check": false,
+      "execution_time_ms": 3012.631699999474,
+      "status": "timeout",
+      "provider": "gemini",
+      "model": "gemini-1.5-flash"
+    }
+  },
+  "critical_scan": {
+    "verdict": "CRITICAL",
+    "final_score": 71.8,
+    "tier3": {
+      "score": 50,
+      "category": "AI_TIMEOUT",
+      "reasoning": "Semantic analysis failed (AI_TIMEOUT): Gemini call timed out after 2.5s.",
+      "flagged_phrases": [],
+      "confidence": 0.0,
+      "requires_visual_check": false,
+      "execution_time_ms": 3030.4329999999027,
+      "status": "timeout",
+      "provider": "gemini",
+      "model": "gemini-1.5-flash"
+    }
+  },
+  "sse_stream": "PASSED"
+}

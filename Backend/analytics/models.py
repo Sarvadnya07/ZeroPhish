@@ -20,6 +20,7 @@ class Verdict(str, Enum):
     SAFE = "SAFE"
     SUSPICIOUS = "SUSPICIOUS"
     CRITICAL = "CRITICAL"
+    UNKNOWN = "UNKNOWN"
 
 
 class ConditionType(str, Enum):

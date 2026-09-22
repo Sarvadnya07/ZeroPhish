@@ -11,6 +11,7 @@ def client():
     from gateway import app
 
     with patch("gateway.get_domain_age", return_value=365), \
+         patch("gateway._finalize_tier3"), \
          patch.dict(os.environ, {"ML_ENABLED": "false"}):
         yield TestClient(app)
 

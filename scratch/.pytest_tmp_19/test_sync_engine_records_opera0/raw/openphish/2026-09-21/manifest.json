@@ -1,0 +1,20 @@
+{
+  "source_name": "OpenPhish Community Feed",
+  "source_key": "openphish",
+  "operational_mode": "AdapterOperationalMode.SAMPLE",
+  "sync_timestamp": "2026-09-21T20:07:45.541247+00:00",
+  "payload_hash": "4025c949fa76d05caa3308a5f16dfd4ef39fa0b7496824943c9d47972a1eda3f",
+  "records_count": 10,
+  "bytes": 2377,
+  "telemetry": {
+    "dns_tls_connect_ms": 0.0,
+    "network_fetch_ms": 0.0,
+    "bytes_downloaded": 2377,
+    "http_status": 200,
+    "content_parse_ms": 0.0,
+    "normalization_ms": 0.0,
+    "deduplication_ms": 0.0,
+    "snapshot_write_ms": 0.0,
+    "total_sync_ms": 0.08
+  }
+}

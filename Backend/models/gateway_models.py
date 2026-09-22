@@ -14,11 +14,15 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, EmailStr, field_validator
 
+from vision.models import VisionAnalysisResult
+from fusion.models import CanonicalEvidence, FusionExplanation
+
 # ---------- Enums ----------
 class Verdict(str, Enum):
     SAFE = "SAFE"
     SUSPICIOUS = "SUSPICIOUS"
     CRITICAL = "CRITICAL"
+    UNKNOWN = "UNKNOWN"
 
 
 class TierStatus(str, Enum):
@@ -43,12 +47,32 @@ class CleanStatus(str, Enum):
 
 # ---------- Tier 1 Models ----------
 class Tier1Result(BaseModel):
-    """Tier 1: Client‑side pre‑validation results from the Chrome extension."""
+    """Tier 1: Heuristic pre-validation results (authoritative server-verified with advisory client signals)."""
 
-    score: int = Field(..., ge=0, le=100, description="Heuristic score (0‑100)")
+    score: int = Field(..., ge=0, le=100, description="Effective Tier 1 heuristic score (0‑100)")
     evidence: List[str] = Field(default_factory=list, description="Evidence strings from heuristics")
     status: CleanStatus = Field(..., description="Clean or Suspicious based on heuristics")
     execution_time_ms: Optional[float] = Field(None, ge=0, description="Execution time in milliseconds")
+    source: str = Field(
+        default="server_verified",
+        description="Authority source: 'server_verified', 'corroborated', or 'degraded'",
+    )
+    server_score: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Authoritative server-computed heuristic score",
+    )
+    client_score: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Client-reported heuristic score (advisory)",
+    )
+    client_advisory: bool = Field(
+        default=False,
+        description="True if client-reported signals were provided",
+    )
 
     @field_validator("evidence")
     @classmethod
@@ -104,20 +128,28 @@ class Tier3Result(BaseModel):
     reasoning: str = Field(..., min_length=1, description="AI explanation")
     flagged_phrases: List[str] = Field(default_factory=list, description="Phrases flagged by AI")
     confidence: Optional[float] = Field(None, ge=0.0, le=1.0, description="AI confidence")
+    requires_visual_check: bool = Field(default=False, description="Flag indicating need for pixel-level visual verification")
     execution_time_ms: Optional[float] = Field(None, ge=0, description="Execution time in milliseconds")
     status: TierStatus = Field(default=TierStatus.COMPLETE, description="Status of AI processing")
+    provider: Optional[str] = Field(default=None, description="AI provider that produced result")
+    model: Optional[str] = Field(default=None, description="Specific model utilized")
 
 
 # ---------- Gateway Request ----------
 class GatewayScanRequest(BaseModel):
     """Request to gateway with Tier 1 results and email data."""
 
-    # Tier 1 data
-    tier1_score: int = Field(..., ge=0, le=100, description="Tier 1 heuristic score")
-    tier1_evidence: List[str] = Field(
+    # Tier 1 data (optional client-reported advisory signals)
+    tier1_score: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Optional client-reported heuristic score (advisory only)",
+    )
+    tier1_evidence: Optional[List[str]] = Field(
         default_factory=list,
         max_length=50,
-        description="Evidence from client‑side analysis",
+        description="Optional client-reported evidence strings (advisory only)",
     )
 
     # Email data
@@ -127,10 +159,22 @@ class GatewayScanRequest(BaseModel):
 
     # Optional metadata
     subject: Optional[str] = Field(None, max_length=500, description="Email subject line")
+    screenshot_b64: Optional[str] = Field(None, description="Optional base64-encoded screenshot for visual analysis")
     timestamp: Optional[datetime] = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="Request timestamp (UTC)",
     )
+
+    @field_validator("sender", mode="before")
+    @classmethod
+    def validate_sender(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            import email.utils
+            _, email_addr = email.utils.parseaddr(v)
+            if email_addr:
+                return email_addr.strip()
+            return v.strip()
+        return v
 
     @field_validator("body")
     @classmethod
@@ -186,14 +230,23 @@ class GatewayScanResponse(BaseModel):
     tier1: Tier1Result
     tier2: Tier2Result
     tier3: Optional[Tier3Result] = None
+    vision: Optional[VisionAnalysisResult] = Field(default=None, description="Vision analysis result")
 
     # Status
     tier3_status: TierStatus = Field(default=TierStatus.PROCESSING)
     complete: bool = False
-    layers_completed: int = Field(default=0, ge=0, le=3, description="Number of tiers completed")
+    layers_completed: int = Field(default=0, ge=0, le=4, description="Number of tiers completed")
 
     # Evidence and metadata
     combined_evidence: List[str] = Field(default_factory=list, description="Aggregated evidence")
+    canonical_evidence: List[CanonicalEvidence] = Field(
+        default_factory=list,
+        description="Normalized structured evidence items",
+    )
+    explanation: Optional[FusionExplanation] = Field(
+        default=None,
+        description="Structured explainability report",
+    )
     weights: ScoringWeights = Field(default_factory=ScoringWeights)
     cached: bool = False
     sender: Optional[EmailStr] = None
@@ -216,11 +269,13 @@ class ScanStatusResponse(BaseModel):
 
     scan_id: str = Field(..., min_length=1)
     complete: bool
-    layers_completed: int = Field(default=0, ge=0, le=3)
+    layers_completed: int = Field(default=0, ge=0, le=4)
     tier3_status: TierStatus
     final_score: Optional[float] = Field(None, ge=0.0, le=100.0)
     verdict: Verdict
     tier3: Optional[Tier3Result] = None
+    vision: Optional[VisionAnalysisResult] = None
+    explanation: Optional[FusionExplanation] = None
     estimated_completion_ms: Optional[int] = Field(None, ge=0, description="Estimated remaining time")
 
 

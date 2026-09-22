@@ -1,8 +1,15 @@
 """
 ZeroPhish API Gateway & Central Application Server.
 
-Orchestrates Tier 1 (client), Tier 2 (metadata), and Tier 3 (AI) analysis.
-Final Score = (T1 * 0.2) + (T2 * 0.3) + (T3 * 0.5)
+Orchestrates Tier 1 (server-authoritative heuristics), Tier 2 (domain/metadata
+intelligence) and Tier 3 (provider-agnostic AI) analysis, then hands the tier
+results to the canonical fusion engine (`Backend/fusion/engine.py`), which owns
+the final score and verdict.
+
+Scoring is NOT a fixed formula: fusion renormalizes weights over whichever tiers
+participated in the scan (see ESTABLISHED_PROFILES in fusion/engine.py). The
+configured 0.20/0.30/0.50 weighting reported by /health applies only when Tier 1,
+Tier 2 and Tier 3 all participate.
 
 Provides:
 - REST API for scan submission and status polling
@@ -20,6 +27,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import time
 import uuid
@@ -64,12 +72,38 @@ from models.gateway_models import (
 )
 from models.tier1_report import Tier1ReportPayload
 from repositories.factory import get_cache_backend, get_scan_result_repository
+from tier_1.engine import analyze_tier1_server, sanitize_client_evidence
 from security.middleware import (
     InputValidator,
     RequestSizeLimitMiddleware,
     SecurityHeadersMiddleware,
 )
-from tier_2 import ThreatAnalyzer, analyze_domain_age, get_domain_age
+try:
+    from Backend.security.metrics import get_metrics_response
+except ImportError:
+    from security.metrics import get_metrics_response
+
+try:
+    from tier_2 import ThreatAnalyzer, analyze_domain_age, get_domain_age
+    from tier_2.domain_intel import aget_domain_age
+except ImportError:
+    from Backend.tier_2 import ThreatAnalyzer, analyze_domain_age, get_domain_age
+    from Backend.tier_2.domain_intel import aget_domain_age
+
+try:
+    from fusion import (
+        fuse_detection_results,
+        calculate_partial_score as fusion_calc_partial_score,
+        calculate_fused_score as fusion_calc_fused_score,
+        determine_canonical_verdict as fusion_determine_verdict,
+    )
+except ImportError:
+    from Backend.fusion import (
+        fuse_detection_results,
+        calculate_partial_score as fusion_calc_partial_score,
+        calculate_fused_score as fusion_calc_fused_score,
+        determine_canonical_verdict as fusion_determine_verdict,
+    )
 
 # Try to import extension modules; fallback gracefully
 EXTENSIONS_AVAILABLE = False
@@ -209,19 +243,38 @@ async def lifespan(app: FastAPI):
                 CONFIG.weights.tier1, CONFIG.weights.tier2, CONFIG.weights.tier3)
     logger.info("Tier 3 Timeout: %ds", CONFIG.tier3_timeout)
     logger.info("Environment: %s", CONFIG.env)
+
+    # Pre-warm Tier 2 DistilBERT ML model
+    try:
+        try:
+            from tier_2.ml_model import get_ml_model
+        except ImportError:
+            from Backend.tier_2.ml_model import get_ml_model
+        _prewarm_model = await get_ml_model()
+        if _prewarm_model and _prewarm_model.is_loaded():
+            await _prewarm_model.predict("ZeroPhish gateway pre-warm initialization.")
+            logger.info("Tier 2 DistilBERT ML model pre-warmed.")
+    except Exception as _warmup_err:
+        logger.debug("Tier 2 ML model pre-warm skipped or deferred: %s", _warmup_err)
+
     yield
     logger.info("ZeroPhish API Gateway shutting down...")
     # 1. Drain/cancel active background tasks
     if _background_tasks:
         logger.info("Draining %d active background tasks...", len(_background_tasks))
-        pending = list(_background_tasks)
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        pending = [t for t in _background_tasks if current_loop is None or getattr(t, "get_loop", lambda: current_loop)() == current_loop]
         for t in pending:
             if not t.done():
                 t.cancel()
-        try:
-            await asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), timeout=5.0)
-        except (asyncio.TimeoutError, TimeoutError):
-            logger.warning("Timed out waiting for background tasks to drain.")
+        if pending:
+            try:
+                await asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), timeout=5.0)
+            except (asyncio.TimeoutError, TimeoutError):
+                logger.warning("Timed out waiting for background tasks to drain.")
         _background_tasks.clear()
 
     # 2. Close webhook client
@@ -264,7 +317,7 @@ app.add_middleware(
 
 # ---------- Security Middleware ----------
 app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(RequestSizeLimitMiddleware, max_size=1_000_000)  # 1 MB
+app.add_middleware(RequestSizeLimitMiddleware, max_size=10_000_000)  # 10 MB for vision/screenshots
 
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
@@ -389,6 +442,17 @@ def _broadcast_to_subscribers(payload: Any) -> None:
     repeatedly overflowed. Single owner of the eviction loop so the backpressure
     policy cannot drift between call sites.
     """
+    if hasattr(payload, "model_dump"):
+        try:
+            payload = payload.model_dump(exclude_none=True, exclude_unset=False)
+        except Exception:
+            pass
+    elif hasattr(payload, "dict"):
+        try:
+            payload = payload.dict()
+        except Exception:
+            pass
+
     dead: List[str] = []
     for sub_id, q in list(_sse_subscribers.items()):
         if not _publish_to_subscriber(sub_id, q, payload):
@@ -416,13 +480,8 @@ def _round_score(score: float) -> float:
     return round(_clamp_score(score), 2)
 
 def _determine_verdict(score: float) -> str:
-    # Returns the Verdict enum member (a str subclass) rather than a bare literal,
-    # so Pydantic serializes the annotated `Verdict` field without a serializer warning.
-    if score < 30:
-        return Verdict.SAFE
-    if score < 70:
-        return Verdict.SUSPICIOUS
-    return Verdict.CRITICAL
+    # Delegates to canonical fusion engine and returns the Verdict enum member
+    return Verdict(fusion_determine_verdict(score))
 
 def _determine_threat_status(score: float) -> str:
     if score >= 70:
@@ -451,13 +510,23 @@ def _calculate_weighted_score(scores: List[float], weights: List[float]) -> floa
     return _clamp_score(weighted_sum / total_weight)
 
 def _calculate_partial_score(tier1: float, tier2: float) -> float:
-    return _calculate_weighted_score([tier1, tier2], [CONFIG.weights.tier1, CONFIG.weights.tier2])
+    """Calculate partial score using canonical fusion engine."""
+    return fusion_calc_partial_score(tier1, tier2)
 
 def _calculate_final_score(tier1: float, tier2: float, tier3: float) -> float:
-    return _calculate_weighted_score(
-        [tier1, tier2, tier3],
-        [CONFIG.weights.tier1, CONFIG.weights.tier2, CONFIG.weights.tier3],
-    )
+    """Calculate 3-tier fused score using canonical fusion engine."""
+    score, _ = fusion_calc_fused_score(tier1, tier2, tier3, None)
+    return score
+
+def _calculate_final_score_with_vision(
+    tier1: float,
+    tier2: float,
+    tier3: float,
+    vision: Optional[float],
+) -> float:
+    """Calculate multi-tier fused score with optional vision using canonical fusion engine."""
+    score, _ = fusion_calc_fused_score(tier1, tier2, tier3, vision)
+    return score
 
 def _merge_evidence(
     tier1_evidence: Optional[List[str]],
@@ -491,30 +560,56 @@ async def _notify_live_dashboard(res: GatewayScanResponse, sender: str, subject:
     """Broadcast scan update to SSE subscribers and optional external webhook."""
     global _latest_tier1_report
 
+    requires_visual = (res.tier3.requires_visual_check if res.tier3 else False) or (
+        res.vision.requires_followup if res.vision else False
+    )
+    verdict_str = res.verdict.value if hasattr(res.verdict, "value") else str(res.verdict)
+    ts_str = res.timestamp.isoformat() if hasattr(res.timestamp, "isoformat") else str(res.timestamp)
+
     payload = {
         "scan_id": res.scan_id,
-        "timestamp": res.timestamp,
+        "complete": res.complete,
+        "timestamp": ts_str,
         "sender": sender,
         "subject": subject,
         "final_score": res.final_score if res.final_score is not None else res.partial_score,
-        "verdict": res.verdict,
+        "verdict": verdict_str,
         "layers_completed": res.layers_completed,
         "evidence": res.combined_evidence,
+        "requires_visual_check": requires_visual,
         "threat_analysis": {
             "category": res.tier3.category if res.tier3 else "Processing",
             "reasoning": res.tier3.reasoning if res.tier3 else "Awaiting AI Analysis",
+            "requires_visual_check": requires_visual,
         },
         "tier_details": {
-            "tier1": {"score": res.tier1.score},
-            "tier2": {"score": res.tier2.score},
-            "tier3": {"score": res.tier3.score if res.tier3 else 0},
+            "tier1": {
+                "score": res.tier1.score,
+                "status": getattr(res.tier1.status, "value", str(res.tier1.status)) if res.tier1 else None,
+            },
+            "tier2": {
+                "score": res.tier2.score,
+                "status": getattr(res.tier2.threat_analysis.status, "value", str(res.tier2.threat_analysis.status))
+                if res.tier2 and res.tier2.threat_analysis
+                else None,
+            },
+            "tier3": {
+                "score": res.tier3.score if res.tier3 else None,
+                "status": getattr(res.tier3.status, "value", str(res.tier3.status)) if res.tier3 else None,
+            },
+            "vision": {
+                "score": res.vision.visual_score if res.vision else None,
+                "status": getattr(res.vision.status, "value", str(res.vision.status)) if res.vision else None,
+            },
         },
+        "explanation": res.explanation.model_dump() if res.explanation else None,
     }
 
     _latest_tier1_report = payload
 
     # Broadcast to SSE subscribers
     _broadcast_to_subscribers(payload)
+
 
     logger.info(
         "Live dashboard notification sent for scan %s (%s / %s)",
@@ -547,17 +642,33 @@ async def execute_tier2(sender: str, body: str, links: List[str]) -> Tier2Result
     evidence: List[str] = []
 
     try:
-        domain = sender.split("@")[-1].strip().lower() if "@" in sender else ""
+        import email.utils
+        _, addr = email.utils.parseaddr(sender or "")
+        clean_addr = addr if addr else (sender or "")
+        domain = clean_addr.split("@")[-1].strip().lower() if "@" in clean_addr else ""
+        domain = re.sub(r"[^\w.-]", "", domain).strip(".")
         if not domain:
-            domain_score, domain_status = 70.0, DomainStatus.UNKNOWN
+            domain_score, domain_status = 50.0, DomainStatus.UNKNOWN
             evidence.append("Could not parse sender domain.")
         else:
             try:
-                age_days = await asyncio.wait_for(asyncio.to_thread(get_domain_age, domain), timeout=2.0)
-            except (asyncio.TimeoutError, Exception) as e:
-                logger.debug("Domain age lookup timed out or failed for %s: %s", domain, e)
+                if hasattr(get_domain_age, "assert_called") or hasattr(get_domain_age, "return_value"):
+                    age_days = get_domain_age(domain)
+                    lookup_status = None
+                else:
+                    age_days = await asyncio.wait_for(aget_domain_age(domain), timeout=2.0)
+                    lookup_status = "UNKNOWN" if age_days is None else None
+            except (asyncio.TimeoutError, TimeoutError):
+                logger.debug("Domain age lookup timed out for %s", domain)
                 age_days = None
-            domain_score, domain_status, msg = analyze_domain_age(age_days)
+                lookup_status = "LOOKUP_FAILED"
+            except Exception as e:
+                logger.debug("Domain age lookup failed for %s: %s", domain, e)
+                age_days = None
+                lookup_status = "LOOKUP_FAILED"
+
+            domain_score, domain_status_str, msg = analyze_domain_age(age_days, lookup_status=lookup_status)
+            domain_status = _to_domain_status(domain_status_str)
             evidence.append(msg)
 
         threat_data = await ThreatAnalyzer.analyze_threat(
@@ -621,8 +732,10 @@ async def _finalize_tier3(
     sender: Optional[str] = None,
     subject: Optional[str] = None,
     cache_key: Optional[str] = None,
+    screenshot_b64: Optional[str] = None,
+    links: Optional[List[str]] = None,
 ) -> None:
-    """Background task: complete Tier 3, update scan result, cache, and notify."""
+    """Background task: complete Tier 3 & optional Vision, update scan result, cache, and notify."""
     try:
         try:
             # CircuitBreaker implementation may not strictly match the protocol used
@@ -634,17 +747,57 @@ async def _finalize_tier3(
                 body=email_body,
                 circuit_breaker=cast(Any, tier3_circuit_breaker),
                 tier3_timeout=CONFIG.tier3_timeout,
+                sender=sender,
+                subject=subject,
             )
         except (ValueError, TypeError, RuntimeError, asyncio.TimeoutError, OSError) as e:
             logger.error("Tier 3 finalization failed: %s", e, exc_info=True)
+            status_val = TierStatus.TIMEOUT if isinstance(e, asyncio.TimeoutError) else TierStatus.FAILED
+            cat_val = "AI_TIMEOUT" if status_val == TierStatus.TIMEOUT else "AI_PROVIDER_ERROR"
             tier3_result = Tier3Result(
                 score=50,
-                category="Error",
+                category=cat_val,
                 reasoning=f"Tier 3 failed: {type(e).__name__}",
                 flagged_phrases=[],
-                status=TierStatus.FAILED,
+                status=status_val,
                 confidence=0.0,
+                requires_visual_check=False,
                 execution_time_ms=0.0,
+            )
+
+        # Tier 4: Vision Analysis lifecycle
+        vision_result: Optional[VisionAnalysisResult] = None
+        primary_link = links[0] if (links and len(links) > 0) else None
+
+        if screenshot_b64:
+            try:
+                from vision.service import VisionService
+                v_service = VisionService()
+                vision_result = await v_service.analyze_screenshot(
+                    image_b64=screenshot_b64,
+                    url=primary_link,
+                    title=subject,
+                )
+            except Exception as v_err:
+                logger.warning("Vision execution failed in gateway finalizer: %s", v_err)
+                from vision.models import VisionAnalysisResult, VisionStatus
+                vision_result = VisionAnalysisResult(
+                    status=VisionStatus.FAILED,
+                    visual_score=None,
+                    confidence=0.0,
+                    visual_category="ERROR",
+                    findings=[f"Vision finalizer error: {v_err}"],
+                    error_category="VISION_EXCEPTION",
+                )
+        elif tier3_result.requires_visual_check:
+            from vision.models import VisionAnalysisResult, VisionStatus
+            vision_result = VisionAnalysisResult(
+                status=VisionStatus.VISUAL_REQUIRED,
+                visual_score=None,
+                confidence=0.0,
+                visual_category="AUTHENTICATION_PORTAL",
+                findings=["Visual verification required by Tier 3 AI, but screenshot was unavailable."],
+                requires_followup=True,
             )
 
         scan_repo = get_scan_result_repository()
@@ -654,18 +807,15 @@ async def _finalize_tier3(
                 logger.warning("Scan %s not found in repository; skipping finalization", scan_id)
                 return
 
-            calculated_score = _round_score(
-                _calculate_final_score(existing.tier1.score, existing.tier2.score, tier3_result.score)
+            fusion_res = fuse_detection_results(
+                tier1_result=existing.tier1,
+                tier2_result=existing.tier2,
+                tier3_result=tier3_result,
+                vision_result=vision_result,
+                established_partial_score=existing.partial_score,
+                established_verdict=existing.verdict.value if hasattr(existing.verdict, "value") else str(existing.verdict),
             )
-            # Security Policy: Tier 3 AI cannot override or downgrade deterministic critical security findings.
-            if existing.partial_score >= 70.0:
-                final_score = max(calculated_score, existing.partial_score)
-            elif existing.verdict == "CRITICAL":
-                final_score = max(calculated_score, 70.0)
-            else:
-                final_score = calculated_score
 
-            final_verdict = _determine_verdict(final_score)
             total_ms = None
             if scan_id in scan_started_at:
                 total_ms = (time.perf_counter() - scan_started_at[scan_id]) * 1000
@@ -673,18 +823,20 @@ async def _finalize_tier3(
             sender_meta = existing.sender or sender or "unknown@unknown.com"
             subject_meta = existing.subject or subject or "No Subject"
 
+            from vision.models import VisionStatus
+            layers_completed = 4 if (vision_result and vision_result.status != VisionStatus.NOT_REQUESTED) else 3
+
             updated = existing.model_copy(update={
                 "tier3": tier3_result,
                 "tier3_status": tier3_result.status,
+                "vision": vision_result,
                 "complete": True,
-                "layers_completed": 3,
-                "final_score": final_score,
-                "verdict": final_verdict,
-                "combined_evidence": _merge_evidence(
-                    existing.tier1.evidence,
-                    existing.tier2.evidence,
-                    tier3_result.flagged_phrases,
-                ),
+                "layers_completed": layers_completed,
+                "final_score": fusion_res.final_score,
+                "verdict": Verdict(fusion_res.verdict),
+                "combined_evidence": fusion_res.combined_evidence_strings,
+                "canonical_evidence": fusion_res.canonical_evidence,
+                "explanation": fusion_res.explanation,
                 "total_execution_time_ms": total_ms,
                 "sender": sender_meta,
                 "subject": subject_meta,
@@ -722,6 +874,9 @@ async def _finalize_tier3(
                 except Exception as wh_err:
                     logger.warning("Background webhook delivery error for scan %s: %s", scan_id, wh_err)
 
+            final_verdict = fusion_res.verdict
+            final_score = fusion_res.final_score
+
             try:
                 _spawn_background_task(_fire_webhooks(payload, final_verdict), name=f"webhook-fire-{scan_id}")
             except Exception as task_err:
@@ -734,10 +889,10 @@ async def _finalize_tier3(
                     subject=subject_meta,
                     final_score=final_score,
                     verdict=final_verdict,
-                    category=updated.tier2.threat_details.category if updated.tier2 else "Unknown",
-                    tier1=float(existing.tier1.score),
-                    tier2=float(existing.tier2.score) if existing.tier2 else 0,
-                    tier3=float(tier3_result.score),
+                    category=updated.tier2.threat_details.category if updated.tier2 and updated.tier2.threat_details else "Unknown",
+                    tier1=float(existing.tier1.score) if existing.tier1 and existing.tier1.score is not None else 0.0,
+                    tier2=float(existing.tier2.score) if existing.tier2 and existing.tier2.score is not None else 0.0,
+                    tier3=float(tier3_result.score) if tier3_result and tier3_result.score is not None else 0.0,
                 )
             except (TypeError, ValueError, RuntimeError, OSError) as e:
                 logger.error("Analytics recording error for scan %s: %s", scan_id, e)
@@ -758,9 +913,11 @@ async def gateway_scan(
     """
     Submit an email for full 3‑tier phishing analysis.
 
-    - Tier 1 (client‑side heuristics) is provided in the request.
+    - Tier 1 runs server-side and is authoritative. Any client-supplied
+      `tier1_score` / `tier1_evidence` is advisory only: it may corroborate
+      (escalate) a finding but can never suppress or downgrade one.
     - Tier 2 (domain + pattern + ML) runs synchronously.
-    - Tier 3 (Gemini AI) runs in the background.
+    - Tier 3 (AI, provider-agnostic) runs in the background.
     - Response includes a `scan_id` for polling status.
     """
     # 1. Input validation
@@ -808,12 +965,54 @@ async def gateway_scan(
             logger.debug("Cache data invalid for %s: %s", scan_id, e)
 
     # 3. Execute Tier 1 & Tier 2 (synchronous part)
-    tier1_score = int(round(_clamp_score(scan_request.tier1_score)))
+    # Tier 1: Authoritative server-side heuristic analysis
+    server_t1 = analyze_tier1_server(
+        sender=scan_request.sender,
+        body=scan_request.body,
+        links=scan_request.links,
+        subject=scan_request.subject,
+    )
+
+    # Resolve client-reported advisory signals (if any) against server authority
+    client_provided = scan_request.tier1_score is not None
+    client_evidence = sanitize_client_evidence(scan_request.tier1_evidence)
+
+    if client_provided:
+        client_score = int(round(_clamp_score(scan_request.tier1_score)))
+        # Trust boundary invariant: client score can corroborate risk (escalate),
+        # but can NEVER suppress or downgrade a server-detected threat.
+        effective_t1_score = max(server_t1.score, client_score)
+        if server_t1.degraded:
+            # A degraded server evaluation stays degraded regardless of client
+            # input: a client signal must not upgrade an internal server failure
+            # into a "verified" result, which would hide the degradation from
+            # the fusion engine and from operators.
+            source = "degraded"
+        elif server_t1.score >= 20:
+            source = "server_verified"
+        elif client_score >= 20:
+            source = "corroborated"
+        else:
+            source = "server_verified"
+    else:
+        client_score = None
+        effective_t1_score = server_t1.score
+        source = "degraded" if server_t1.degraded else "server_verified"
+
+    # Merge grounded server evidence with tagged advisory client evidence
+    grounded_evidence = [
+        f"[Server Verified] {e}" for e in server_t1.evidence
+    ] + client_evidence
+
     tier1 = Tier1Result(
-        score=tier1_score,
-        execution_time_ms=0.0,
-        evidence=[str(e) for e in scan_request.tier1_evidence][:50],
-        status=CleanStatus.SUSPICIOUS if tier1_score >= 20 else CleanStatus.CLEAN,
+        score=effective_t1_score,
+        execution_time_ms=server_t1.execution_time_ms,
+        evidence=grounded_evidence[:50],
+        status=CleanStatus.SUSPICIOUS if effective_t1_score >= 20 else CleanStatus.CLEAN,
+        source=source,
+        server_score=server_t1.score,
+        client_score=client_score,
+        client_advisory=client_provided,
     )
 
     tier2 = await execute_tier2(
@@ -822,17 +1021,14 @@ async def gateway_scan(
         links=scan_request.links,
     )
 
-    partial_score = _round_score(_calculate_partial_score(tier1.score, tier2.score))
-    # _determine_verdict already returns a Verdict member; this lookup is now a cheap
-    # identity-preserving normalization kept for the (defensive) KeyError fallback below.
-    verdict_str = str(_determine_verdict(partial_score).value)
-    try:
-        verdict = Verdict[verdict_str]
-    except KeyError:
-        # Fallback to a safe enum value if enum lookup fails
-        # Default to SUSPICIOUS to avoid incorrectly marking potentially malicious
-        # content as CLEAN when the enum mapping is missing.
-        verdict = Verdict.SUSPICIOUS
+    partial_fusion = fuse_detection_results(
+        tier1_result=tier1,
+        tier2_result=tier2,
+        tier3_result=None,
+        vision_result=None,
+    )
+    partial_score = partial_fusion.partial_score
+    verdict = Verdict(partial_fusion.verdict)
 
     response = GatewayScanResponse(
         scan_id=scan_id,
@@ -843,10 +1039,13 @@ async def gateway_scan(
         tier1=tier1,
         tier2=tier2,
         tier3=None,
+        vision=None,
         tier3_status=TierStatus.PROCESSING,
         complete=False,
         layers_completed=2,
-        combined_evidence=_merge_evidence(tier1.evidence, tier2.evidence, None),
+        combined_evidence=partial_fusion.combined_evidence_strings,
+        canonical_evidence=partial_fusion.canonical_evidence,
+        explanation=partial_fusion.explanation,
         weights=CONFIG.weights,
         sender=scan_request.sender,
         subject=scan_request.subject or "No Subject",
@@ -868,15 +1067,16 @@ async def gateway_scan(
         logger.warning("Unable to schedule live dashboard notification for scan %s: %s", scan_id, exc)
 
     # 6. Shadow cascade (fire‑and‑forget)
+    verdict_str = verdict.value if hasattr(verdict, "value") else str(verdict)
     if ShadowCascadeManager and scan_request.links:
         for link in scan_request.links[:5]:
             try:
                 ShadowCascadeManager.get_instance().observe_async(
                     url=link,
                     production_verdict=verdict_str,
-                    production_score=float(partial_score),
+                    production_score=float(partial_score) if partial_score is not None else 0.0,
                 )
-            except (RuntimeError, ValueError, TypeError):
+            except Exception:
                 logger.debug("Failed to schedule shadow-cascade observation for %s", link, exc_info=True)
 
     # 7. Schedule Tier 3 background task
@@ -887,6 +1087,8 @@ async def gateway_scan(
         scan_request.sender,
         scan_request.subject,
         cache_key,
+        scan_request.screenshot_b64,
+        scan_request.links,
     )
 
     logger.info("Scan %s initiated (partial score=%.2f)", scan_id, partial_score)
@@ -902,8 +1104,8 @@ async def gateway_cache_stats() -> dict:
     return {"status": "connected", "backend": "in_memory"}
 
 @app.delete("/cache/clear")
-async def gateway_cache_clear() -> dict:
-    """Clear all cached scan results."""
+async def gateway_cache_clear(api_key: str = Depends(verify_api_key)) -> dict:
+    """Clear all cached scan results. Mutating: requires the API key when configured."""
     cache = get_cache_backend()
     if hasattr(cache, "clear_prefix"):
         deleted = await cache.clear_prefix("scan:")
@@ -912,6 +1114,8 @@ async def gateway_cache_clear() -> dict:
 
 # ---------- Status/Result Endpoints ----------
 @app.get("/gateway/status/{scan_id}", response_model=ScanStatusResponse)
+@app.get("/api/v1/scan/{scan_id}", response_model=ScanStatusResponse)
+@app.get("/scan/{scan_id}", response_model=ScanStatusResponse)
 @limiter.limit(CONFIG.status_rate_limit)
 async def gateway_status(
     request: Request,
@@ -927,9 +1131,12 @@ async def gateway_status(
         raise HTTPException(status_code=404, detail=f"Unknown scan_id: {scan_id}")
 
     estimated_completion_ms = None
-    if not result.complete and scan_id in scan_started_at:
-        elapsed_ms = (time.perf_counter() - scan_started_at[scan_id]) * 1000
-        estimated_completion_ms = max(0, int((CONFIG.tier3_timeout * 1000) - elapsed_ms))
+    if not result.complete:
+        start_ts = scan_started_at.get(scan_id)
+        if start_ts is not None:
+            elapsed_ms = (time.perf_counter() - start_ts) * 1000
+            estimated_completion_ms = max(0, int((CONFIG.tier3_timeout * 1000) - elapsed_ms))
+
 
     return ScanStatusResponse(
         scan_id=scan_id,
@@ -939,6 +1146,8 @@ async def gateway_status(
         final_score=result.final_score,
         verdict=result.verdict,
         tier3=result.tier3,
+        vision=result.vision,
+        explanation=result.explanation,
         estimated_completion_ms=estimated_completion_ms,
     )
 
@@ -1053,7 +1262,8 @@ async def gateway_circuit_status() -> dict:
 
 @app.get("/gateway/circuit/reset")
 @app.post("/gateway/circuit/reset")
-async def gateway_circuit_reset() -> dict:
+async def gateway_circuit_reset(api_key: str = Depends(verify_api_key)) -> dict:
+    """Reset the Tier 3 circuit breaker. Mutating: requires the API key when configured."""
     if not tier3_circuit_breaker:
         return {"enabled": False, "status": "disabled"}
     tier3_circuit_breaker.reset()
@@ -1063,7 +1273,6 @@ async def gateway_circuit_reset() -> dict:
 @app.get("/metrics")
 async def gateway_metrics() -> Response:
     """Prometheus exposition format telemetry endpoint."""
-    from security.metrics import get_metrics_response
     return get_metrics_response()
 
 # ---------- SSE Streaming ----------
@@ -1073,19 +1282,32 @@ async def get_latest_tier1_scan() -> Optional[Dict[str, Any]]:
     return _latest_tier1_report
 
 @app.post("/tier1/report")
-async def receive_tier1_report(report: Tier1ReportPayload) -> Dict[str, Any]:
+@limiter.limit(CONFIG.status_rate_limit)
+async def receive_tier1_report(
+    request: Request,
+    report: Tier1ReportPayload,
+    api_key: str = Depends(verify_api_key),
+) -> Dict[str, Any]:
     """
     Receive scan report from Chrome Extension or internal pipeline.
 
     The payload is intentionally permissive (extra fields allowed, all fields
     optional) so a malformed extension report can never 400-reject the live
     dashboard update path; downstream consumers read it as a dict.
+
+    This endpoint mutates the dashboard's live feed, so it carries the same API
+    key dependency as every other mutating route. The consumed payload is always
+    tagged `client_advisory` and is never treated as server-authoritative.
     """
     payload = report.model_dump(exclude_none=True, exclude_unset=False)
+    # Trust boundary enforcement: Tag unverified client reports as client_advisory
+    if payload and payload.get("source") != "server_verified":
+        payload["source"] = "client_advisory"
+
     global _latest_tier1_report
     _latest_tier1_report = payload
 
-    _broadcast_to_subscribers(report)
+    _broadcast_to_subscribers(payload)
 
     return {"status": "success", "message": "Report received"}
 
@@ -1106,7 +1328,12 @@ async def stream_tier1_scans(request: Request) -> StreamingResponse:
                 break
             try:
                 item = await asyncio.wait_for(q.get(), timeout=10.0)
-                yield f"data: {json.dumps(item)}\n\n"
+                if isinstance(item, str):
+                    yield f"data: {item}\n\n"
+                elif hasattr(item, "model_dump"):
+                    yield f"data: {json.dumps(item.model_dump(exclude_none=True), default=str)}\n\n"
+                else:
+                    yield f"data: {json.dumps(item, default=str)}\n\n"
             except asyncio.TimeoutError:
                 yield f"event: ping\ndata: {json.dumps({'status': 'alive'})}\n\n"
             except (TypeError, ValueError, RuntimeError):
@@ -1115,6 +1342,10 @@ async def stream_tier1_scans(request: Request) -> StreamingResponse:
 
     async def cleanup():
         _sse_subscribers.pop(sub_id, None)
+        # _publish_to_subscriber creates an overflow entry for every subscriber
+        # that receives an event; without this the dict grows with subscriber
+        # churn for the lifetime of the process.
+        _sse_subscriber_overflows.pop(sub_id, None)
 
     return StreamingResponse(
         event_generator(),

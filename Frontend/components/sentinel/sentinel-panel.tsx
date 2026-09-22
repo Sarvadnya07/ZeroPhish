@@ -11,7 +11,7 @@ import { TacticalActions } from "./tactical-actions"
 import { TechLogs } from "./tech-logs"
 import { LIVE_IDLE_STATE } from "@/lib/sentinel-data"
 import type { ScanResult } from "@/lib/sentinel-data"
-import { tier1ReportToScanResult, type Tier1Report } from "@/lib/live-tier1"
+import { gatewayScanResponseToScanResult, tier1ReportToScanResult, type GatewayScanResponse, type Tier1Report } from "@/lib/live-tier1"
 
 export function SentinelPanel() {
   const [scanData, setScanData] = useState<ScanResult>(LIVE_IDLE_STATE)
@@ -31,14 +31,19 @@ export function SentinelPanel() {
     let latestPollTimer: ReturnType<typeof setInterval> | null = null
     let lastSeenEventKey = ""
 
-    function eventKey(report: Tier1Report): string {
-      return String(report?.event_id || `${report?.scan_id || "unknown"}|${report?.created_at || "unknown"}`)
+    function eventKey(report: GatewayScanResponse | Tier1Report): string {
+      const rep = report as Partial<GatewayScanResponse & Tier1Report>
+      const ts = rep?.timestamp || rep?.created_at || "unknown"
+      const status = rep?.complete ? "complete" : `L${rep?.layers_completed ?? 0}`
+      const score = rep?.final_score ?? rep?.partial_score ?? rep?.tier1?.score ?? ""
+      return String(rep?.event_id || `${rep?.scan_id || "unknown"}|${ts}|${status}|${score}`)
     }
 
-    function applyLiveReport(data: Tier1Report) {
-      setScanData(tier1ReportToScanResult(data))
+    function applyLiveReport(data: GatewayScanResponse | Tier1Report) {
+      setScanData(gatewayScanResponseToScanResult(data))
       lastSeenEventKey = eventKey(data)
     }
+
 
     async function bootstrapLatest() {
       try {

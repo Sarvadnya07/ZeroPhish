@@ -80,7 +80,7 @@ ZeroPhish therefore treats email content, URLs, redirect targets, remote respons
 | SSRF Protection | Outbound destinations and redirects are validated before access |
 | Authentication & RBAC | Protected application routes enforce authentication and role checks |
 | Redis Cache | Optional Redis cache with in-memory fallback |
-| Persistence | SQL-backed repositories for durable application state |
+| Persistence | SQL-backed repositories when `DATABASE_URL` is configured; in-memory otherwise (state does not survive restart in the default configuration) |
 | Circuit Breaker | Protects external Tier 3 dependency paths from repeated failures |
 | SSE Backpressure | Bounded subscriber queues with slow-consumer handling |
 | Background Task Lifecycle | Tracks asynchronous work and bounds shutdown handling |
@@ -107,19 +107,25 @@ Tier 3 uses Gemini for contextual analysis when configured. It can assess phishi
 
 ## Scoring
 
-The current application configuration uses the following default weighting:
+The fused score is computed by `Backend/fusion/engine.py`, which renormalizes
+weights over **whichever tiers actually participated** in the scan. There is no
+single fixed formula; the weight set depends on which tiers produced a result
+(`ESTABLISHED_PROFILES` in that module):
 
-```text
-T1 = 20%
-T2 = 30%
-T3 = 50%
-```
+| Participating tiers | T1 | T2 | T3 | Vision |
+|---|---:|---:|---:|---:|
+| T1 + T2 + T3 + Vision | 0.15 | 0.25 | 0.45 | 0.15 |
+| T1 + T2 + T3 | 0.20 | 0.30 | 0.50 | — |
+| T1 + T2 + Vision (T3 failed/absent) | 0.25 | 0.50 | — | 0.25 |
+| T1 + T2 (partial / pre-Tier-3) | 0.40 | 0.60 | — | — |
 
-Conceptually:
+When a tier fails or is unavailable it is excluded and the remaining weights are
+renormalized to sum to 1.0. A failed advisory tier therefore does not dilute the
+authoritative signal, and `partial_score` (T1+T2 only) uses the 0.40/0.60 profile.
 
-```text
-Final Score = (T1 × 0.20) + (T2 × 0.30) + (T3 × 0.50)
-```
+`ScoringWeights` (T1 0.20 / T2 0.30 / T3 0.50) reported by `/health` is the
+*configured* weighting, i.e. the T1+T2+T3 profile — it is not the computation for
+every scan.
 
 The current configured verdict ranges are:
 
@@ -128,6 +134,10 @@ The current configured verdict ranges are:
 | `0–29` | SAFE |
 | `30–69` | SUSPICIOUS |
 | `70–100` | CRITICAL |
+| (none) | UNKNOWN — authoritative tiers did not produce a usable result |
+
+`UNKNOWN` is a distinct outcome, not a synonym for SAFE: it is returned when the
+server-authoritative tiers could not evaluate the scan.
 
 These thresholds are application configuration, not calibrated probabilities of maliciousness.
 

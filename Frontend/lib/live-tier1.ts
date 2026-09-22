@@ -20,19 +20,27 @@ export interface GatewayScanResponse {
   subject?: string
   final_score?: number | null
   partial_score?: number | null
-  verdict?: "SAFE" | "SUSPICIOUS" | "CRITICAL" | string
+  verdict?: "SAFE" | "SUSPICIOUS" | "CRITICAL" | "UNKNOWN" | string
   layers_completed?: number
   complete?: boolean
   evidence?: string[]
+  combined_evidence?: string[]
+  requires_visual_check?: boolean
   threat_analysis?: {
     category?: string
     reasoning?: string
+    requires_visual_check?: boolean
   }
   tier_details?: {
     tier1?: { score: number; status?: string }
     tier2?: { score: number; status?: string }
-    tier3?: { score: number; status?: string }
+    tier3?: { score: number | null; status?: string }
+    vision?: { score: number | null; status?: string }
   }
+  tier1?: { score: number; status?: string; evidence?: string[] }
+  tier2?: { score: number; status?: string; evidence?: string[] }
+  tier3?: { score: number | null; status?: string; category?: string; reasoning?: string; requires_visual_check?: boolean }
+  vision?: { visual_score?: number | null; status?: string; visual_category?: string; requires_followup?: boolean }
   links?: { href: string; text?: string | null }[]
 }
 
@@ -167,28 +175,53 @@ export function gatewayScanResponseToScanResult(report: GatewayScanResponse | Ti
     threatLevel = "warning"
   } else if (gw.verdict === "SAFE") {
     threatLevel = "safe"
+  } else if (gw.verdict === "UNKNOWN") {
+    threatLevel = score >= 50 ? "threat" : "warning"
   } else {
     threatLevel = threatLevelFromCategory(categoryFromScore(score))
   }
 
   // 3. Process layers and phase
   const layersCompleted = gw.layers_completed ?? (gw.complete ? 3 : t1.layers_completed ?? 1)
-  const phase: ScanResult["phase"] = layersCompleted < 3 ? "scanning" : "complete"
+  // A report that explicitly declares itself unfinished is never promoted to
+  // "complete". The destructive actions in the UI (Safe Passage / Quarantine)
+  // are gated on this phase, so "complete" must mean the server said so.
+  const phase: ScanResult["phase"] =
+    gw.complete === true ? "complete" : gw.complete === false ? "scanning" : layersCompleted < 3 ? "scanning" : "complete"
 
   // 4. Tier details mapping
-  const t1Score = gw.tier_details?.tier1?.score ?? t1.tier1?.score ?? 0
-  const t2Score = gw.tier_details?.tier2?.score ?? 0
-  const t3Score = gw.tier_details?.tier3?.score ?? 0
+  const t1Score =
+    gw.tier_details?.tier1?.score ?? (gw.tier1?.score !== undefined ? gw.tier1.score : t1.tier1?.score ?? 0)
+  const t2Score =
+    gw.tier_details?.tier2?.score ?? (gw.tier2?.score !== undefined ? gw.tier2.score : 0)
+  const t3Score =
+    gw.tier_details?.tier3?.score ??
+    (gw.tier3?.score !== undefined && gw.tier3.score !== null ? gw.tier3.score : 0)
 
   // 5. Evidence mapping
   let evidenceItems: EvidenceItem[] = []
-  if (Array.isArray(gw.evidence) && gw.evidence.length > 0) {
+  const evList =
+    Array.isArray(gw.combined_evidence) && gw.combined_evidence.length > 0
+      ? gw.combined_evidence
+      : Array.isArray(gw.evidence) && gw.evidence.length > 0
+        ? gw.evidence
+        : []
+
+  if (evList.length > 0) {
     // Modern Gateway string evidence
-    evidenceItems = gw.evidence.slice(0, 12).map((item: string) => {
+    evidenceItems = evList.slice(0, 12).map((item: string) => {
       const text = String(item)
       const lower = text.toLowerCase()
-      const isHigh = lower.includes("phish") || lower.includes("spoof") || lower.includes("punycode") || lower.includes("critical")
-      const isMed = lower.includes("suspicious") || lower.includes("shortener") || lower.includes("urgency") || lower.includes("financial")
+      const isHigh =
+        lower.includes("phish") ||
+        lower.includes("spoof") ||
+        lower.includes("punycode") ||
+        lower.includes("critical")
+      const isMed =
+        lower.includes("suspicious") ||
+        lower.includes("shortener") ||
+        lower.includes("urgency") ||
+        lower.includes("financial")
       const category = lower.startsWith("ai:")
         ? "AI Semantic"
         : lower.includes("domain")
@@ -209,20 +242,28 @@ export function gatewayScanResponseToScanResult(report: GatewayScanResponse | Ti
     evidenceItems = evidenceToItems(t1.tier1?.evidence ?? [])
   }
 
+
   // Heuristic status indicators
   const legacyEvidence = t1.tier1?.evidence ?? []
   const checks = new Set(legacyEvidence.map((e) => e?.check).filter(Boolean))
   const kinds = new Set(legacyEvidence.map((e) => e?.kind).filter(Boolean))
 
-  const regexStatus: TierStatus["status"] =
-    kinds.has("credential") || t1Score >= 70
+  // An empty evidence set means Tier 1 produced no signals to evaluate. That is
+  // "not evaluated" — rendering it as a pass would assert a clean heuristic
+  // result that was never computed, and would also mask a malformed report.
+  const hasTier1Signal = legacyEvidence.length > 0 || evList.length > 0 || t1Score > 0
+
+  const regexStatus: TierStatus["status"] = !hasTier1Signal
+    ? "pending"
+    : kinds.has("credential") || t1Score >= 70
       ? "fail"
       : kinds.has("urgency") || kinds.has("financial") || t1Score >= 30
         ? "warning"
         : "pass"
 
-  const linkStatus: TierStatus["status"] =
-    checks.has("brand_mismatch") || checks.has("homograph") || checks.has("punycode") || checks.has("ip_url") || t1Score >= 70
+  const linkStatus: TierStatus["status"] = !hasTier1Signal
+    ? "pending"
+    : checks.has("brand_mismatch") || checks.has("homograph") || checks.has("punycode") || checks.has("ip_url") || t1Score >= 70
       ? "fail"
       : checks.has("shortener") || checks.has("tld")
         ? "warning"
@@ -250,31 +291,38 @@ export function gatewayScanResponseToScanResult(report: GatewayScanResponse | Ti
     },
 
     tier2: {
-      spf: tierStatus("SPF", t2Score >= 50 ? "warning" : "pass"),
-      dkim: tierStatus("DKIM", t2Score >= 50 ? "warning" : "pass"),
-      dmarc: tierStatus("DMARC", t2Score >= 70 ? "fail" : "pass"),
-      domainAge: gw.tier_details?.tier2 ? (t2Score >= 70 ? "Suspicious / New" : "Established") : "Tier 2 disabled",
-      hostingProvider: gw.tier_details?.tier2 ? "Active (Verified)" : "Tier 2 disabled",
+      // The canonical gateway scan response carries Tier 2 domain/threat analysis
+      // only: it does not report SPF, DKIM, or DMARC outcomes, and it carries no
+      // hosting or registration-date field. These are therefore reported as not
+      // evaluated rather than inferred from the Tier 2 numeric score.
+      spf: tierStatus("SPF", "pending"),
+      dkim: tierStatus("DKIM", "pending"),
+      dmarc: tierStatus("DMARC", "pending"),
+      domainAge: gw.tier_details?.tier2 ? (t2Score >= 70 ? "Suspicious / New" : "Established") : "Not available",
+      hostingProvider: "Not available",
     },
 
     tier3: {
       active: layersCompleted >= 3 || t3Score > 0,
       markers: gw.threat_analysis?.reasoning
         ? [gw.threat_analysis.reasoning]
-        : t1.tier1?.ml_reasoning
-          ? [t1.tier1.ml_reasoning]
-          : [],
-      intentProfile: gw.threat_analysis?.category
-        ? [{ label: gw.threat_analysis.category, value: Math.round(score) }]
+        : gw.tier3?.reasoning
+          ? [gw.tier3.reasoning]
+          : t1.tier1?.ml_reasoning
+            ? [t1.tier1.ml_reasoning]
+            : [],
+      intentProfile: (gw.threat_analysis?.category || gw.tier3?.category)
+        ? [{ label: (gw.threat_analysis?.category || gw.tier3?.category)!, value: Math.round(score) }]
         : [],
     },
 
     urls: urlsFromLinks(gw.links ?? t1.links ?? [], categoryFromScore(score)),
     evidence: evidenceItems,
     flaggedExcerpts:
-      Array.isArray(gw.evidence) && gw.evidence.length > 0
-        ? gw.evidence.map((e: string) => `**Evidence**: ${e}`)
+      evList.length > 0
+        ? evList.map((e: string) => `**Evidence**: ${e}`)
         : t1.tier1?.reasons?.map((r) => `**Reason**: ${r}`) ?? [],
+
   }
 }
 

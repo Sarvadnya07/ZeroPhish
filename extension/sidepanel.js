@@ -27,15 +27,23 @@ function getEndpoints() {
   };
 }
 
-// Load custom base URLs & session token from storage
+// Load custom base URLs (non-sensitive, cloud-synced) from storage.
 if (typeof chrome !== 'undefined' && chrome.storage?.sync) {
-  chrome.storage.sync.get(['gatewayBase', 'backendBase', 'webUrl', 'clerkSessionToken'], (cfg) => {
+  chrome.storage.sync.get(['gatewayBase', 'backendBase', 'webUrl'], (cfg) => {
     if (cfg?.gatewayBase) {
       GATEWAY_BASE = cfg.gatewayBase.replace(/\/+$/, '');
     } else if (cfg?.backendBase) {
       GATEWAY_BASE = cfg.backendBase.replace(/\/+$/, '');
     }
     if (cfg?.webUrl) WEB_URL = cfg.webUrl.replace(/\/+$/, '');
+  });
+}
+
+// The session bearer token is a credential: it is read from chrome.storage.local,
+// which stays on-device. chrome.storage.sync would replicate it to the user's
+// cloud-synced profile in plaintext.
+if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+  chrome.storage.local.get(['clerkSessionToken'], (cfg) => {
     if (cfg?.clerkSessionToken) {
       currentAuthToken = cfg.clerkSessionToken;
       fetchUserProfile(currentAuthToken);
@@ -133,8 +141,8 @@ if (signinBtn) {
 if (signoutBtn) {
   signoutBtn.addEventListener('click', () => {
     currentAuthToken = null;
-    if (typeof chrome !== 'undefined' && chrome.storage?.sync) {
-      chrome.storage.sync.remove('clerkSessionToken');
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.remove('clerkSessionToken');
     }
     updateAuthUI(null);
     setAnalysisSummary('Signed Out', 'Sign in via ZeroPhish Combat Centre to access personalized defense feeds.', '');
@@ -156,13 +164,36 @@ function updateGauge(score) {
 }
 
 /**
+ * Canonical verdict vocabulary.
+ *
+ * The server emits SAFE | SUSPICIOUS | CRITICAL | UNKNOWN. The local Tier 1
+ * heuristic emits its own advisory vocabulary (safe | spam | phishing) which is
+ * NOT server-authoritative. Both are mapped explicitly here.
+ *
+ * Trust-boundary rule: an unrecognised, missing, or not-yet-evaluated verdict
+ * must NEVER fall through to a benign SAFE render.
+ */
+const VERDICT_ALIASES = {
+  SAFE: 'SAFE',
+  SPAM: 'SUSPICIOUS',       // local advisory category
+  PHISHING: 'CRITICAL',     // local advisory category
+  SUSPICIOUS: 'SUSPICIOUS',
+  CRITICAL: 'CRITICAL',
+  UNKNOWN: 'UNKNOWN',
+  ERROR: 'ERROR',
+  OFFLINE: 'OFFLINE',
+  PENDING: 'PENDING',       // not yet evaluated
+};
+
+/**
  * Updates the verdict badge styling and label
  */
 function setVerdict(verdict, score) {
-  const v = (verdict || 'SAFE').toUpperCase();
+  const raw = String(verdict ?? '').trim().toUpperCase();
+  const v = VERDICT_ALIASES[raw] || 'UNKNOWN';
   if (!statusPill) return;
 
-  statusPill.classList.remove('safe', 'suspicious', 'critical', 'offline');
+  statusPill.classList.remove('safe', 'suspicious', 'critical', 'offline', 'pending');
 
   if (v === 'CRITICAL' || score >= 70) {
     statusPill.classList.add('critical');
@@ -179,13 +210,31 @@ function setVerdict(verdict, score) {
     if (verdictText) verdictText.innerText = v;
     if (verdictRange) verdictRange.innerText = 'ERROR';
     if (verdictIcon) verdictIcon.innerText = '⚠';
-  } else {
+  } else if (v === 'UNKNOWN') {
+    statusPill.classList.add('suspicious');
+    if (verdictText) verdictText.innerText = 'UNKNOWN';
+    if (verdictRange) verdictRange.innerText = 'UNRESOLVED';
+    if (verdictIcon) verdictIcon.innerText = '?';
+  } else if (v === 'PENDING') {
+    statusPill.classList.add('pending');
+    if (verdictText) verdictText.innerText = 'NOT SCANNED';
+    if (verdictRange) verdictRange.innerText = 'PENDING';
+    if (verdictIcon) verdictIcon.innerText = '·';
+  } else if (v === 'SAFE') {
     statusPill.classList.add('safe');
     if (verdictText) verdictText.innerText = 'SAFE';
     if (verdictRange) verdictRange.innerText = '0-29';
     if (verdictIcon) verdictIcon.innerText = '✓';
+  } else {
+    // Defensive: an unmapped verdict is never rendered as benign.
+    statusPill.classList.add('suspicious');
+    if (verdictText) verdictText.innerText = 'UNKNOWN';
+    if (verdictRange) verdictRange.innerText = 'UNRESOLVED';
+    if (verdictIcon) verdictIcon.innerText = '?';
   }
 }
+
+
 
 /**
  * Updates the 3 multi-line analysis text fields
@@ -251,11 +300,11 @@ function renderEvidence(evidenceList) {
  */
 function resetUI() {
   updateGauge(0);
-  setVerdict('SAFE', 0);
+  setVerdict('PENDING', 0);
   setAnalysisSummary(
     'Ready for Scan.',
-    'Tier 1 (Local) & Tier 2 (ML) Standby.',
-    'Tier 3 (Gemini AI) Ready to protect...'
+    'No analysis has been run for this page.',
+    'Tier 1 (Local) & Tier 2 (ML) Standby.'
   );
   updatePipeline(1, 'READY', 0);
   updatePipeline(2, 'READY', 0);
@@ -426,7 +475,10 @@ if (scanButton) {
       const t1Score = Math.max(0, Math.min(100, Math.round(heur?.t1_score || 0)));
 
       updateGauge(t1Score);
-      setVerdict(heur?.t1_category || 'SAFE', t1Score);
+      // Local Tier 1 is advisory. It is mapped through the canonical verdict
+      // vocabulary so its category (safe|spam|phishing) never falls through to
+      // a benign render. The server verdict replaces this once Tier 2 returns.
+      setVerdict(heur?.t1_category, t1Score);
       updatePipeline(1, 'Complete', 100);
       setAnalysisSummary(
         'Tier 1: Local Analysis Complete.',
@@ -543,26 +595,56 @@ if (scanButton) {
 }
 
 function finishScanWithResult(result) {
-  const finalScore = Math.round(result.final_score ?? result.partial_score ?? 0);
+  const isComplete = result.complete === true;
+  const hasFinal = typeof result.final_score === 'number';
+  // A partial score is NOT an overall score: never present one as the other.
+  const finalScore = Math.round(hasFinal ? result.final_score : (result.partial_score ?? 0));
+
   updateGauge(finalScore);
   setVerdict(result.verdict, finalScore);
 
   updatePipeline(1, 'Complete', 100);
   updatePipeline(2, 'Complete', 100);
 
+  // Tier 3 state: an incomplete or unrecognised state must never be collapsed
+  // into a benign label ("Standby") that reads as "finished and fine".
   if (result.tier3_status === 'complete' && result.tier3) {
     updatePipeline(3, 'Complete', 100);
+  } else if (result.tier3_status === 'failed') {
+    updatePipeline(3, 'Failed', 100);
+  } else if (result.tier3_status === 'timeout') {
+    updatePipeline(3, 'Timeout', 100);
   } else if (result.tier3_status === 'skipped') {
     updatePipeline(3, 'Skipped', 100);
   } else {
-    updatePipeline(3, 'Standby', 100);
+    updatePipeline(3, 'Incomplete', 100);
   }
 
+  // Server-authoritative signal that visual verification is still required.
+  const visionStatus = String(result.vision?.status || '').toUpperCase();
+  const requiresVisual =
+    result.requires_visual_check === true ||
+    result.vision?.requires_followup === true ||
+    visionStatus === 'VISUAL_REQUIRED';
+
   setScanningState(false);
+
+  const scoreLabel = hasFinal ? 'Overall Threat Score' : 'Partial Threat Score (Tier 3 incomplete)';
+  let detailLine;
+  if (requiresVisual) {
+    detailLine = 'Visual verification required: screenshot analysis did not complete.';
+  } else if (result.tier3?.reasoning) {
+    detailLine = result.tier3.reasoning;
+  } else if (isComplete) {
+    detailLine = 'Analysis complete.';
+  } else {
+    detailLine = 'Tier 3 AI analysis did not complete; this result is partial.';
+  }
+
   setAnalysisSummary(
-    `Verdict: ${result.verdict || 'SAFE'}`,
-    `Overall Threat Score: ${finalScore}/100`,
-    result.tier3?.reasoning || '3-Tier Analysis finalized successfully.'
+    `Verdict: ${result.verdict || 'UNKNOWN'}`,
+    `${scoreLabel}: ${finalScore}/100`,
+    detailLine
   );
 
   renderEvidence(result.combined_evidence || result.tier1?.evidence || []);
@@ -615,25 +697,48 @@ if (visualCheckBtn) {
       if (!res.ok) throw new Error(`Vision backend returned HTTP ${res.status}`);
       const data = await res.json();
 
-      const score = Math.round(data.threat_score || (data.is_phishing ? 85 : 10));
-      updateGauge(score);
+      const visionStatus = String(data?.status || '').toUpperCase();
+      const visualScore = typeof data?.visual_score === 'number' ? data.visual_score : null;
 
-      if (data.is_phishing) {
-        setVerdict('CRITICAL', score);
+      // A Vision result that did not complete successfully carries no visual
+      // verdict. It must NEVER be rendered as a pass.
+      const visionCompleted =
+        (visionStatus === 'SUCCESS' || visionStatus === 'HEURISTIC_FALLBACK') && visualScore !== null;
+
+      if (!visionCompleted) {
+        updatePipeline(3, visionStatus === 'TIMEOUT' ? 'Timeout' : 'Failed', 100);
+        updateGauge(0);
+        setVerdict('UNKNOWN', 0);
+        const reason =
+          (Array.isArray(data?.findings) && data.findings.join(' ')) ||
+          data?.error_category ||
+          'No visual verdict was produced.';
         setAnalysisSummary(
-          '🚨 SPOOFED PORTAL DETECTED!',
-          `Brand spoofed: ${data.matched_brand || 'Unknown Target'}`,
-          data.reasoning || 'Visual portal layout matches high-risk phishing signatures.'
+          'Visual Check Inconclusive.',
+          `Vision analysis did not complete (status: ${visionStatus || 'UNKNOWN'}).`,
+          reason
         );
-        updatePipeline(3, 'Intercepted', 100);
       } else {
-        setVerdict('SAFE', score);
-        setAnalysisSummary(
-          'Visual Checks Passed.',
-          'Page visual layout matches authentic domain structure.',
-          data.reasoning || 'No deceptive logo or brand spoofing patterns detected.'
-        );
-        updatePipeline(3, 'Verified', 100);
+        const score = Math.round(visualScore);
+        updateGauge(score);
+
+        if (data.is_phishing) {
+          setVerdict('CRITICAL', score);
+          setAnalysisSummary(
+            '🚨 SPOOFED PORTAL DETECTED!',
+            `Brand spoofed: ${data.matched_brand || 'Unknown Target'}`,
+            data.reasoning || 'Visual portal layout matches high-risk phishing signatures.'
+          );
+          updatePipeline(3, 'Intercepted', 100);
+        } else {
+          setVerdict('SAFE', score);
+          setAnalysisSummary(
+            'Visual Checks Passed.',
+            'Page visual layout matches authentic domain structure.',
+            data.reasoning || 'No deceptive logo or brand spoofing patterns detected.'
+          );
+          updatePipeline(3, 'Verified', 100);
+        }
       }
     } catch (e) {
       setAnalysisSummary('Visual Check Failed', toErrorMessage(e), '');

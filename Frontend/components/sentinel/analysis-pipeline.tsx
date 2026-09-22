@@ -164,7 +164,7 @@ export function AnalysisPipeline({ data }: { data: ScanResult }) {
               className={`font-mono text-xs ${
                 data.tier2.domainAge.includes("days")
                   ? "text-[#FF003C]"
-                  : data.tier2.domainAge === "Checking..."
+                  : data.tier2.domainAge === "Checking..." || data.tier2.domainAge === "Not available"
                     ? "text-[hsl(0,0%,45%)]"
                     : "text-[#00F0FF]"
               }`}
@@ -259,9 +259,13 @@ export function AnalysisPipeline({ data }: { data: ScanResult }) {
                   Awaiting upstream data...
                 </span>
               </>
-            ) : (
+            ) : data.tier3.active ? (
               <span className="font-mono text-xs text-[#00F0FF]">
                 No psychological markers detected.
+              </span>
+            ) : (
+              <span className="font-mono text-xs text-[hsl(0,0%,50%)]">
+                Semantic analysis was not produced for this scan.
               </span>
             )}
           </div>

@@ -2,7 +2,7 @@
 Vision FastAPI router — /vision/* endpoints.
 
 Provides screenshot analysis for visual phishing detection,
-with rate limiting and authentication.
+with rate limiting, authentication, and hardened security guards.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 RATE_LIMIT = os.getenv("VISION_RATE_LIMIT", "10/minute")
 
 router = APIRouter(prefix="/vision", tags=["vision"])
+_vision_service = VisionService()
 
 
 @router.post(
@@ -34,8 +35,8 @@ router = APIRouter(prefix="/vision", tags=["vision"])
     summary="Analyze screenshot for visual phishing cues",
     description=(
         "Submit a base64‑encoded screenshot with optional URL/title context. "
-        "Uses Gemini Multimodal Vision if API key is set; otherwise falls back "
-        "to local heuristic analysis. Rate‑limited."
+        "Uses Multimodal Vision via Tier3Router if available; otherwise performs "
+        "hardened pixel forensic fallback. Rate‑limited."
     ),
 )
 @limiter.limit(RATE_LIMIT)
@@ -44,47 +45,42 @@ async def analyze_screenshot(
     response: Response,
     data: VisionAnalysisRequest,
     current_user: User = Depends(require_auth),
-) -> dict[str, Any]:
+) -> VisionAnalysisResult:
     """
-    Endpoint for the Chrome Extension to submit captured screenshots
-    for proactive visual heuristics analysis (CNN / Gemini).
+    Endpoint for client/extension to submit captured screenshots
+    for visual forensics analysis.
     Requires authentication.
     """
-    # Validate input
-    if not data.image_data_b64 or len(data.image_data_b64) < 50:
+    if not data.image_data_b64 or len(data.image_data_b64.strip()) < 50:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or empty image data",
+            detail="Invalid or empty image data payload",
         )
 
-    if not data.image_data_b64.startswith("data:image"):
-        # Allow raw base64 as well, but warn
-        logger.debug("Image data did not start with 'data:image'; assuming raw base64.")
-
     try:
-        result = await VisionService.analyze_screenshot(
+        result = await _vision_service.analyze_screenshot(
             image_b64=data.image_data_b64,
             url=data.url,
             title=data.title,
         )
         logger.info(
-            "Vision analysis for user %s: is_phishing=%s, score=%.1f",
+            "Vision analysis completed for user %s: status=%s, visual_score=%s, category=%s",
             current_user.id,
-            result.get("is_phishing"),
-            result.get("threat_score", 0),
+            result.status.value,
+            result.visual_score,
+            result.visual_category,
         )
         return result
 
     except ValueError as e:
-        logger.warning("Vision analysis input error for user %s: %s", current_user.id, e)
+        logger.warning("Vision analysis input validation error for user %s: %s", current_user.id, e)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
     except Exception as e:
-        logger.exception("Vision analysis failed for user %s", current_user.id)
-        # Do not expose internal error details to clients
+        logger.exception("Vision analysis unexpected failure for user %s", current_user.id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Vision analysis failed",
+            detail="Vision analysis processing error",
         )

@@ -3,6 +3,7 @@ Gateway Circuit Breaker Wrapper
 
 Wraps execute_tier3 with circuit breaker protection.
 Provides structured error handling, logging, and fallback responses.
+Preserves explicit failure states and propagates visual verification needs.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import time
 from typing import Any, Callable, Optional, Protocol
 
 from models.gateway_models import Tier3Result, TierStatus
-from tier_3.main import analyze_email_intent
+from tier_3.main import analyze_email_intent, get_t3_router
 
 logger = logging.getLogger(__name__)
 
@@ -61,51 +62,70 @@ async def execute_tier3_with_circuit_breaker(
     body: str,
     circuit_breaker: Optional[CircuitBreakerProtocol],
     tier3_timeout: int,
+    sender: Optional[str] = None,
+    subject: Optional[str] = None,
 ) -> Tier3Result:
     """
     Execute Tier 3 with circuit breaker protection.
 
     Args:
-        body: Email body text to analyse.
+        body: Email body text to analyze.
         circuit_breaker: CircuitBreaker instance (or None).
         tier3_timeout: Timeout in seconds for the AI call.
+        sender: Optional sender address / header.
+        subject: Optional email subject line.
 
     Returns:
-        Tier3Result with status (complete, timeout, unavailable, circuit_open, failed).
+        Tier3Result with status (complete, timeout, unavailable, failed).
     """
     start_time = time.perf_counter()
 
     # Define the actual Tier 3 execution logic
-    async def _tier3_execution(text: str) -> Tier3Result:
-        # Check if Gemini API key is configured
-        if not os.getenv("GEMINI_API_KEY"):
-            logger.warning("Gemini API key not configured; Tier 3 unavailable.")
-            raise Tier3UnavailableError("Gemini API key not configured")
+    async def _tier3_execution(
+        text: str,
+        sender_val: Optional[str] = None,
+        subject_val: Optional[str] = None,
+    ) -> Tier3Result:
+        # Check if any Tier 3 AI provider is configured and available
+        router = get_t3_router()
+        if not router.has_available_provider():
+            logger.warning("No Tier 3 AI provider configured or available.")
+            raise Tier3UnavailableError("No Tier 3 AI provider configured or available")
 
         try:
             # Execute AI analysis with timeout
             result = await asyncio.wait_for(
-                analyze_email_intent(text),
-                timeout=tier3_timeout
+                analyze_email_intent(text, sender=sender_val, subject=subject_val),
+                timeout=tier3_timeout,
             )
 
             execution_ms = (time.perf_counter() - start_time) * 1000.0
 
+            # If result category indicates failure, preserve explicit failure status
+            if result.category == "AI_TIMEOUT":
+                status = TierStatus.TIMEOUT
+            elif result.category in ("AI_UNAVAILABLE", "AI_RATE_LIMITED", "AI_INVALID_RESPONSE", "AI_PROVIDER_ERROR"):
+                status = TierStatus.FAILED
+            else:
+                status = TierStatus.COMPLETE
+
             return Tier3Result(
-                score=int(result.threat_score),
+                score=int(round(result.threat_score)),
                 category=result.category,
                 reasoning=result.reasoning,
                 flagged_phrases=result.flagged_phrases,
                 confidence=float(getattr(result, "confidence", 1.0)),
-                status=_coerce_tier_status("complete"),
+                requires_visual_check=bool(getattr(result, "requires_visual_check", False)),
+                status=status,
                 execution_time_ms=execution_ms,
+                provider=getattr(result, "provider", None),
+                model=getattr(result, "model", None),
             )
 
         except asyncio.TimeoutError as e:
             logger.warning("Tier 3 execution timed out after %ss", tier3_timeout)
             raise Tier3ExecutionError(f"Timeout: {e}") from e
         except Tier3UnavailableError:
-            # Re-raise as-is so caller can handle with neutral fallback
             raise
         except Exception as e:
             logger.error("Tier 3 execution failed: %s", e, exc_info=True)
@@ -115,17 +135,23 @@ async def execute_tier3_with_circuit_breaker(
     async def _tier3_fallback(
         text: str,
         reason: str = "Circuit open or execution failed",
-        status: str | TierStatus = "circuit_open",
+        status: str | TierStatus = "failed",
+        category: str = "AI_UNAVAILABLE",
+        sender_val: Optional[str] = None,
+        subject_val: Optional[str] = None,
     ) -> Tier3Result:
         logger.info("Tier 3 fallback triggered: %s", reason)
         return Tier3Result(
             score=50,
-            category="AI Unavailable",
+            category=category,
             reasoning=reason,
             flagged_phrases=[],
             confidence=0.0,
+            requires_visual_check=False,
             status=_coerce_tier_status(status),
             execution_time_ms=0.0,
+            provider="fallback",
+            model="none",
         )
 
     # Execute with circuit breaker if provided
@@ -136,33 +162,66 @@ async def execute_tier3_with_circuit_breaker(
                 fallback=_tier3_fallback,
                 timeout_seconds=tier3_timeout,
                 text=body,
+                sender_val=sender,
+                subject_val=subject,
             )
-        except Tier3UnavailableError:
-            # API key missing – return neutral score without counting as failure
-            return await _tier3_fallback(body, reason="Gemini API key not configured", status="unavailable")
+        except Tier3UnavailableError as e:
+            return await _tier3_fallback(
+                body,
+                reason=str(e) or "Tier 3 AI provider not configured",
+                status="unavailable",
+                category="AI_UNAVAILABLE",
+            )
         except Tier3ExecutionError as e:
-            # Circuit breaker will already have handled fallback, but if it didn't,
-            # we provide a final neutral score.
             logger.warning("Tier 3 execution error after circuit breaker: %s", e)
-            return await _tier3_fallback(body, reason=str(e), status="failed")
+            status_val = "timeout" if "timeout" in str(e).lower() else "failed"
+            cat_val = "AI_TIMEOUT" if status_val == "timeout" else "AI_PROVIDER_ERROR"
+            return await _tier3_fallback(
+                body,
+                reason=str(e),
+                status=status_val,
+                category=cat_val,
+            )
         except Exception as e:
-            # Unexpected error – fallback
             logger.error("Unexpected error in circuit breaker call: %s", e, exc_info=True)
-            return await _tier3_fallback(body, reason=f"Unexpected error: {e}", status="error")
+            return await _tier3_fallback(
+                body,
+                reason=f"Unexpected error: {e}",
+                status="failed",
+                category="AI_PROVIDER_ERROR",
+            )
     else:
         # No circuit breaker – execute directly with error handling
         try:
-            return await _tier3_execution(body)
+            return await _tier3_execution(body, sender_val=sender, subject_val=subject)
         except Tier3UnavailableError:
-            return await _tier3_fallback(body, reason="Gemini API key not configured", status="unavailable")
+            return await _tier3_fallback(
+                body,
+                reason="Gemini API key not configured",
+                status="unavailable",
+                category="AI_UNAVAILABLE",
+            )
         except asyncio.TimeoutError:
             return await _tier3_fallback(
                 body,
                 reason=f"AI analysis timed out after {tier3_timeout}s",
-                status="timeout"
+                status="timeout",
+                category="AI_TIMEOUT",
             )
         except Tier3ExecutionError as e:
-            return await _tier3_fallback(body, reason=str(e), status="failed")
+            status_val = "timeout" if "timeout" in str(e).lower() else "failed"
+            cat_val = "AI_TIMEOUT" if status_val == "timeout" else "AI_PROVIDER_ERROR"
+            return await _tier3_fallback(
+                body,
+                reason=str(e),
+                status=status_val,
+                category=cat_val,
+            )
         except Exception as e:
             logger.error("Unhandled error in Tier 3: %s", e, exc_info=True)
-            return await _tier3_fallback(body, reason=f"Unexpected error: {e}", status="error")
+            return await _tier3_fallback(
+                body,
+                reason=f"Unexpected error: {e}",
+                status="failed",
+                category="AI_PROVIDER_ERROR",
+            )

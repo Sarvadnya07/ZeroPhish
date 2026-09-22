@@ -59,8 +59,13 @@ if sys.platform == "win32":
     tv = _ensure_stub_module("torchvision", is_package=True)
     tt = _ensure_stub_module("torchvision.transforms")
     setattr(tt, "InterpolationMode", _StubInterpolationMode)
+    ttf = _ensure_stub_module("torchvision.transforms.functional")
+    setattr(ttf, "pil_to_tensor", lambda *args, **kwargs: None)
     tio = _ensure_stub_module("torchvision.io")
+    setattr(tio, "ImageReadMode", object)
+    setattr(tio, "decode_image", lambda *args, **kwargs: None)
     setattr(tv, "transforms", tt)
+    setattr(tt, "functional", ttf)
     setattr(tv, "io", tio)
 
 # ---------- Optional imports ----------
@@ -414,20 +419,23 @@ class PhishingMLModel:
         return status
 
 
-# ---------- Global Instance ----------
+# ---------- Global Instance with Lock ----------
 _ml_model_instance: Optional[PhishingMLModel] = None
+_ml_model_lock = asyncio.Lock()
 
 
 async def get_ml_model() -> PhishingMLModel:
-    """Get or create the global ML model instance (lazy-loaded)."""
+    """Get or create the global ML model instance with concurrency protection."""
     global _ml_model_instance
 
     if _ml_model_instance is None:
-        _ml_model_instance = PhishingMLModel(
-            model_name=os.getenv("HF_MODEL_NAME", DEFAULT_MODEL_NAME),
-            cache_dir=os.getenv("HF_MODEL_CACHE_DIR", DEFAULT_CACHE_DIR),
-            inference_timeout=int(os.getenv("ML_INFERENCE_TIMEOUT", str(DEFAULT_INFERENCE_TIMEOUT))),
-        )
-        await _ml_model_instance.load_model()
+        async with _ml_model_lock:
+            if _ml_model_instance is None:
+                _ml_model_instance = PhishingMLModel(
+                    model_name=os.getenv("HF_MODEL_NAME", DEFAULT_MODEL_NAME),
+                    cache_dir=os.getenv("HF_MODEL_CACHE_DIR", DEFAULT_CACHE_DIR),
+                    inference_timeout=int(os.getenv("ML_INFERENCE_TIMEOUT", str(DEFAULT_INFERENCE_TIMEOUT))),
+                )
+                await _ml_model_instance.load_model()
 
     return _ml_model_instance

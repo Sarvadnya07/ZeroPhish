@@ -279,6 +279,9 @@ body {
 
 .status-pill.critical { background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.3); }
 .status-pill.critical .pill-title, .status-pill.critical .status-icon { background: var(--red-primary); }
+/* Neutral state: no analysis has been run yet. Deliberately not green. */
+.status-pill.pending { background: rgba(148, 163, 184, 0.1); border-color: rgba(148, 163, 184, 0.3); }
+.status-pill.pending .pill-title, .status-pill.pending .status-icon { background: var(--text-secondary); }
 
 .analysis-summary {
   text-align: center;

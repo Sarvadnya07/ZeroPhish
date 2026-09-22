@@ -33,7 +33,7 @@ class Tier1ReportPayload(BaseModel):
     final_score: Optional[float] = None
     partial_score: Optional[float] = None
     verdict: Optional[str] = None
-    layers_completed: Optional[int] = Field(default=None, ge=0, le=3)
+    layers_completed: Optional[int] = Field(default=None, ge=0, le=4)
     evidence: Optional[List[str]] = None
 
     def model_dump(self, **kwargs: Any) -> Dict[str, Any]:

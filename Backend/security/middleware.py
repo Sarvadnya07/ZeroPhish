@@ -20,7 +20,10 @@ from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from security.audit_logger import log_ssrf_blocked
+try:
+    from .audit_logger import log_ssrf_blocked
+except ImportError:
+    from security.audit_logger import log_ssrf_blocked
 
 logger = logging.getLogger(__name__)
 
@@ -262,13 +265,24 @@ def get_generic_error_message(status_code: int) -> str:
     return error_messages.get(status_code, "An error occurred")
 
 
+class ValidationResult(dict):
+    """
+    Dual-access validation result supporting both dict subscription:
+        res["valid"], res["errors"]
+    and tuple unpacking:
+        valid, errors = res
+    """
+    def __iter__(self):
+        return iter((self["valid"], self["errors"]))
+
+
 class InputValidator:
     """Validate and sanitize request inputs."""
 
     @staticmethod
     def validate_scan_request(
         sender: str, body: str, links: list, subject: Optional[str] = None
-    ) -> dict:
+    ) -> ValidationResult:
         errors = []
 
         if not validate_email_address(sender):
@@ -293,4 +307,4 @@ class InputValidator:
         if subject and len(subject) > 500:
             errors.append("Subject too long (max 500 chars)")
 
-        return {"valid": len(errors) == 0, "errors": errors}
+        return ValidationResult({"valid": len(errors) == 0, "errors": errors})

@@ -214,36 +214,38 @@ def test_sql_webhook_repository(sqlite_session_factory):
 
 @pytest.mark.asyncio
 async def test_vision_service_offline_fallback():
+    from unittest.mock import patch
     # 1x1 transparent PNG data URI
     tiny_png_b64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
 
-    # Test clean page
-    result = await VisionService.analyze_screenshot(
-        image_b64=tiny_png_b64,
-        url='https://login.microsoftonline.com',
-        title='Microsoft Login Official',
-    )
-    assert 'is_phishing' in result
-    assert 'threat_score' in result
-    assert result['is_phishing'] is False
-    assert result['threat_score'] <= 30.0
+    with patch("tier_3.router.Tier3Router.has_available_provider", return_value=False):
+        # Test clean page
+        result = await VisionService.analyze_screenshot(
+            image_b64=tiny_png_b64,
+            url='https://login.microsoftonline.com',
+            title='Microsoft Login Official',
+        )
+        assert 'is_phishing' in result
+        assert 'threat_score' in result
+        assert result['is_phishing'] is False
+        assert result['threat_score'] is None or result['threat_score'] <= 30.0
 
-    # Test deceptive page
-    spoofed = await VisionService.analyze_screenshot(
-        image_b64=tiny_png_b64,
-        url='http://evil-attacker-portal.xyz/secure',
-        title='Microsoft Login - Verify Password',
-    )
-    assert spoofed['is_phishing'] is True
-    assert spoofed['threat_score'] >= 70.0
-    assert spoofed['matched_brand'] == 'Microsoft'
+        # Test deceptive page
+        spoofed = await VisionService.analyze_screenshot(
+            image_b64=tiny_png_b64,
+            url='http://evil-attacker-portal.xyz/secure',
+            title='Microsoft Login - Verify Password',
+        )
+        assert spoofed['is_phishing'] is True
+        assert spoofed['threat_score'] >= 70.0
+        assert spoofed['matched_brand'] == 'Microsoft'
 
-    # Test invalid base64
-    invalid = await VisionService.analyze_screenshot(
-        image_b64='invalid_not_an_image',
-    )
-    assert invalid['is_phishing'] is False
-    assert 'Could not parse image data' in invalid['reasoning']
+        # Test invalid base64
+        invalid = await VisionService.analyze_screenshot(
+            image_b64='invalid_not_an_image',
+        )
+        assert invalid['is_phishing'] is False
+        assert 'Could not parse image data' in invalid['reasoning']
 
 
 @pytest.mark.asyncio

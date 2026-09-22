@@ -41,7 +41,9 @@ from repositories.factory import get_webhook_repository
 @pytest.fixture
 def client():
     """Test client bound to canonical gateway."""
-    return TestClient(app)
+    with patch("gateway._finalize_tier3"), \
+         patch("gateway.get_domain_age", return_value=365):
+        yield TestClient(app)
 
 
 # ==============================================================================
@@ -139,7 +141,7 @@ def test_p02_cache_key_scoped_by_version():
 
 
 @pytest.mark.asyncio
-async def test_p02_t3_cannot_downgrade_critical_findings(client):
+async def test_p02_t3_cannot_downgrade_critical_findings():
     """
     Verify that an injected prompt returning threat_score=0 cannot downgrade
     deterministic CRITICAL findings from Tier 1 and Tier 2.
