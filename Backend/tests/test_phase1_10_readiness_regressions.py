@@ -25,7 +25,19 @@ from tier_1.engine import ServerTier1Result
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    """Create an isolated gateway client without running real Tier 3 work.
+
+    These regressions validate Tier 1/API-key/SSE bookkeeping behavior. The
+    gateway schedules Tier 3 as a background task, and Starlette TestClient
+    waits for BackgroundTasks to finish before completing the request. Running
+    the real provider path here couples these unit/regression tests to network
+    availability and can block CI indefinitely.
+    """
+    async def _noop_finalize_tier3(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(gateway, "_finalize_tier3", _noop_finalize_tier3)
     return TestClient(app)
 
 
