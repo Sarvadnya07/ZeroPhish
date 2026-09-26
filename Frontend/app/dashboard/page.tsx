@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
+import { normalizeScanHistory } from "@/lib/dashboard-history";
 import { ShieldCheck, ShieldAlert, Zap, TrendingUp, Clock } from "lucide-react";
 
 // Re-export the existing SentinelPanel inline (imports from the existing component path)
@@ -37,16 +38,6 @@ function StatCard({
       </div>
     </div>
   );
-}
-
-/**
- * Keep dashboard rendering resilient to an unexpected API payload.
- * The backend contract is an array, but the UI should degrade to an
- * empty state rather than crashing if a proxy, stale backend, or future
- * response change returns null or another JSON shape.
- */
-export function normalizeScanHistory(value: unknown): any[] {
-  return Array.isArray(value) ? value : [];
 }
 
 export default function DashboardPage() {
