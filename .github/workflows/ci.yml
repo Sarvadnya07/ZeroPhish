@@ -31,6 +31,8 @@ jobs:
   backend-test:
     name: Backend Tests, Migrations & Coverage
     runs-on: ubuntu-latest
+    # Backend tests must never be allowed to consume GitHub's maximum job window.
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: Backend
@@ -48,7 +50,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
-          python -m pip install pytest pytest-asyncio pytest-cov httpx
+          python -m pip install pytest pytest-asyncio pytest-cov pytest-timeout httpx
 
       - name: Verify database migrations & schema parity
         env:
@@ -66,7 +68,13 @@ jobs:
           ZEROPHISH_VERSION: 1.0.0-ci
           GIT_COMMIT_SHA: ${{ github.sha }}
         run: |
-          python -m pytest tests/ -v --cov=. --cov-report=xml --cov-report=term-missing
+          python -m pytest tests/ -v \
+            --timeout=60 \
+            --timeout-method=thread \
+            --durations=20 \
+            --cov=. \
+            --cov-report=xml \
+            --cov-report=term-missing
 
       - name: Enforce coverage threshold
         run: python -m coverage report --fail-under=65
