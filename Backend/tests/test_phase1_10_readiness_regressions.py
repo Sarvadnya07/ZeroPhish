@@ -14,9 +14,8 @@ they cannot silently regress:
    disconnect normally.
 """
 
-import time
-
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 import gateway
@@ -154,37 +153,50 @@ def test_mutating_endpoints_remain_open_when_no_api_key_is_configured(client, mo
 # 3. SSE subscriber bookkeeping does not leak
 # ---------------------------------------------------------------------------
 
-def test_sse_subscriber_overflow_map_is_cleaned_on_disconnect(client):
+@pytest.mark.asyncio
+async def test_sse_subscriber_overflow_map_is_cleaned_on_disconnect():
     """
-    `_publish_to_subscriber` records an overflow counter for every subscriber it
-    delivers to. A subscriber that disconnects must not leave that entry behind,
-    otherwise the map grows with subscriber churn for the process lifetime.
+    The SSE endpoint owns a background cleanup callback. Exercise that callback
+    directly instead of opening a TestClient stream: an SSE response is
+    intentionally unbounded, so TestClient waits for the streaming application
+    to finish and can never reach the context-manager exit.
     """
-    before = set(gateway._sse_subscriber_overflows)
+    request = Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/tier1/stream",
+        "headers": [],
+        "query_string": b"",
+    })
 
-    with client.stream("GET", "/tier1/stream") as response:
-        assert response.status_code == 200
-        # Drain the initial ping/frame so the subscriber is registered.
-        for _ in response.iter_lines():
-            break
-        # Publishing creates the overflow entry for this subscriber.
-        client.post("/tier1/report", json={"scan_id": "sse-leak-probe", "final_score": 7})
+    response = await gateway.stream_tier1_scans(request)
+    assert response.status_code == 200
+    assert len(gateway._sse_subscribers) >= 1
 
-    # Exiting the stream context triggers the endpoint's background cleanup.
-    new_keys = set(gateway._sse_subscriber_overflows) - before
-    assert not new_keys, f"overflow entries leaked after disconnect: {new_keys}"
+    sub_id = next(iter(gateway._sse_subscribers))
+    gateway._sse_subscriber_overflows[sub_id] = 1
+
+    assert response.background is not None
+    await response.background()
+
+    assert sub_id not in gateway._sse_subscriber_overflows
 
 
-def test_sse_subscriber_registry_is_empty_after_disconnect(client):
-    with client.stream("GET", "/tier1/stream") as response:
-        assert response.status_code == 200
-        client.post("/tier1/report", json={"scan_id": "sse-reg-probe"})
-        assert len(gateway._sse_subscribers) >= 1
+@pytest.mark.asyncio
+async def test_sse_subscriber_registry_is_empty_after_disconnect():
+    request = Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/tier1/stream",
+        "headers": [],
+        "query_string": b"",
+    })
 
-    deadline = 20
-    for _ in range(deadline):
-        if not gateway._sse_subscribers:
-            break
-        time.sleep(0.05)
+    response = await gateway.stream_tier1_scans(request)
+    assert response.status_code == 200
+    assert len(gateway._sse_subscribers) >= 1
+
+    assert response.background is not None
+    await response.background()
 
     assert not gateway._sse_subscribers, "SSE subscriber registry retained a disconnected client"
