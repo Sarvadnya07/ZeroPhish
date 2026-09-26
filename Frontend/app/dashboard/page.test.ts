@@ -13,7 +13,7 @@ describe("DashboardPage scan history", () => {
     },
   );
 
-  it("preserves valid scan history entries", () => {
+  it("keeps valid scan history entries unchanged", () => {
     const history = [{ verdict: "SAFE", sender_domain: "example.com" }];
 
     expect(normalizeScanHistory(history)).toBe(history);
