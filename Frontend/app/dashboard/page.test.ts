@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeScanHistory } from "@/lib/dashboard-history";
+import { normalizeScanHistory } from "../../lib/dashboard-history";
 
 describe("DashboardPage scan history", () => {
   it("preserves an empty API response as an empty history", () => {
