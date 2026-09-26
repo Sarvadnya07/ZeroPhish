@@ -39,6 +39,16 @@ function StatCard({
   );
 }
 
+/**
+ * Keep dashboard rendering resilient to an unexpected API payload.
+ * The backend contract is an array, but the UI should degrade to an
+ * empty state rather than crashing if a proxy, stale backend, or future
+ * response change returns null or another JSON shape.
+ */
+export function normalizeScanHistory(value: unknown): any[] {
+  return Array.isArray(value) ? value : [];
+}
+
 export default function DashboardPage() {
   const { token, user } = useAuth();
   const [riskScore, setRiskScore] = useState<number | null>(null);
@@ -53,7 +63,7 @@ export default function DashboardPage() {
       api.analytics.history(token),
     ]).then(([rs, sh]) => {
       if (rs.status === "fulfilled") setRiskScore(rs.value.risk_score);
-      if (sh.status === "fulfilled") setScanHistory(sh.value);
+      if (sh.status === "fulfilled") setScanHistory(normalizeScanHistory(sh.value));
     }).finally(() => setLoadingStats(false));
   }, [token]);
 
@@ -111,12 +121,12 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Recent scan history */}
-      {scanHistory.length > 0 && (
-        <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl overflow-hidden">
-          <div className="border-b border-zinc-800 px-5 py-3">
-            <h2 className="text-sm font-semibold text-zinc-300">Recent Scan History</h2>
-          </div>
+      {/* Recent scan history / empty state */}
+      <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl overflow-hidden">
+        <div className="border-b border-zinc-800 px-5 py-3">
+          <h2 className="text-sm font-semibold text-zinc-300">Recent Scan History</h2>
+        </div>
+        {scanHistory.length > 0 ? (
           <div className="divide-y divide-zinc-800/50">
             {scanHistory.slice(0, 10).map((s: any, i) => (
               <div key={i} className="px-5 py-3 flex items-center gap-3 text-sm">
@@ -130,8 +140,16 @@ export default function DashboardPage() {
               </div>
             ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="px-5 py-10 text-center">
+            <ShieldCheck className="mx-auto h-8 w-8 text-zinc-600" aria-hidden="true" />
+            <p className="mt-3 text-sm font-medium text-zinc-300">No scans yet</p>
+            <p className="mt-1 text-xs text-zinc-500">
+              Your recent scan history will appear here after your first scan.
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
