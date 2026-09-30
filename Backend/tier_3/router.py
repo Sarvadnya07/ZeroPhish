@@ -52,6 +52,9 @@ class Tier3Router:
         self.register_provider("gemini", GeminiProvider())
         self.register_provider("openai_compatible", OpenAICompatibleProvider())
         self.register_provider("ollama", OllamaProvider())
+        if os.getenv("ZEROPHISH_ENABLE_TEST_PROVIDER", "false").lower() in ("true", "1", "yes"):
+            from .providers.test_provider import ControlledTestProvider
+            self.register_provider("test_provider", ControlledTestProvider())
 
     def register_provider(self, provider_id: str, provider: AIProvider) -> None:
         """Register or overwrite an AI provider instance."""

@@ -52,6 +52,7 @@ wheels/
 coverage.xml
 htmlcov/
 *.cover
+scratch/.pytest_tmp/
 
 # Node & Next.js Build Outputs
 node_modules/
@@ -91,6 +92,7 @@ desktop.ini
 ehthumbs.db
 .vscode/
 .idea/
+.reticle/
 
 # Local ML Model Artifacts & Weights (Never commit heavy binaries or caches)
 /models/

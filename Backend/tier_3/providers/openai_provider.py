@@ -77,7 +77,7 @@ class OpenAICompatibleProvider(AIProvider):
             async with httpx.AsyncClient(timeout=2.0) as client:
                 res = await client.get(
                     f"{self._base_url}/models",
-                    headers={"Authorization": f"Bearer {self._api_key}"},
+                    headers={"Authorization": f"Bearer {self._get_api_key()}"},
                 )
                 return res.status_code in (200, 403, 404)
         except Exception:
@@ -115,7 +115,7 @@ class OpenAICompatibleProvider(AIProvider):
 
         endpoint = f"{self._base_url}/chat/completions"
         headers = {
-            "Authorization": f"Bearer {self._api_key}",
+            "Authorization": f"Bearer {self._get_api_key()}",
             "Content-Type": "application/json",
         }
 

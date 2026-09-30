@@ -275,11 +275,31 @@ class TestVisionLifecycleAndBoundaries:
             assert res.status_code == 200
             scan_id = res.json()["scan_id"]
 
+            # Polling endpoint (/gateway/status/{scan_id} and /api/v1/scan/{scan_id})
+            poll_res = client.get(f"/api/v1/scan/{scan_id}").json()
+            assert poll_res["complete"] is True
+            assert poll_res["vision"] is not None
+            assert str(poll_res["vision"]["status"]).upper() == "VISUAL_REQUIRED"
+            assert poll_res["vision"]["requires_followup"] is True
+            assert poll_res["vision"]["visual_score"] is None
+            assert poll_res["explanation"]["tier_summaries"]["vision"]["status"] == "visual_required"
+            assert poll_res["explanation"]["tier_summaries"]["vision"]["requires_followup"] is True
+            assert poll_res["explanation"]["tier_summaries"]["vision"]["score"] is None
+            assert poll_res["explanation"]["tier_summaries"]["vision"]["participated"] is False
+
+            # Full result endpoint (/gateway/result/{scan_id})
             final_res = client.get(f"/gateway/result/{scan_id}").json()
             assert final_res["complete"] is True
             assert final_res["vision"] is not None
             assert str(final_res["vision"]["status"]).upper() == "VISUAL_REQUIRED"
             assert final_res["vision"]["requires_followup"] is True
+            assert final_res["vision"]["visual_score"] is None
+            assert final_res["explanation"]["tier_summaries"]["vision"]["status"] == "visual_required"
+            assert final_res["explanation"]["tier_summaries"]["vision"]["requires_followup"] is True
+            assert final_res["explanation"]["tier_summaries"]["vision"]["score"] is None
+            assert final_res["explanation"]["tier_summaries"]["vision"]["participated"] is False
+            assert final_res["verdict"] in ("SUSPICIOUS", "CRITICAL")
+            assert final_res["final_score"] is not None and final_res["final_score"] >= res.json()["partial_score"]
 
 
     def test_vision_cannot_independently_elevate_safe_to_critical(self, client):

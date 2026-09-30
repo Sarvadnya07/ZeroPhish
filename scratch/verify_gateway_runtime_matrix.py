@@ -41,6 +41,8 @@ def start_gateway():
     env["PORT"] = "8001"
     env["PYTHONPATH"] = os.path.abspath("Backend")
     env["SECRET_KEY"] = "production_ready_test_secret_key_1234567890"
+    env["ZEROPHISH_ENABLE_TEST_PROVIDER"] = "true"
+    env["TIER3_PRIMARY_PROVIDER"] = "test_provider"
     
     cmd = [
         sys.executable,
@@ -229,7 +231,82 @@ async def run_matrix():
         print(f"[CASE 6: ALL ADVISORY FAILURE] Verified: When T3 and Vision fail, baseline partial score is strictly preserved.")
 
         # 7. Missing Screenshot / VISUAL_REQUIRED
-        print(f"[CASE 7: VISUAL_REQUIRED] Contract verified: missing screenshot yields status=not_requested / visual_required, never synthetic 50/0")
+        # When Tier 3 requires visual check and screenshot is absent:
+        # - Gateway finalizer creates VisionAnalysisResult(status=VISUAL_REQUIRED, requires_followup=True, visual_score=None)
+        # - Fusion engine sets tier summary status="visual_required", requires_followup=True, score=None, participated=False
+        # - Final transport exposes vision.status=VISUAL_REQUIRED and explanation summary status=visual_required
+        # - visual_score is None, NEVER synthetic 50/0
+        # - Missing image does not silently become SAFE
+        req_visual_payload = {
+            "sender": "portal-support@brand-login.org",
+            "subject": "Please log in to review your confidential invoice",
+            "body": "VISUAL_CHECK_REQUIRED: Please log in to review your confidential invoice.",
+            "links": ["http://brand-login.org/invoice"],
+            "tier1_score": 45,
+            "tier1_evidence": ["Suspicious login portal structure"],
+            # screenshot_b64 intentionally omitted
+        }
+        r_c7 = await client.post("/api/v1/scan", json=req_visual_payload)
+        assert r_c7.status_code == 200, f"Failed to submit Case 7 scan: {r_c7.status_code}"
+        d_c7 = r_c7.json()
+        scan_id_c7 = d_c7["scan_id"]
+
+        for _ in range(25):
+            await asyncio.sleep(0.5)
+            st_c7 = (await client.get(f"/api/v1/scan/{scan_id_c7}")).json()
+            if st_c7.get("complete"):
+                break
+
+        assert st_c7.get("complete") is True, "Case 7 scan did not reach complete=True"
+
+        # Also retrieve full result via /gateway/result/{scan_id} to verify cross-endpoint consistency
+        res_c7_full = await client.get(f"/gateway/result/{scan_id_c7}")
+        assert res_c7_full.status_code == 200, f"/gateway/result/{scan_id_c7} returned {res_c7_full.status_code}"
+        d_c7_full = res_c7_full.json()
+
+        # Authoritative vision object
+        vision_st = st_c7.get("vision")
+        vision_full = d_c7_full.get("vision")
+        assert vision_st is not None, "Case 7: vision object is missing in /api/v1/scan/{id}"
+        assert vision_full is not None, "Case 7: vision object is missing in /gateway/result/{id}"
+
+        # Tier 3 visual check flag
+        t3_st = st_c7.get("tier3")
+        assert t3_st is not None, "Case 7: tier3 object is missing"
+        assert t3_st.get("requires_visual_check") is True, f"Expected tier3.requires_visual_check=True, got {t3_st.get('requires_visual_check')}"
+
+        # Assert canonical vision fields
+        assert str(vision_st.get("status")).upper() == "VISUAL_REQUIRED", f"Expected vision.status=VISUAL_REQUIRED, got {vision_st.get('status')}"
+        assert str(vision_full.get("status")).upper() == "VISUAL_REQUIRED", f"Expected full vision.status=VISUAL_REQUIRED, got {vision_full.get('status')}"
+        assert vision_st.get("requires_followup") is True, f"Expected vision.requires_followup=True, got {vision_st.get('requires_followup')}"
+        assert vision_full.get("requires_followup") is True, f"Expected full vision.requires_followup=True, got {vision_full.get('requires_followup')}"
+        assert vision_st.get("visual_score") is None, f"Expected visual_score=None, got {vision_st.get('visual_score')}"
+        assert vision_full.get("visual_score") is None, f"Expected full visual_score=None, got {vision_full.get('visual_score')}"
+
+        # Assert explanation tier summary for vision
+        expl = st_c7.get("explanation") or {}
+        v_summary = expl.get("tier_summaries", {}).get("vision", {})
+        assert v_summary.get("status") == "visual_required", f"Expected explanation vision status=visual_required, got {v_summary.get('status')}"
+        assert v_summary.get("requires_followup") is True, "Expected explanation vision requires_followup=True"
+        assert v_summary.get("score") is None, f"Expected explanation vision score=None, got {v_summary.get('score')}"
+        assert v_summary.get("participated") is False, "Expected explanation vision participated=False"
+
+        # Assert verdict and score semantics: missing image must NOT silently become SAFE or create synthetic 50/0
+        assert st_c7["verdict"] in ("SUSPICIOUS", "CRITICAL"), f"Missing image silently became {st_c7['verdict']}"
+        assert st_c7["final_score"] is not None and st_c7["final_score"] >= d_c7["partial_score"], "Final score degraded below partial baseline"
+        assert st_c7["final_score"] != 50.0 or d_c7["partial_score"] == 50.0, "Unexpected synthetic score 50.0 assigned"
+
+        print(
+            f"[CASE 7: VISUAL_REQUIRED] Observed: "
+            f"requires_visual_check={t3_st.get('requires_visual_check')} | "
+            f"vision_status={vision_st.get('status')} | "
+            f"requires_followup={vision_st.get('requires_followup')} | "
+            f"visual_score={vision_st.get('visual_score')} | "
+            f"summary_status={v_summary.get('status')} | "
+            f"verdict={st_c7['verdict']} | "
+            f"final_score={st_c7['final_score']} (baseline: {d_c7['partial_score']}) | "
+            f"PASS"
+        )
 
 
         # 8. Polling Verification
