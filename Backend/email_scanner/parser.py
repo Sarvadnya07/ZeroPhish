@@ -149,8 +149,9 @@ class EmlParser:
             content_disposition = str(part.get("Content-Disposition", "")).lower()
             filename = part.get_filename()
 
-            if filename:
+            if filename or "attachment" in content_disposition:
                 # This is an attachment
+                resolved_filename = filename or "unnamed_attachment"
                 payload = part.get_payload(decode=True)
                 if payload is None:
                     payload = b""
@@ -158,7 +159,7 @@ class EmlParser:
                     payload = payload.encode("utf-8", errors="ignore")
                 elif not isinstance(payload, (bytes, bytearray, memoryview)):
                     payload = str(payload).encode("utf-8", errors="ignore")
-                attachments.append(EmlParser._analyse_attachment(filename, content_type, payload))
+                attachments.append(EmlParser._analyse_attachment(resolved_filename, content_type, payload))
                 continue
 
             # Body parts
