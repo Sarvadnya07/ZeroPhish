@@ -26,6 +26,20 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+norecursedirs = [
+    ".venv",
+    "node_modules",
+    "htmlcov",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".git",
+    "scratch",
+    "Frontend",
+    "extension",
+]
+markers = [
+    "durability: multi-process lifecycle and persistence durability tests",
+]
 
 [tool.coverage.run]
 source = ["Backend"]
@@ -37,9 +51,7 @@ omit = [
     "*/ENV/*",
     "*/env/*",
     "Backend/tier_2/benchmark*.py",
-    "Backend/tier_2/main.py",
     "tier_2/benchmark*.py",
-    "tier_2/main.py",
 ]
 
 [tool.coverage.report]

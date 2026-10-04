@@ -79,6 +79,9 @@ jobs:
       - name: Enforce coverage threshold
         run: python -m coverage report --fail-under=65
 
+      - name: Run multi-process restart durability verification
+        run: python -m pytest ../test_blackbox_durability.py -v --no-cov
+
       - name: Upload coverage report
         uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         if: always()
@@ -106,7 +109,7 @@ jobs:
         run: python -m pip install pip-audit
 
       - name: Audit dependencies for known vulnerabilities
-        run: python -m pip_audit -r requirements.txt --ignore-vuln PYSEC-2022-43059
+        run: python -m pip_audit -r requirements.txt
 
   frontend-ci:
     name: Frontend Typecheck, Vitest & Build
