@@ -249,6 +249,19 @@ async def lifespan(app: FastAPI):
         logger.critical("FATAL: DATABASE_URL is not set in production mode.")
         raise RuntimeError("DATABASE_URL must be configured in production environment for multi-worker safety.")
 
+    # Fail closed in production if REDIS_URL is not configured for multi-worker SSE propagation
+    if CONFIG.env == "production" and not os.getenv("REDIS_URL"):
+        logger.critical("FATAL: REDIS_URL is not set in production mode.")
+        raise RuntimeError("REDIS_URL must be configured in production environment for multi-worker SSE event propagation.")
+
+    # Initialize cross-worker SSE Pub/Sub transport
+    try:
+        await start_sse_pubsub()
+    except Exception as _pubsub_err:
+        logger.warning("Failed to start Redis Pub/Sub SSE transport: %s", _pubsub_err)
+        if CONFIG.env == "production":
+            raise RuntimeError(f"Failed to start Redis Pub/Sub in production: {_pubsub_err}")
+
     # Pre-warm Tier 2 DistilBERT ML model
     try:
         try:
@@ -264,7 +277,13 @@ async def lifespan(app: FastAPI):
 
     yield
     logger.info("ZeroPhish API Gateway shutting down...")
-    # 1. Drain/cancel active background tasks
+    # 1. Stop cross-worker SSE Pub/Sub
+    try:
+        await stop_sse_pubsub()
+    except Exception as e:
+        logger.debug("Error stopping Redis Pub/Sub SSE transport: %s", e)
+
+    # 2. Drain/cancel active background tasks
     if _background_tasks:
         logger.info("Draining %d active background tasks...", len(_background_tasks))
         try:
@@ -282,7 +301,7 @@ async def lifespan(app: FastAPI):
                 logger.warning("Timed out waiting for background tasks to drain.")
         _background_tasks.clear()
 
-    # 2. Close webhook client
+    # 3. Close webhook client
     if EXTENSIONS_AVAILABLE:
         try:
             from webhooks.service import _close_client
@@ -290,14 +309,14 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.debug("Error closing webhook client: %s", e)
 
-    # 3. Close cache backend
+    # 4. Close cache backend
     try:
         from repositories.factory import close_cache_backend
         await close_cache_backend()
     except Exception as e:
         logger.debug("Error closing cache backend: %s", e)
 
-    # 4. Clear SSE subscribers
+    # 5. Clear SSE subscribers
     _sse_subscribers.clear()
     _sse_subscriber_overflows.clear()
 
@@ -401,9 +420,37 @@ sse_metrics: Dict[str, int] = {
     "sse_queue_full_total": 0,
     "sse_events_dropped_total": 0,
     "sse_subscriber_evictions_total": 0,
+    "sse_redis_published_total": 0,
+    "sse_redis_received_total": 0,
+    "sse_redis_errors_total": 0,
 }
 _sse_subscriber_overflows: Dict[str, int] = {}
 MAX_OVERFLOW_THRESHOLD = 5
+
+# ---------- Cross-Worker SSE Pub/Sub State (P1-01B) ----------
+SSE_EVENT_CHANNEL = "gateway:scan:events"
+WORKER_ID: str = str(uuid.uuid4())
+_redis_pub_client: Optional[Any] = None
+_redis_sub_client: Optional[Any] = None
+_sse_pubsub_task: Optional[asyncio.Task] = None
+_sse_pubsub_active: bool = False
+_sse_seen_events: set[str] = set()
+_sse_seen_events_order: List[str] = []
+MAX_SEEN_EVENTS = 1000
+
+
+def _mark_seen_event(event_id: str) -> bool:
+    """Track recently seen event IDs to prevent duplicate dispatch. Returns True if first seen, False if duplicate."""
+    if not event_id:
+        return True
+    if event_id in _sse_seen_events:
+        return False
+    _sse_seen_events.add(event_id)
+    _sse_seen_events_order.append(event_id)
+    if len(_sse_seen_events_order) > MAX_SEEN_EVENTS:
+        evicted = _sse_seen_events_order.pop(0)
+        _sse_seen_events.discard(evicted)
+    return True
 
 
 def _publish_to_subscriber(sub_id: str, q: asyncio.Queue, payload: Any) -> bool:
@@ -441,11 +488,44 @@ def _publish_to_subscriber(sub_id: str, q: asyncio.Queue, payload: Any) -> bool:
         return False
 
 
-def _broadcast_to_subscribers(payload: Any) -> None:
+def _publish_cross_worker_sse(payload: Any) -> None:
+    """Publish a validated local event to Redis Pub/Sub for cross-worker propagation."""
+    global _redis_pub_client
+    if _redis_pub_client is None:
+        return
+
+    event_id = str(uuid.uuid4())
+    envelope = {
+        "event_id": event_id,
+        "origin_worker": WORKER_ID,
+        "event_type": "scan_update",
+        "data": payload,
+    }
+
+    async def _pub_coro():
+        global _redis_pub_client
+        try:
+            raw = json.dumps(envelope, default=str)
+            await _redis_pub_client.publish(SSE_EVENT_CHANNEL, raw)
+            sse_metrics["sse_redis_published_total"] += 1
+            logger.debug("Published cross-worker SSE event %s to %s", event_id, SSE_EVENT_CHANNEL)
+        except Exception as e:
+            sse_metrics["sse_redis_errors_total"] += 1
+            logger.debug("Failed to publish cross-worker SSE event to Redis: %s", e)
+
+    try:
+        _spawn_background_task(_pub_coro(), name=f"sse-redis-pub-{event_id}")
+    except RuntimeError:
+        pass
+
+
+def _broadcast_to_subscribers(payload: Any, propagate: bool = True) -> None:
     """
     Send payload to every SSE subscriber and evict subscribers whose queue
     repeatedly overflowed. Single owner of the eviction loop so the backpressure
     policy cannot drift between call sites.
+    When propagate=True and Redis Pub/Sub is active, asynchronously publishes the event
+    to other workers.
     """
     if hasattr(payload, "model_dump"):
         try:
@@ -465,6 +545,159 @@ def _broadcast_to_subscribers(payload: Any) -> None:
     for sub_id in dead:
         _sse_subscribers.pop(sub_id, None)
         _sse_subscriber_overflows.pop(sub_id, None)
+
+    if propagate and _redis_pub_client is not None:
+        _publish_cross_worker_sse(payload)
+
+
+async def _sse_redis_listener_loop(redis_url: str) -> None:
+    """
+    Background subscriber loop that receives cross-worker events from Redis Pub/Sub
+    and fans them out to local worker SSE queues without republishing.
+    """
+    global _redis_sub_client, _sse_pubsub_active, _latest_tier1_report
+    import redis.asyncio as aioredis
+
+    backoff = 0.5
+    while True:
+        pubsub = None
+        try:
+            _redis_sub_client = aioredis.from_url(
+                redis_url,
+                decode_responses=True,
+                socket_connect_timeout=3.0,
+                socket_timeout=5.0,
+            )
+            pubsub = _redis_sub_client.pubsub()
+            await pubsub.subscribe(SSE_EVENT_CHANNEL)
+            _sse_pubsub_active = True
+            backoff = 0.5
+            logger.info("Worker %s subscribed to Redis SSE channel: %s", WORKER_ID, SSE_EVENT_CHANNEL)
+
+            while True:
+                msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if msg is None:
+                    await asyncio.sleep(0.05)
+                    continue
+
+                if msg.get("type") != "message":
+                    continue
+
+                raw_data = msg.get("data")
+                if not raw_data or not isinstance(raw_data, str):
+                    continue
+
+                try:
+                    envelope = json.loads(raw_data)
+                except Exception:
+                    logger.debug("Discarding malformed JSON on Redis SSE channel")
+                    continue
+
+                if not isinstance(envelope, dict):
+                    continue
+
+                # Untrusted transport validation
+                origin_worker = envelope.get("origin_worker")
+                event_id = envelope.get("event_id")
+                event_data = envelope.get("data")
+
+                # Loop prevention: Discard events originated by this worker
+                if origin_worker == WORKER_ID:
+                    continue
+
+                # Validate required structure
+                if not isinstance(event_data, dict):
+                    continue
+
+                # Deduplication check
+                if event_id and not _mark_seen_event(str(event_id)):
+                    logger.debug("Discarding duplicate Redis SSE event %s", event_id)
+                    continue
+
+                sse_metrics["sse_redis_received_total"] += 1
+
+                # Update latest telemetry cache if valid
+                if "scan_id" in event_data:
+                    _latest_tier1_report = event_data
+
+                # Fan out to local connected subscribers without republishing (propagate=False)
+                _broadcast_to_subscribers(event_data, propagate=False)
+
+        except asyncio.CancelledError:
+            logger.info("Redis SSE listener cancelled for worker %s", WORKER_ID)
+            break
+        except Exception as e:
+            _sse_pubsub_active = False
+            sse_metrics["sse_redis_errors_total"] += 1
+            logger.warning("Redis SSE subscription error on worker %s: %s; retrying in %.1fs", WORKER_ID, e, backoff)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 5.0)
+        finally:
+            _sse_pubsub_active = False
+            if pubsub:
+                try:
+                    await pubsub.unsubscribe(SSE_EVENT_CHANNEL)
+                    await pubsub.aclose()
+                except Exception:
+                    pass
+            if _redis_sub_client:
+                try:
+                    await _redis_sub_client.aclose()
+                except Exception:
+                    pass
+                _redis_sub_client = None
+
+
+async def start_sse_pubsub(redis_url: Optional[str] = None) -> None:
+    """Initialize Redis Pub/Sub publisher client and background listener task."""
+    global _redis_pub_client, _sse_pubsub_task
+    resolved_url = redis_url or os.getenv("REDIS_URL")
+    if not resolved_url:
+        return
+
+    import redis.asyncio as aioredis
+    _redis_pub_client = aioredis.from_url(
+        resolved_url,
+        decode_responses=True,
+        socket_connect_timeout=3.0,
+        socket_timeout=5.0,
+    )
+    _sse_pubsub_task = asyncio.create_task(
+        _sse_redis_listener_loop(resolved_url),
+        name=f"sse-redis-listener-{WORKER_ID}",
+    )
+    logger.info("Started Redis Pub/Sub SSE integration for worker %s", WORKER_ID)
+
+
+async def stop_sse_pubsub() -> None:
+    """Cleanly cancel the background listener and close Redis pub/sub clients."""
+    global _redis_pub_client, _redis_sub_client, _sse_pubsub_task, _sse_pubsub_active
+    _sse_pubsub_active = False
+    if _sse_pubsub_task and not _sse_pubsub_task.done():
+        _sse_pubsub_task.cancel()
+        try:
+            await asyncio.wait_for(_sse_pubsub_task, timeout=2.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+            pass
+        _sse_pubsub_task = None
+
+    if _redis_pub_client:
+        try:
+            await _redis_pub_client.aclose()
+        except Exception:
+            pass
+        _redis_pub_client = None
+
+    if _redis_sub_client:
+        try:
+            await _redis_sub_client.aclose()
+        except Exception:
+            pass
+        _redis_sub_client = None
+
+    _sse_seen_events.clear()
+    _sse_seen_events_order.clear()
+    logger.info("Stopped Redis Pub/Sub SSE integration for worker %s", WORKER_ID)
 
 SCAN_CACHE_VERSION = "v2.1"
 
@@ -1223,6 +1456,8 @@ async def gateway_health() -> dict:
         },
         "sse": {
             "active_subscribers": len(_sse_subscribers),
+            "pubsub_active": _sse_pubsub_active,
+            "worker_id": WORKER_ID,
             **sse_metrics,
         },
         "circuit_breaker": tier3_circuit_breaker.get_status() if tier3_circuit_breaker else None,
@@ -1261,6 +1496,24 @@ async def gateway_readiness(response: Response) -> dict:
             is_ready = False
     else:
         dependencies["database"] = "in-memory"
+
+    # Active Redis Pub/Sub probe if configured
+    if os.getenv("REDIS_URL"):
+        try:
+            if _redis_pub_client:
+                await _redis_pub_client.ping()
+                dependencies["redis_pubsub"] = "ready"
+            else:
+                dependencies["redis_pubsub"] = "uninitialized"
+                if CONFIG.env == "production":
+                    is_ready = False
+        except Exception as e:
+            logger.error("Readiness check redis_pubsub probe failed: %s", e)
+            dependencies["redis_pubsub"] = "unhealthy"
+            if CONFIG.env == "production":
+                is_ready = False
+    else:
+        dependencies["redis_pubsub"] = "local-only"
 
     # Circuit breaker health check
     if tier3_circuit_breaker:
