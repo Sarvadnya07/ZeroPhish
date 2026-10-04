@@ -514,7 +514,9 @@ and documented health keys `features` / `tier3_circuit_breaker` do not exist.
   verified gap.
 - CI installs backend deps with a CPU PyTorch index and runs `pip-audit`
   (ignoring `PYSEC-2022-43059`); the frontend runs `pnpm audit --audit-level=high`
-  and pins `next` to exactly `16.3.3`.
+  (allow-listing only the documented upstream-blocked `braces` advisory
+  `GHSA-vfj7-8cjw-p6xm`, see `SECURITY.md`) and pins `next` to exactly `16.3.6`
+  (security floor for `GHSA-vcvr-r3jv-pc5j`; was `16.3.3` at Phase 1 time).
 - **Inconsistency found:** `SECURITY.md` justifies accepted advisories against
   `transformers==4.57.6` / `torch==2.5.1+cu118`, while `requirements.txt` pins
   `transformers==5.10.4` / `torch==2.13.0`. The security rationale no longer

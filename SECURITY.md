@@ -93,6 +93,13 @@ The following vulnerabilities are accepted with documented compensating controls
 - **PyTorch (`torch==2.5.1+cu118`)**:
   - Advisories related to pickle deserialization are mitigated by the same controls (only trusted models loaded).
 
+- **braces (`braces@3.0.3`, high — `GHSA-vfj7-8cjw-p6xm`)**:
+  - **Advisory**: stack-exhaustion denial of service through deeply nested glob patterns.
+  - **Status**: UPSTREAM-BLOCKED. The advisory lists `>=3.0.4` as the patched range, but no `braces@3.0.4` (or later 3.x) release exists on the npm registry (`dist-tags.latest` is `3.0.3`), so the fix cannot be installed without an arbitrary package substitution.
+  - **Dependency paths**: `tailwindcss`/`tailwindcss-animate` → `chokidar`/`micromatch` → `braces`, and `@next/eslint-plugin-next` → `fast-glob` → `micromatch` → `braces`.
+  - **Reachability**: build/lint tooling only (Tailwind CSS compilation at `pnpm build` and ESLint glob expansion). `braces` is never loaded by the Next.js production server, the FastAPI backend, or the browser bundle.
+  - **Compensating controls**: the CI audit gate and `scripts/security-gate.ps1` allow-list exactly this one advisory ID (`GHSA-vfj7-8cjw-p6xm`); every other high/critical advisory still fails the gate. The advisory will be re-evaluated as soon as upstream publishes a patched 3.x release.
+
 ---
 
 ## Environment & Configuration Security

@@ -404,10 +404,32 @@ if (Test-Path (Join-Path $FrontendDir "package.json")) {
 
             Write-Host ""
             Write-Host "Running pnpm audit..." -ForegroundColor White
-            pnpm audit --audit-level=high
-            if ($LASTEXITCODE -eq 0) {
-                Pass "pnpm audit" "0 high/critical vulnerabilities found."
+            # Policy: fail on any high/critical advisory except the documented
+            # upstream-blocked braces advisory GHSA-vfj7-8cjw-p6xm
+            # (no braces@3.0.4 published upstream; build-tool chain only).
+            # See SECURITY.md "Accepted Upstream Exceptions".
+            $AuditJson = pnpm audit --audit-level=high --json 2>$null | Out-String
+            $AuditAllowed = @("GHSA-vfj7-8cjw-p6xm")
+            $AuditBlocking = @()
+            try {
+                $AuditData = $AuditJson | ConvertFrom-Json
+                if ($AuditData -and $AuditData.advisories) {
+                    foreach ($Prop in $AuditData.advisories.PSObject.Properties) {
+                        $Adv = $Prop.Value
+                        if ($AuditAllowed -notcontains $Adv.github_advisory_id) {
+                            $AuditBlocking += "$($Adv.github_advisory_id) $($Adv.module_name) $($Adv.severity)"
+                        } else {
+                            Write-Host "Allowed (documented upstream-blocked): $($Adv.github_advisory_id) $($Adv.module_name) $($Adv.severity)" -ForegroundColor DarkYellow
+                        }
+                    }
+                }
+            } catch {
+                $AuditBlocking += "pnpm audit output could not be parsed (fail-closed)"
+            }
+            if ($AuditBlocking.Count -eq 0) {
+                Pass "pnpm audit" "No blocking high/critical vulnerabilities (documented upstream-blocked advisories excepted)."
             } else {
+                foreach ($Finding in $AuditBlocking) { Write-Host "  BLOCKING: $Finding" -ForegroundColor Red }
                 Fail "pnpm audit" "High/critical dependency findings exist."
             }
         }

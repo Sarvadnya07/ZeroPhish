@@ -139,7 +139,27 @@ jobs:
           node -e "const p=require('./package.json'); if(p.dependencies.next !== '16.3.6') process.exit(1)"
 
       - name: Audit frontend dependencies
-        run: pnpm audit --audit-level=high
+        # Fails on ANY high/critical advisory except the single documented
+        # upstream-blocked advisory (braces GHSA-vfj7-8cjw-p6xm: no patched
+        # release exists upstream; see SECURITY.md "Accepted Upstream
+        # Exceptions"). Build-tool chain only; not production-runtime reachable.
+        run: |
+          set +e
+          pnpm audit --audit-level=high --json > pnpm-audit.json
+          set -e
+          node -e "
+            const fs = require('fs');
+            const a = JSON.parse(fs.readFileSync('pnpm-audit.json', 'utf8'));
+            const allowed = new Set(['GHSA-vfj7-8cjw-p6xm']);
+            const advisories = Object.values(a.advisories || {});
+            const blocking = advisories.filter(x => !allowed.has(x.github_advisory_id));
+            if (blocking.length) {
+              console.error('Blocking advisories:');
+              for (const x of blocking) console.error('- ' + x.github_advisory_id + ' ' + x.module_name + ' ' + x.severity);
+              process.exit(1);
+            }
+            for (const x of advisories) console.log('Allowed (documented upstream-blocked): ' + x.github_advisory_id + ' ' + x.module_name + ' ' + x.severity);
+          "
 
       - name: TypeScript type check
         run: pnpm exec tsc --noEmit
