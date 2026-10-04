@@ -43,6 +43,31 @@ def _wait_for_health(port: int, timeout: float = 25.0) -> dict[str, Any]:
     raise TimeoutError(f"Gateway on port {port} did not become healthy within {timeout}s")
 
 
+def _wait_for_scan_completion(port: int, scan_id: str, timeout: float = 25.0) -> dict[str, Any]:
+    """
+    Poll the authoritative /gateway/result/{scan_id} endpoint until complete or timeout.
+    Returns the authoritative completed scan result dictionary.
+    """
+    start = time.time()
+    last_status = None
+    while time.time() - start < timeout:
+        try:
+            r = requests.get(f"http://127.0.0.1:{port}/gateway/result/{scan_id}", timeout=2.0)
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("complete") is True and data.get("final_score") is not None:
+                    return data
+                last_status = f"HTTP 200 but complete={data.get('complete')}, final_score={data.get('final_score')}"
+            else:
+                last_status = f"HTTP {r.status_code}: {r.text[:200]}"
+        except Exception as exc:
+            last_status = f"Exception: {exc}"
+        time.sleep(0.5)
+    raise TimeoutError(
+        f"Scan {scan_id} on port {port} did not complete within {timeout}s. Last status: {last_status}"
+    )
+
+
 def _terminate_process(proc: subprocess.Popen) -> None:
     """Reliably terminate a subprocess across POSIX and Windows."""
     if proc.poll() is None:
@@ -137,8 +162,18 @@ def test_blackbox_process_restart_durability(tmp_path):
 
         scan_data = scan_resp.json()
         scan_id = scan_data["scan_id"]
-        verdict = scan_data["verdict"]
-        score = scan_data["final_score"]
+
+        # If scan is incomplete, poll authoritative endpoint until completion
+        if not scan_data.get("complete") or scan_data.get("final_score") is None:
+            completed_result = _wait_for_scan_completion(port=port, scan_id=scan_id, timeout=25.0)
+            verdict = completed_result["verdict"]
+            score = completed_result["final_score"]
+        else:
+            verdict = scan_data["verdict"]
+            score = scan_data["final_score"]
+
+        assert score is not None, f"Authoritative scan {scan_id} final_score is None after completion"
+        assert verdict is not None, f"Authoritative scan {scan_id} verdict is None after completion"
 
         # Verify scan record registered in health metric
         health_check_a = requests.get(f"http://127.0.0.1:{port}/health", timeout=5.0).json()
@@ -188,6 +223,7 @@ def test_blackbox_process_restart_durability(tmp_path):
 
         retrieved = get_resp.json()
         assert retrieved["scan_id"] == scan_id
+        assert retrieved["complete"] is True, f"Expected persisted scan to be complete, got: {retrieved.get('complete')}"
         assert retrieved["verdict"] == verdict
         assert retrieved["final_score"] == score
 
