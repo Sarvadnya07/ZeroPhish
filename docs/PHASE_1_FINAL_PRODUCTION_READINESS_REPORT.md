@@ -7,6 +7,34 @@
 
 ---
 
+## Phase 1.10 FREEZE — Production Baseline
+
+**Phase 1.10 is frozen as the production-readiness baseline at commit `41332b0`
+(`ci: encode upstream-blocked braces advisory in audit gates`).**
+
+Production validation (all passed on the frozen baseline):
+
+- Backend: **627/627**
+- Runtime E2E: **16/16**
+- Vitest: **45/45**
+- TypeScript: **PASS**
+- ESLint: **PASS**
+- Production build: **PASS** (Next.js 16.3.6)
+- Phase 1.10 invariants: **30/30 PASS**
+
+**Final verdict: PRODUCTION-READY WITH DOCUMENTED UPSTREAM LIMITATION**
+
+Remaining advisory: `braces@3.0.3` / `GHSA-vfj7-8cjw-p6xm` — status
+**UPSTREAM-BLOCKED** (advisory requires `>=3.0.4`; no such release exists on the
+npm registry). The advisory is documented in `SECURITY.md` and handled through
+the exact-ID, fail-closed CI allow-list; every other high/critical advisory
+still fails the audit gate.
+
+Future development must occur in a subsequent phase and must not silently
+mutate the Phase 1.10 production baseline.
+
+---
+
 ## 1. Executive Summary
 
 Phase 1.10 set out to determine whether the current ZeroPhish implementation can
