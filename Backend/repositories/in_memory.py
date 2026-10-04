@@ -491,6 +491,16 @@ class InMemoryScanResultRepository:
 
     async def save(self, scan_id: str, scan_data: Any) -> None:
         async with self._lock:
+            existing = self._scans.get(scan_id)
+            if existing is not None:
+                existing_complete = bool(getattr(existing, "complete", False))
+                incoming_complete = bool(getattr(scan_data, "complete", False))
+                if existing_complete and not incoming_complete:
+                    logger.warning(
+                        "Ignoring stale update for scan %s (in-memory): existing is complete, incoming is incomplete",
+                        scan_id,
+                    )
+                    return
             self._scans[scan_id] = scan_data
             while len(self._scans) > self._limit:
                 oldest_key = next(iter(self._scans))
