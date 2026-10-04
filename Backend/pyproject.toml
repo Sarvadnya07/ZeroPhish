@@ -68,6 +68,16 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+norecursedirs = [
+    ".venv",
+    "venv",
+    "htmlcov",
+    ".pytest_cache",
+    ".mypy_cache",
+]
+markers = [
+    "durability: multi-process lifecycle and persistence durability tests",
+]
 
 [project]
 # Minimal metadata so the pytest tooling below can be installed as a dev extra:
@@ -97,7 +107,6 @@ omit = [
     "*/ENV/*",
     "*/env/*",
     "tier_2/benchmark*.py",
-    "tier_2/main.py",
 ]
 
 [tool.coverage.report]

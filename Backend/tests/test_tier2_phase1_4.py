@@ -313,3 +313,12 @@ async def test_execute_tier2_unresolvable_domain_neutral_score():
         assert res.domain_analysis.score == 50.0
         assert res.domain_analysis.status == DomainStatus.UNKNOWN
         assert any("timed out or provider unavailable" in e for e in res.evidence)
+
+
+def test_tier2_legacy_entrypoint_shim():
+    """Verify Backend/tier_2/main.py delegates canonically to Backend/gateway.py app."""
+    import tier_2.main as tier2_entrypoint
+    import gateway
+
+    assert tier2_entrypoint.app is gateway.app
+

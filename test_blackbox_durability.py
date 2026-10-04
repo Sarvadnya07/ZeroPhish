@@ -1,121 +1,205 @@
+"""
+ZeroPhish - Black-box Multi-Process Durability and Restart Test.
+
+Lifecycle Boundary Tested:
+- Validates process crash/restart lifecycle boundary under SQL persistence.
+- Process A starts with standalone SQLite database and records a scan.
+- Process A is terminated (crash simulation).
+- Process B starts against the exact same SQLite database.
+- Process B loads existing scan state on startup and serves the persisted scan_id.
+"""
+
+from __future__ import annotations
+
 import os
+import socket
+import subprocess
 import sys
 import time
+from typing import Any
+
+import pytest
 import requests
-import subprocess
-import signal
 
-DB_FILE = os.path.abspath("test_durability.db")
-if os.path.exists(DB_FILE):
-    os.remove(DB_FILE)
 
-env = os.environ.copy()
-env["PORT"] = "8001"
-env["DATABASE_URL"] = f"sqlite:///{DB_FILE}"
-env["REPOSITORY_BACKEND"] = "sql"
-env["SECRET_KEY"] = "production_ready_test_secret_key_1234567890"
-env["PYTHONPATH"] = os.path.abspath("Backend")
+def _find_free_port() -> int:
+    """Find an available TCP port on localhost to avoid port collision."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
 
-print(f"[1] Starting Process A on port 8001 with DB={DB_FILE}...")
-proc_a = subprocess.Popen(
-    [sys.executable, "-m", "uvicorn", "Backend.gateway:app", "--host", "127.0.0.1", "--port", "8001", "--log-level", "warning"],
-    env=env,
-    stdout=subprocess.PIPE,
-    stderr=subprocess.PIPE,
-    text=True
-)
 
-def wait_for_health(timeout=25):
+def _wait_for_health(port: int, timeout: float = 25.0) -> dict[str, Any]:
+    """Poll the /health endpoint until HTTP 200 or timeout."""
     start = time.time()
     while time.time() - start < timeout:
         try:
-            r = requests.get("http://127.0.0.1:8001/health", timeout=1)
+            r = requests.get(f"http://127.0.0.1:{port}/health", timeout=1.0)
             if r.status_code == 200:
                 return r.json()
         except Exception:
             pass
         time.sleep(0.5)
-    raise TimeoutError("Gateway did not become healthy in time")
+    raise TimeoutError(f"Gateway on port {port} did not become healthy within {timeout}s")
 
-try:
-    health_a = wait_for_health()
-    print(f"[1] Process A healthy: status={health_a.get('status')}, scans={health_a.get('scans')}")
 
-    scan_payload = {
-        "tier1_score": 75,
-        "tier1_evidence": ["Urgent phrasing detected", "Suspicious sender domain"],
-        "body": "URGENT: Your account has been suspended. Please click here to verify your identity.",
-        "sender": "alert@security-paypal-fake.com",
-        "subject": "Action Required: Account Suspended",
-        "links": ["http://evil-phish.com/login"]
-    }
+def _terminate_process(proc: subprocess.Popen) -> None:
+    """Reliably terminate a subprocess across POSIX and Windows."""
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    # Ensure stdout/stderr pipes are closed to prevent handle inheritance leaks
+    for pipe in (proc.stdout, proc.stderr, proc.stdin):
+        if pipe and not pipe.closed:
+            try:
+                pipe.close()
+            except Exception:
+                pass
+    time.sleep(0.5)
 
-    print("[2] Posting scan to Process A (allowing up to 35s for DNS/WHOIS resolution)...")
+
+@pytest.mark.durability
+def test_blackbox_process_restart_durability(tmp_path):
+    """
+    Verify durable persistence across an actual multi-process crash/restart boundary.
+
+    Test Lifecycle Steps:
+    1. Initialize a dedicated SQLite database in tmp_path.
+    2. Spawn Process A (uvicorn Gateway) bound to the database.
+    3. Execute a scan through Process A and verify scan caching.
+    4. Terminate Process A (simulating process failure / shutdown).
+    5. Spawn Process B (new uvicorn Gateway process) bound to the identical database file.
+    6. Verify Process B successfully reloads previous scans on startup and serves the scan result.
+    """
+    db_file = tmp_path / "test_durability.db"
+    db_path = str(db_file.resolve())
+    port = _find_free_port()
+
+    repo_root = os.path.abspath(os.path.dirname(__file__))
+    backend_dir = os.path.join(repo_root, "Backend")
+
+    env = os.environ.copy()
+    env["PORT"] = str(port)
+    env["DATABASE_URL"] = f"sqlite:///{db_path}"
+    env["REPOSITORY_BACKEND"] = "sql"
+    env["SECRET_KEY"] = "production_ready_test_secret_key_1234567890"
+    existing_pp = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{backend_dir}{os.pathsep}{repo_root}" + (f"{os.pathsep}{existing_pp}" if existing_pp else "")
+
+    # -------------------------------------------------------------
+    # Step 1: Start Process A
+    # -------------------------------------------------------------
+    proc_a = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "gateway:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--log-level",
+            "warning",
+        ],
+        cwd=backend_dir,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    scan_id = None
+    verdict = None
+    score = None
+
     try:
-        t0 = time.time()
-        scan_resp = requests.post("http://127.0.0.1:8001/gateway/scan", json=scan_payload, timeout=35)
-        print(f"[2] Post completed in {time.time() - t0:.2f}s with status {scan_resp.status_code}")
+        health_a = _wait_for_health(port=port, timeout=30.0)
+        assert health_a.get("status") == "healthy"
+
+        scan_payload = {
+            "tier1_score": 75,
+            "tier1_evidence": ["Urgent phrasing detected", "Suspicious sender domain"],
+            "body": "URGENT: Your account has been suspended. Please click here to verify your identity.",
+            "sender": "alert@security-paypal-fake.com",
+            "subject": "Action Required: Account Suspended",
+            "links": ["http://evil-phish.com/login"],
+        }
+
+        scan_resp = requests.post(
+            f"http://127.0.0.1:{port}/gateway/scan", json=scan_payload, timeout=35.0
+        )
         assert scan_resp.status_code == 200, f"Scan failed: {scan_resp.text}"
-    except Exception as e:
-        print(f"ERROR: {e}")
-        out, err = proc_a.communicate(timeout=2)
-        print(f"Process A stderr: {err}")
-        raise
-    scan_data = scan_resp.json()
-    scan_id = scan_data["scan_id"]
-    verdict = scan_data["verdict"]
-    score = scan_data["final_score"]
-    print(f"[2] Scan completed: id={scan_id}, verdict={verdict}, score={score}")
 
-    # Verify health has total_cached == 1
-    h = requests.get("http://127.0.0.1:8001/health").json()
-    assert h["scans"]["total_cached"] >= 1, f"Expected total_cached >= 1, got {h['scans']}"
-    print(f"[2] Health total_cached verified: {h['scans']['total_cached']}")
+        scan_data = scan_resp.json()
+        scan_id = scan_data["scan_id"]
+        verdict = scan_data["verdict"]
+        score = scan_data["final_score"]
 
-finally:
-    print("[3] Terminating Process A...")
-    proc_a.terminate()
+        # Verify scan record registered in health metric
+        health_check_a = requests.get(f"http://127.0.0.1:{port}/health", timeout=5.0).json()
+        assert health_check_a["scans"]["total_cached"] >= 1
+
+    finally:
+        _terminate_process(proc_a)
+
+    assert scan_id is not None, "Scan ID was not generated by Process A"
+
+    # Give OS socket / file handle a brief moment to settle
+    time.sleep(1.0)
+
+    # -------------------------------------------------------------
+    # Step 2: Start Process B with the same database
+    # -------------------------------------------------------------
+    proc_b = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "gateway:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--log-level",
+            "warning",
+        ],
+        cwd=backend_dir,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
     try:
-        proc_a.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc_a.kill()
-    print("[3] Process A stopped.")
+        health_b = _wait_for_health(port=port, timeout=30.0)
+        assert health_b.get("status") == "healthy"
+        assert (
+            health_b["scans"]["total_cached"] >= 1
+        ), f"Process B did not reload persisted scans: {health_b['scans']}"
 
-time.sleep(1)
+        # Step 3: Query the scan from Process B
+        get_resp = requests.get(f"http://127.0.0.1:{port}/gateway/result/{scan_id}", timeout=5.0)
+        assert get_resp.status_code == 200, f"Get scan failed: {get_resp.status_code} {get_resp.text}"
 
-print(f"[4] Starting Process B on port 8001 with same DB={DB_FILE}...")
-proc_b = subprocess.Popen(
-    [sys.executable, "-m", "uvicorn", "Backend.gateway:app", "--host", "127.0.0.1", "--port", "8001", "--log-level", "warning"],
-    env=env,
-    stdout=subprocess.PIPE,
-    stderr=subprocess.PIPE,
-    text=True
-)
+        retrieved = get_resp.json()
+        assert retrieved["scan_id"] == scan_id
+        assert retrieved["verdict"] == verdict
+        assert retrieved["final_score"] == score
 
-try:
-    health_b = wait_for_health()
-    print(f"[4] Process B healthy: status={health_b.get('status')}, scans={health_b.get('scans')}")
-    assert health_b["scans"]["total_cached"] >= 1, f"Process B did not load persisted scans: {health_b['scans']}"
+    finally:
+        _terminate_process(proc_b)
 
-    print(f"[5] Querying scan {scan_id} from Process B...")
-    get_resp = requests.get(f"http://127.0.0.1:8001/gateway/result/{scan_id}", timeout=5)
-    assert get_resp.status_code == 200, f"Get scan failed: {get_resp.status_code} {get_resp.text}"
-    retrieved_data = get_resp.json()
-    assert retrieved_data["scan_id"] == scan_id
-    assert retrieved_data["verdict"] == verdict
-    assert retrieved_data["final_score"] == score
-    print(f"[5] Scan retrieved successfully from Process B: {retrieved_data['scan_id']} matches!")
 
-    print("[6] Durability verified 100% across process crash/restart!")
+if __name__ == "__main__":
+    import tempfile
+    from pathlib import Path
 
-finally:
-    print("[7] Terminating Process B...")
-    proc_b.terminate()
-    try:
-        proc_b.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc_b.kill()
-    print("[7] Process B stopped.")
-    if os.path.exists(DB_FILE):
-        os.remove(DB_FILE)
-    print("[8] Cleanup complete.")
+    with tempfile.TemporaryDirectory() as td:
+        print("[Standalone Invocation] Running durability test in temporary directory:", td)
+        test_blackbox_process_restart_durability(Path(td))
+        print("[Standalone Invocation] Black-box durability test PASSED!")
