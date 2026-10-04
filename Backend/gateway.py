@@ -244,6 +244,11 @@ async def lifespan(app: FastAPI):
     logger.info("Tier 3 Timeout: %ds", CONFIG.tier3_timeout)
     logger.info("Environment: %s", CONFIG.env)
 
+    # Fail closed in production if durable persistence is not configured
+    if CONFIG.env == "production" and not os.getenv("DATABASE_URL"):
+        logger.critical("FATAL: DATABASE_URL is not set in production mode.")
+        raise RuntimeError("DATABASE_URL must be configured in production environment for multi-worker safety.")
+
     # Pre-warm Tier 2 DistilBERT ML model
     try:
         try:
@@ -819,6 +824,17 @@ async def _finalize_tier3(
             total_ms = None
             if scan_id in scan_started_at:
                 total_ms = (time.perf_counter() - scan_started_at[scan_id]) * 1000
+            elif getattr(existing, "timestamp", None):
+                try:
+                    ts = existing.timestamp
+                    if isinstance(ts, str):
+                        ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    now = datetime.now(timezone.utc)
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    total_ms = max(0.0, (now - ts).total_seconds() * 1000)
+                except Exception:
+                    total_ms = None
 
             sender_meta = existing.sender or sender or "unknown@unknown.com"
             subject_meta = existing.subject or subject or "No Subject"
@@ -1136,6 +1152,18 @@ async def gateway_status(
         if start_ts is not None:
             elapsed_ms = (time.perf_counter() - start_ts) * 1000
             estimated_completion_ms = max(0, int((CONFIG.tier3_timeout * 1000) - elapsed_ms))
+        elif getattr(result, "timestamp", None):
+            try:
+                ts = result.timestamp
+                if isinstance(ts, str):
+                    ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                now = datetime.now(timezone.utc)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                elapsed_ms = max(0.0, (now - ts).total_seconds() * 1000)
+                estimated_completion_ms = max(0, int((CONFIG.tier3_timeout * 1000) - elapsed_ms))
+            except Exception:
+                estimated_completion_ms = None
 
 
     return ScanStatusResponse(

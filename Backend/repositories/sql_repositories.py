@@ -6,9 +6,12 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import logging
 import time
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 try:
     from sqlalchemy.orm import Session  # type: ignore[import-not-found]
@@ -415,11 +418,18 @@ class SQLScanResultRepository:
             try:
                 existing = session.query(ScanResultDB).filter(ScanResultDB.scan_id == scan_id).first()
                 if existing:
+                    # Concurrency control: Do not allow a stale, incomplete update to overwrite a completed scan
+                    if existing.complete and not complete:
+                        logger.warning(
+                            "Ignoring stale update for scan %s: existing is complete, incoming is incomplete",
+                            scan_id,
+                        )
+                        return
                     existing.partial_score = partial_score
                     existing.final_score = final_score
                     existing.verdict = verdict
                     existing.complete = complete
-                    existing.layers_completed = layers_completed
+                    existing.layers_completed = max(existing.layers_completed, layers_completed)
                     existing.data_json = data_json
                 else:
                     db_record = ScanResultDB(
