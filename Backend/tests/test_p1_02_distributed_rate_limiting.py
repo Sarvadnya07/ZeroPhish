@@ -513,6 +513,39 @@ async def test_11_cleanup_resource_safety_on_shutdown():
                         mock_sec_pool.disconnect.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_11b_independent_security_cleanup_when_gateway_cleanup_fails():
+    """Verify that a failure in gateway limiter cleanup does not prevent security limiter cleanup."""
+    mock_gw_storage_client = MagicMock()
+    mock_gw_storage_client.close.side_effect = RuntimeError("Gateway storage close boom!")
+
+    mock_gw_limiter = MagicMock()
+    mock_gw_limiter._limiter.storage.storage = mock_gw_storage_client
+
+    mock_sec_storage_client = MagicMock()
+    mock_sec_storage_client.close = MagicMock()
+    mock_sec_pool = MagicMock()
+    mock_sec_pool.disconnect = MagicMock()
+    mock_sec_storage_client.connection_pool = mock_sec_pool
+
+    from security import dependencies as sec_deps
+    mock_sec_limiter = MagicMock()
+    mock_sec_limiter._limiter.storage.storage = mock_sec_storage_client
+
+    with patch.object(app.state, "limiter", mock_gw_limiter):
+        with patch.object(sec_deps, "limiter", mock_sec_limiter):
+            with patch.dict(os.environ, {"DATABASE_URL": "sqlite:///:memory:", "REDIS_URL": "redis://fake:6379"}):
+                with patch("gateway.start_sse_pubsub", new_callable=AsyncMock):
+                    with patch("gateway.stop_sse_pubsub", new_callable=AsyncMock):
+                        async with lifespan(app):
+                            pass
+                        # Gateway close was attempted and failed
+                        mock_gw_storage_client.close.assert_called_once()
+                        # Security limiter close and disconnect still executed successfully
+                        mock_sec_storage_client.close.assert_called_once()
+                        mock_sec_pool.disconnect.assert_called_once()
+
+
 # ==============================================================================
 # TEST 12 — Existing API contract
 # ==============================================================================
@@ -638,7 +671,7 @@ def test_real_redis_cross_worker_rate_limiting_integration():
             pass
 
 
-def _multiprocess_worker_target(redis_url: str, route_name: str, client_ip: str, results_queue: Any):
+def _multiprocess_worker_target(redis_url: str, route_name: str, client_ip: str, key_prefix: str, results_queue: Any):
     """Worker process function for testing real OS-multiprocess rate limiting."""
     from fastapi import FastAPI, Request
     from fastapi.testclient import TestClient
@@ -646,7 +679,12 @@ def _multiprocess_worker_target(redis_url: str, route_name: str, client_ip: str,
     from slowapi.util import get_remote_address
     from slowapi.errors import RateLimitExceeded
 
-    w_limiter = Limiter(key_func=get_remote_address, storage_uri=redis_url, headers_enabled=False)
+    w_limiter = Limiter(
+        key_func=get_remote_address,
+        storage_uri=redis_url,
+        storage_options={"key_prefix": key_prefix},
+        headers_enabled=False,
+    )
     w_app = FastAPI()
     w_app.state.limiter = w_limiter
     w_app.add_exception_handler(RateLimitExceeded, gateway.rate_limit_handler)
@@ -669,7 +707,8 @@ def test_real_redis_multiprocess_workers_cross_process_enforcement():
     """
     Multiprocess Integration Test:
     Spawns multiple real OS processes using Python's multiprocessing module against a live Redis daemon.
-    Verifies that separate OS processes strictly enforce the shared atomic rate limit across process boundaries.
+    Verifies that separate OS processes strictly enforce the shared atomic rate limit across process boundaries,
+    using an isolated unique keyspace and safe child-process lifecycle joining/termination.
     """
     import multiprocessing
     redis_url = os.getenv("TEST_REAL_REDIS_URL") or os.getenv("REDIS_URL")
@@ -677,6 +716,7 @@ def test_real_redis_multiprocess_workers_cross_process_enforcement():
 
     r_client = redis.Redis.from_url(redis_url)
     run_id = uuid.uuid4().hex[:8]
+    test_key_prefix = f"TEST_MP_{run_id}"
     route_name = f"/mp-test-{run_id}"
     client_ip = "203.0.113.200"
 
@@ -688,22 +728,33 @@ def test_real_redis_multiprocess_workers_cross_process_enforcement():
         for _ in range(3):
             p = multiprocessing.Process(
                 target=_multiprocess_worker_target,
-                args=(redis_url, route_name, client_ip, queue)
+                args=(redis_url, route_name, client_ip, test_key_prefix, queue)
             )
             procs.append(p)
             p.start()
 
+        # Join children with bounded timeout; terminate any hung process
         for p in procs:
             p.join(timeout=10)
+            if p.is_alive():
+                p.terminate()
+                p.join(timeout=2)
             assert p.exitcode == 0
 
         statuses = [queue.get(timeout=2) for _ in range(3)]
         assert statuses.count(200) == 2
         assert statuses.count(429) == 1
     finally:
-        # Cleanup keys created by multiprocess test
+        # Close queue safely
         try:
-            keys = r_client.keys(f"*{route_name}*")
+            queue.close()
+            queue.join_thread()
+        except Exception:
+            pass
+
+        # Cleanup only keys belonging to this exact test prefix
+        try:
+            keys = r_client.keys(f"{test_key_prefix}*")
             if keys:
                 r_client.delete(*keys)
             r_client.close()

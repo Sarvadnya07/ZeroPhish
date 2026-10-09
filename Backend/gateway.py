@@ -341,7 +341,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.debug("Error closing cache backend: %s", e)
 
-    # 5. Close rate limiter storage connections if managed
+    # 5. Close rate limiter storage connections independently
+    # 5a. Gateway limiter teardown
     try:
         _limiter_inst = getattr(app.state, "limiter", None)
         if _limiter_inst and hasattr(_limiter_inst, "_limiter"):
@@ -353,14 +354,15 @@ async def lifespan(app: FastAPI):
                 _pool = getattr(_storage_client, "connection_pool", None)
                 if _pool and hasattr(_pool, "disconnect"):
                     _pool.disconnect()
-        
-        try:
-            from security.dependencies import close_security_limiter
-            close_security_limiter()
-        except Exception as _sec_close_err:
-            logger.debug("Error calling close_security_limiter: %s", _sec_close_err)
-    except Exception as e:
-        logger.debug("Error closing rate limiter storage: %s", e)
+    except Exception as _gw_close_err:
+        logger.warning("Error during gateway rate limiter teardown: %s", _gw_close_err)
+
+    # 5b. Security dependency limiter teardown (must run even if gateway limiter teardown failed)
+    try:
+        from security.dependencies import close_security_limiter
+        close_security_limiter()
+    except Exception as _sec_close_err:
+        logger.warning("Error during security dependency rate limiter teardown: %s", _sec_close_err)
 
     # 6. Clear SSE subscribers
     _sse_subscribers.clear()
