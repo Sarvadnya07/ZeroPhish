@@ -40,8 +40,10 @@ from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Security, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.security import APIKeyHeader
+import redis.exceptions
+from limits.errors import StorageError
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -244,22 +246,45 @@ async def lifespan(app: FastAPI):
     logger.info("Tier 3 Timeout: %ds", CONFIG.tier3_timeout)
     logger.info("Environment: %s", CONFIG.env)
 
+    current_env = (os.getenv("ZEROPHISH_ENV") or os.getenv("ENV") or CONFIG.env or "development").strip().lower()
+    is_production = current_env == "production"
+
     # Fail closed in production if durable persistence is not configured
-    if CONFIG.env == "production" and not os.getenv("DATABASE_URL"):
+    if is_production and not os.getenv("DATABASE_URL"):
         logger.critical("FATAL: DATABASE_URL is not set in production mode.")
         raise RuntimeError("DATABASE_URL must be configured in production environment for multi-worker safety.")
 
-    # Fail closed in production if REDIS_URL is not configured for multi-worker SSE propagation
-    if CONFIG.env == "production" and not os.getenv("REDIS_URL"):
+    # Fail closed in production if REDIS_URL is not configured for distributed rate limiting & multi-worker SSE propagation
+    if is_production and not os.getenv("REDIS_URL"):
         logger.critical("FATAL: REDIS_URL is not set in production mode.")
-        raise RuntimeError("REDIS_URL must be configured in production environment for multi-worker SSE event propagation.")
+        raise RuntimeError("REDIS_URL must be configured in production environment for distributed rate limiting and multi-worker SSE event propagation.")
+
+    # In production, verify that the configured Redis rate-limit backend is actively reachable for both limiters
+    if is_production:
+        _lim_inst = getattr(app.state, "limiter", None)
+        _lim_storage = getattr(getattr(_lim_inst, "_limiter", None), "storage", None) if _lim_inst else None
+        if not _lim_storage or not hasattr(_lim_storage, "check") or not _lim_storage.check():
+            logger.critical("FATAL: Redis gateway distributed rate limiter storage is unreachable during production startup.")
+            raise RuntimeError("Redis gateway rate limiter storage failed connectivity check in production environment.")
+        
+        try:
+            from security.dependencies import limiter as sec_limiter
+            _sec_storage = getattr(getattr(sec_limiter, "_limiter", None), "storage", None)
+            if not _sec_storage or not hasattr(_sec_storage, "check") or not _sec_storage.check():
+                logger.critical("FATAL: Redis security dependency rate limiter storage is unreachable during production startup.")
+                raise RuntimeError("Redis security dependency rate limiter storage failed connectivity check in production environment.")
+        except Exception as _sec_lim_err:
+            logger.critical("FATAL: Security dependency rate limiter check failed: %s", _sec_lim_err)
+            raise RuntimeError(f"Security dependency rate limiter check failed in production: {_sec_lim_err}")
+
+        logger.info("Verified Redis distributed rate limiter connectivity for all limiters during production startup.")
 
     # Initialize cross-worker SSE Pub/Sub transport
     try:
         await start_sse_pubsub()
     except Exception as _pubsub_err:
         logger.warning("Failed to start Redis Pub/Sub SSE transport: %s", _pubsub_err)
-        if CONFIG.env == "production":
+        if is_production:
             raise RuntimeError(f"Failed to start Redis Pub/Sub in production: {_pubsub_err}")
 
     # Pre-warm Tier 2 DistilBERT ML model
@@ -316,7 +341,30 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.debug("Error closing cache backend: %s", e)
 
-    # 5. Clear SSE subscribers
+    # 5. Close rate limiter storage connections independently
+    # 5a. Gateway limiter teardown
+    try:
+        _limiter_inst = getattr(app.state, "limiter", None)
+        if _limiter_inst and hasattr(_limiter_inst, "_limiter"):
+            _storage = getattr(_limiter_inst._limiter, "storage", None)
+            _storage_client = getattr(_storage, "storage", None)
+            if _storage_client and hasattr(_storage_client, "close"):
+                _storage_client.close()
+            if _storage_client and hasattr(_storage_client, "connection_pool"):
+                _pool = getattr(_storage_client, "connection_pool", None)
+                if _pool and hasattr(_pool, "disconnect"):
+                    _pool.disconnect()
+    except Exception as _gw_close_err:
+        logger.warning("Error during gateway rate limiter teardown: %s", _gw_close_err)
+
+    # 5b. Security dependency limiter teardown (must run even if gateway limiter teardown failed)
+    try:
+        from security.dependencies import close_security_limiter
+        close_security_limiter()
+    except Exception as _sec_close_err:
+        logger.warning("Error during security dependency rate limiter teardown: %s", _sec_close_err)
+
+    # 6. Clear SSE subscribers
     _sse_subscribers.clear()
     _sse_subscriber_overflows.clear()
 
@@ -361,15 +409,115 @@ async def metrics_middleware(request: Request, call_next):
     return response
 
 # ---------- Rate Limiting ----------
-limiter = Limiter(key_func=get_remote_address)
+rate_limit_metrics: Dict[str, int] = {
+    "rate_limit_redis_errors_total": 0,
+    "rate_limit_rejected_total": 0,
+}
+
+def _create_gateway_limiter(redis_url: Optional[str] = None) -> Limiter:
+    """
+    Create Limiter backed by Redis when configured, or in-memory fallback for local development.
+
+    In production (ZEROPHISH_ENV == 'production'), REDIS_URL is mandatory and missing/unreachable
+    Redis fails closed (no silent local fallback). In local development or testing without a live
+    Redis server, falls back to in-memory store so single-process local work remains functional.
+    """
+    env = (os.getenv("ZEROPHISH_ENV") or os.getenv("ENV") or CONFIG.env or "development").strip().lower()
+    is_production = env == "production"
+    target_url = redis_url or os.getenv("REDIS_URL")
+
+    if target_url:
+        if is_production:
+            logger.info("Initializing distributed rate limiter with Redis storage: %s", target_url.split("@")[-1])
+            return Limiter(
+                key_func=get_remote_address,
+                storage_uri=target_url,
+                storage_options={
+                    "socket_connect_timeout": 3.0,
+                    "socket_timeout": 5.0,
+                },
+                headers_enabled=False,
+            )
+        else:
+            # Local development or testing: verify connectivity before binding,
+            # or gracefully fall back to local-only in-memory storage if Redis is offline.
+            try:
+                candidate = Limiter(
+                    key_func=get_remote_address,
+                    storage_uri=target_url,
+                    storage_options={
+                        "socket_connect_timeout": 0.5,
+                        "socket_timeout": 0.5,
+                    },
+                    headers_enabled=False,
+                )
+                storage = getattr(getattr(candidate, "_limiter", None), "storage", None)
+                if storage and hasattr(storage, "check") and storage.check():
+                    logger.info("Connected to Redis distributed rate limiter storage in development")
+                    return candidate
+                logger.warning("Configured REDIS_URL unreachable in development; falling back to local in-memory rate limiter")
+            except Exception as e:
+                logger.warning("Redis rate limiter initialization failed in development (%s); falling back to in-memory", e)
+
+    if is_production:
+        logger.critical("FATAL: Distributed rate limiter requires REDIS_URL in production environment.")
+        raise RuntimeError("REDIS_URL must be configured and available in production environment for distributed rate limiting.")
+
+    logger.info("Initializing local in-memory rate limiter (single-worker development only)")
+    return Limiter(
+        key_func=get_remote_address,
+        storage_uri="memory://",
+        headers_enabled=False,
+    )
+
+limiter = _create_gateway_limiter()
 app.state.limiter = limiter
 
 async def rate_limit_handler(request: Request, exc: Exception) -> Response:
     if isinstance(exc, RateLimitExceeded):
-        return _rate_limit_exceeded_handler(request, exc)
+        rate_limit_metrics["rate_limit_rejected_total"] += 1
+        try:
+            from security.audit_logger import log_rate_limited
+            client_ip = request.client.host if request.client else "unknown"
+            log_rate_limited(client_ip, request.url.path)
+        except Exception:
+            pass
+        response = JSONResponse(
+            {"error": f"Rate limit exceeded: {exc.detail}"},
+            status_code=429,
+        )
+        try:
+            limiter_obj = getattr(request.app.state, "limiter", None)
+            view_rate_limit = getattr(request.state, "view_rate_limit", None)
+            if limiter_obj and view_rate_limit:
+                window_stats = limiter_obj._limiter.get_window_stats(view_rate_limit[0], *view_rate_limit[1])
+                reset_in = 1 + window_stats[0]
+                retry_after_sec = max(1, int(reset_in - time.time()))
+                response.headers["Retry-After"] = str(retry_after_sec)
+                response.headers["X-RateLimit-Limit"] = str(view_rate_limit[0].amount)
+                response.headers["X-RateLimit-Remaining"] = str(window_stats[1])
+                response.headers["X-RateLimit-Reset"] = str(reset_in)
+            else:
+                response.headers["Retry-After"] = "60"
+        except Exception as _rh_err:
+            logger.debug("Failed computing rate limit headers: %s", _rh_err)
+            response.headers["Retry-After"] = "60"
+        return response
     raise exc
 
 app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
+
+async def rate_limit_storage_error_handler(request: Request, exc: Exception) -> Response:
+    rate_limit_metrics["rate_limit_redis_errors_total"] += 1
+    logger.error("Rate limiter storage error on %s: %s", request.url.path, exc)
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"error": "Service temporarily unavailable: rate limit storage error"},
+        headers={"Retry-After": "5"},
+    )
+
+app.add_exception_handler(redis.exceptions.RedisError, rate_limit_storage_error_handler)
+app.add_exception_handler(StorageError, rate_limit_storage_error_handler)
 
 # ---------- Extension Routers ----------
 if EXTENSIONS_AVAILABLE:
@@ -1440,10 +1588,11 @@ async def gateway_health() -> dict:
         total_scans = await scan_repo.count()
         pending_scans = await scan_repo.count_pending()
 
+    current_env = (os.getenv("ZEROPHISH_ENV") or os.getenv("ENV") or CONFIG.env or "development").strip().lower()
     return {
         "status": "healthy",
         "service": "ZeroPhish API Gateway",
-        "environment": CONFIG.env,
+        "environment": current_env,
         "version": os.getenv("ZEROPHISH_VERSION", "1.0.0"),
         "commit_sha": os.getenv("GIT_COMMIT_SHA") or os.getenv("GITHUB_SHA", "dev-local"),
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1460,6 +1609,14 @@ async def gateway_health() -> dict:
             "worker_id": WORKER_ID,
             **sse_metrics,
         },
+        "rate_limiting": {
+            "storage_backend": (
+                getattr(getattr(getattr(getattr(app.state, "limiter", None), "_limiter", None), "storage", None), "STORAGE_SCHEME", ["unknown"])[0]
+                if getattr(getattr(app.state, "limiter", None), "_limiter", None)
+                else "unknown"
+            ),
+            **rate_limit_metrics,
+        },
         "circuit_breaker": tier3_circuit_breaker.get_status() if tier3_circuit_breaker else None,
     }
 
@@ -1468,6 +1625,9 @@ async def gateway_health() -> dict:
 @app.get("/gateway/ready")
 async def gateway_readiness(response: Response) -> dict:
     """Active readiness probe for orchestration and load balancers."""
+    current_env = (os.getenv("ZEROPHISH_ENV") or os.getenv("ENV") or CONFIG.env or "development").strip().lower()
+    is_prod = current_env == "production"
+
     dependencies = {
         "repository": "ready",
         "weights": "ready",
@@ -1505,15 +1665,37 @@ async def gateway_readiness(response: Response) -> dict:
                 dependencies["redis_pubsub"] = "ready"
             else:
                 dependencies["redis_pubsub"] = "uninitialized"
-                if CONFIG.env == "production":
+                if is_prod:
                     is_ready = False
         except Exception as e:
             logger.error("Readiness check redis_pubsub probe failed: %s", e)
             dependencies["redis_pubsub"] = "unhealthy"
-            if CONFIG.env == "production":
+            if is_prod:
                 is_ready = False
     else:
         dependencies["redis_pubsub"] = "local-only"
+
+    # Active Rate Limiter storage probe
+    _limiter_inst = getattr(app.state, "limiter", None)
+    if _limiter_inst and hasattr(_limiter_inst, "_limiter"):
+        _storage = getattr(_limiter_inst._limiter, "storage", None)
+        if _storage and hasattr(_storage, "check"):
+            try:
+                if _storage.check():
+                    dependencies["rate_limiter"] = "ready"
+                else:
+                    dependencies["rate_limiter"] = "unhealthy"
+                    if is_prod:
+                        is_ready = False
+            except Exception as e:
+                logger.error("Readiness check rate_limiter storage probe failed: %s", e)
+                dependencies["rate_limiter"] = "unhealthy"
+                if is_prod:
+                    is_ready = False
+        else:
+            dependencies["rate_limiter"] = "local-only"
+    else:
+        dependencies["rate_limiter"] = "uninitialized"
 
     # Circuit breaker health check
     if tier3_circuit_breaker:
@@ -1527,7 +1709,7 @@ async def gateway_readiness(response: Response) -> dict:
 
     return {
         "status": "ready" if is_ready else "not_ready",
-        "environment": CONFIG.env,
+        "environment": current_env,
         "version": os.getenv("ZEROPHISH_VERSION", "1.0.0"),
         "commit_sha": os.getenv("GIT_COMMIT_SHA") or os.getenv("GITHUB_SHA", "dev-local"),
         "timestamp": datetime.now(timezone.utc).isoformat(),
