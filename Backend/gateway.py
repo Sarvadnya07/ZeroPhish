@@ -259,14 +259,25 @@ async def lifespan(app: FastAPI):
         logger.critical("FATAL: REDIS_URL is not set in production mode.")
         raise RuntimeError("REDIS_URL must be configured in production environment for distributed rate limiting and multi-worker SSE event propagation.")
 
-    # In production, verify that the configured Redis rate-limit backend is actively reachable
+    # In production, verify that the configured Redis rate-limit backend is actively reachable for both limiters
     if is_production:
         _lim_inst = getattr(app.state, "limiter", None)
         _lim_storage = getattr(getattr(_lim_inst, "_limiter", None), "storage", None) if _lim_inst else None
         if not _lim_storage or not hasattr(_lim_storage, "check") or not _lim_storage.check():
-            logger.critical("FATAL: Redis distributed rate limiter storage is unreachable during production startup.")
-            raise RuntimeError("Redis rate limiter storage failed connectivity check in production environment.")
-        logger.info("Verified Redis distributed rate limiter connectivity during production startup.")
+            logger.critical("FATAL: Redis gateway distributed rate limiter storage is unreachable during production startup.")
+            raise RuntimeError("Redis gateway rate limiter storage failed connectivity check in production environment.")
+        
+        try:
+            from security.dependencies import limiter as sec_limiter
+            _sec_storage = getattr(getattr(sec_limiter, "_limiter", None), "storage", None)
+            if not _sec_storage or not hasattr(_sec_storage, "check") or not _sec_storage.check():
+                logger.critical("FATAL: Redis security dependency rate limiter storage is unreachable during production startup.")
+                raise RuntimeError("Redis security dependency rate limiter storage failed connectivity check in production environment.")
+        except Exception as _sec_lim_err:
+            logger.critical("FATAL: Security dependency rate limiter check failed: %s", _sec_lim_err)
+            raise RuntimeError(f"Security dependency rate limiter check failed in production: {_sec_lim_err}")
+
+        logger.info("Verified Redis distributed rate limiter connectivity for all limiters during production startup.")
 
     # Initialize cross-worker SSE Pub/Sub transport
     try:
@@ -338,6 +349,16 @@ async def lifespan(app: FastAPI):
             _storage_client = getattr(_storage, "storage", None)
             if _storage_client and hasattr(_storage_client, "close"):
                 _storage_client.close()
+            if _storage_client and hasattr(_storage_client, "connection_pool"):
+                _pool = getattr(_storage_client, "connection_pool", None)
+                if _pool and hasattr(_pool, "disconnect"):
+                    _pool.disconnect()
+        
+        try:
+            from security.dependencies import close_security_limiter
+            close_security_limiter()
+        except Exception as _sec_close_err:
+            logger.debug("Error calling close_security_limiter: %s", _sec_close_err)
     except Exception as e:
         logger.debug("Error closing rate limiter storage: %s", e)
 

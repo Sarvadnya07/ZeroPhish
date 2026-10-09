@@ -403,7 +403,7 @@ async def test_8_missing_redis_url_production_contract():
                 pass
         assert "REDIS_URL must be configured in production environment" in str(exc_info.value)
 
-    # 4. Lifespan startup failure in production mode when REDIS_URL is present but Redis is unreachable
+    # 4. Lifespan startup failure in production mode when REDIS_URL is present but gateway Redis is unreachable
     with patch.dict(os.environ, {"ZEROPHISH_ENV": "production", "DATABASE_URL": "sqlite:///:memory:", "REDIS_URL": "redis://unreachable.host:6379"}):
         unreachable_storage = MagicMock()
         unreachable_storage.check.return_value = False
@@ -411,7 +411,22 @@ async def test_8_missing_redis_url_production_contract():
             with pytest.raises(RuntimeError) as exc_info:
                 async with lifespan(app):
                     pass
-            assert "Redis rate limiter storage failed connectivity check" in str(exc_info.value)
+            assert "Redis gateway rate limiter storage failed connectivity check" in str(exc_info.value)
+
+    # 5. Lifespan startup failure in production mode when security limiter is unreachable
+    with patch.dict(os.environ, {"ZEROPHISH_ENV": "production", "DATABASE_URL": "sqlite:///:memory:", "REDIS_URL": "redis://unreachable.host:6379"}):
+        from security import dependencies as sec_deps
+        reachable_gw_storage = MagicMock()
+        reachable_gw_storage.check.return_value = True
+        unreachable_sec_storage = MagicMock()
+        unreachable_sec_storage.check.return_value = False
+
+        with patch.object(app.state.limiter._limiter, "storage", reachable_gw_storage):
+            with patch.object(sec_deps.limiter._limiter, "storage", unreachable_sec_storage):
+                with pytest.raises(RuntimeError) as exc_info:
+                    async with lifespan(app):
+                        pass
+                assert "Redis security dependency rate limiter storage failed connectivity check" in str(exc_info.value)
 
 
 # ==============================================================================
@@ -466,19 +481,36 @@ def test_10_rate_limited_routes_coverage():
 @pytest.mark.asyncio
 async def test_11_cleanup_resource_safety_on_shutdown():
     """Verify rate limiter storage resources are safely closed when the app shuts down."""
-    mock_storage_client = MagicMock()
-    mock_storage_client.close = MagicMock()
+    mock_gw_storage_client = MagicMock()
+    mock_gw_storage_client.close = MagicMock()
+    mock_gw_pool = MagicMock()
+    mock_gw_pool.disconnect = MagicMock()
+    mock_gw_storage_client.connection_pool = mock_gw_pool
 
-    mock_limiter = MagicMock()
-    mock_limiter._limiter.storage.storage = mock_storage_client
+    mock_gw_limiter = MagicMock()
+    mock_gw_limiter._limiter.storage.storage = mock_gw_storage_client
 
-    with patch.object(app.state, "limiter", mock_limiter):
-        with patch.dict(os.environ, {"DATABASE_URL": "sqlite:///:memory:", "REDIS_URL": "redis://fake:6379"}):
-            with patch("gateway.start_sse_pubsub", new_callable=AsyncMock):
-                with patch("gateway.stop_sse_pubsub", new_callable=AsyncMock):
-                    async with lifespan(app):
-                        pass
-                    mock_storage_client.close.assert_called_once()
+    mock_sec_storage_client = MagicMock()
+    mock_sec_storage_client.close = MagicMock()
+    mock_sec_pool = MagicMock()
+    mock_sec_pool.disconnect = MagicMock()
+    mock_sec_storage_client.connection_pool = mock_sec_pool
+
+    from security import dependencies as sec_deps
+    mock_sec_limiter = MagicMock()
+    mock_sec_limiter._limiter.storage.storage = mock_sec_storage_client
+
+    with patch.object(app.state, "limiter", mock_gw_limiter):
+        with patch.object(sec_deps, "limiter", mock_sec_limiter):
+            with patch.dict(os.environ, {"DATABASE_URL": "sqlite:///:memory:", "REDIS_URL": "redis://fake:6379"}):
+                with patch("gateway.start_sse_pubsub", new_callable=AsyncMock):
+                    with patch("gateway.stop_sse_pubsub", new_callable=AsyncMock):
+                        async with lifespan(app):
+                            pass
+                        mock_gw_storage_client.close.assert_called_once()
+                        mock_gw_pool.disconnect.assert_called_once()
+                        mock_sec_storage_client.close.assert_called_once()
+                        mock_sec_pool.disconnect.assert_called_once()
 
 
 # ==============================================================================
@@ -535,13 +567,27 @@ def _is_real_redis_available() -> bool:
 def test_real_redis_cross_worker_rate_limiting_integration():
     """
     Integration test executing atomic increments and TTL expiry against an actual Redis daemon.
-    Validates cross-worker coordination and window expiration in a live environment.
+    Validates cross-worker coordination, shared state, and window expiration with keyspace cleanup.
     """
     redis_url = os.getenv("TEST_REAL_REDIS_URL") or os.getenv("REDIS_URL")
     assert redis_url is not None
 
-    limiter_w1 = Limiter(key_func=get_remote_address, storage_uri=redis_url, headers_enabled=False)
-    limiter_w2 = Limiter(key_func=get_remote_address, storage_uri=redis_url, headers_enabled=False)
+    r_client = redis.Redis.from_url(redis_url)
+    run_id = uuid.uuid4().hex[:8]
+    test_key_prefix = f"TEST_RL_{run_id}"
+
+    limiter_w1 = Limiter(
+        key_func=get_remote_address,
+        storage_uri=redis_url,
+        storage_options={"key_prefix": test_key_prefix},
+        headers_enabled=False,
+    )
+    limiter_w2 = Limiter(
+        key_func=get_remote_address,
+        storage_uri=redis_url,
+        storage_options={"key_prefix": test_key_prefix},
+        headers_enabled=False,
+    )
 
     app_w1 = FastAPI()
     app_w1.state.limiter = limiter_w1
@@ -551,7 +597,7 @@ def test_real_redis_cross_worker_rate_limiting_integration():
     app_w2.state.limiter = limiter_w2
     app_w2.add_exception_handler(RateLimitExceeded, gateway.rate_limit_handler)
 
-    unique_route = f"/real-redis-test-{int(time.time())}"
+    unique_route = f"/real-redis-test-{run_id}"
 
     @app_w1.get(unique_route)
     @limiter_w1.limit("2/second")
@@ -563,20 +609,103 @@ def test_real_redis_cross_worker_rate_limiting_integration():
     async def ep2(request: Request):
         return {"worker": 2}
 
-    c1 = TestClient(app_w1, client=("203.0.113.195", 50000))
-    c2 = TestClient(app_w2, client=("203.0.113.195", 50000))
+    try:
+        c1 = TestClient(app_w1, client=("203.0.113.195", 50000))
+        c2 = TestClient(app_w2, client=("203.0.113.195", 50000))
 
-    # Request 1 via Worker 1 -> OK
-    assert c1.get(unique_route).status_code == 200
-    # Request 2 via Worker 2 -> OK (limit 2 reached)
-    assert c2.get(unique_route).status_code == 200
-    # Request 3 via Worker 1 -> 429 Rate Limit Exceeded
-    assert c1.get(unique_route).status_code == 429
-    # Request 4 via Worker 2 -> 429 Rate Limit Exceeded
-    assert c2.get(unique_route).status_code == 429
+        # Request 1 via Worker 1 -> OK
+        assert c1.get(unique_route).status_code == 200
+        # Request 2 via Worker 2 -> OK (limit 2 reached)
+        assert c2.get(unique_route).status_code == 200
+        # Request 3 via Worker 1 -> 429 Rate Limit Exceeded
+        assert c1.get(unique_route).status_code == 429
+        # Request 4 via Worker 2 -> 429 Rate Limit Exceeded
+        assert c2.get(unique_route).status_code == 429
 
-    # Wait for TTL to expire (window: 2/second)
-    time.sleep(1.2)
+        # Wait for TTL to expire (window: 2/second)
+        time.sleep(1.2)
 
-    # Request 5 after expiry -> OK
-    assert c1.get(unique_route).status_code == 200
+        # Request 5 after expiry -> OK
+        assert c1.get(unique_route).status_code == 200
+    finally:
+        # Cleanup test keys in Redis
+        try:
+            keys = r_client.keys(f"{test_key_prefix}*")
+            if keys:
+                r_client.delete(*keys)
+            r_client.close()
+        except Exception:
+            pass
+
+
+def _multiprocess_worker_target(redis_url: str, route_name: str, client_ip: str, results_queue: Any):
+    """Worker process function for testing real OS-multiprocess rate limiting."""
+    from fastapi import FastAPI, Request
+    from fastapi.testclient import TestClient
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+
+    w_limiter = Limiter(key_func=get_remote_address, storage_uri=redis_url, headers_enabled=False)
+    w_app = FastAPI()
+    w_app.state.limiter = w_limiter
+    w_app.add_exception_handler(RateLimitExceeded, gateway.rate_limit_handler)
+
+    @w_app.get(route_name)
+    @w_limiter.limit("2/minute")
+    async def target_endpoint(request: Request):
+        return {"status": "ok"}
+
+    w_client = TestClient(w_app, client=(client_ip, 50000))
+    res = w_client.get(route_name)
+    results_queue.put(res.status_code)
+
+
+@pytest.mark.skipif(
+    not _is_real_redis_available(),
+    reason="Live Redis instance not available; set TEST_REAL_REDIS_URL to run real-Redis integration tests in CI/staging."
+)
+def test_real_redis_multiprocess_workers_cross_process_enforcement():
+    """
+    Multiprocess Integration Test:
+    Spawns multiple real OS processes using Python's multiprocessing module against a live Redis daemon.
+    Verifies that separate OS processes strictly enforce the shared atomic rate limit across process boundaries.
+    """
+    import multiprocessing
+    redis_url = os.getenv("TEST_REAL_REDIS_URL") or os.getenv("REDIS_URL")
+    assert redis_url is not None
+
+    r_client = redis.Redis.from_url(redis_url)
+    run_id = uuid.uuid4().hex[:8]
+    route_name = f"/mp-test-{run_id}"
+    client_ip = "203.0.113.200"
+
+    queue = multiprocessing.Queue()
+    procs = []
+
+    try:
+        # Launch 3 separate OS processes making 1 request each against the shared 2/minute limit
+        for _ in range(3):
+            p = multiprocessing.Process(
+                target=_multiprocess_worker_target,
+                args=(redis_url, route_name, client_ip, queue)
+            )
+            procs.append(p)
+            p.start()
+
+        for p in procs:
+            p.join(timeout=10)
+            assert p.exitcode == 0
+
+        statuses = [queue.get(timeout=2) for _ in range(3)]
+        assert statuses.count(200) == 2
+        assert statuses.count(429) == 1
+    finally:
+        # Cleanup keys created by multiprocess test
+        try:
+            keys = r_client.keys(f"*{route_name}*")
+            if keys:
+                r_client.delete(*keys)
+            r_client.close()
+        except Exception:
+            pass

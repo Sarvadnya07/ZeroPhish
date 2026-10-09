@@ -66,3 +66,18 @@ def _resolve_limiter(redis_url: Optional[str] = None) -> Limiter:
     )
 
 limiter: Limiter = _resolve_limiter()
+
+def close_security_limiter() -> None:
+    """Safely close Redis storage client owned by security dependency limiter."""
+    try:
+        if hasattr(limiter, "_limiter"):
+            _storage = getattr(limiter._limiter, "storage", None)
+            _storage_client = getattr(_storage, "storage", None)
+            if _storage_client and hasattr(_storage_client, "close"):
+                _storage_client.close()
+            if _storage_client and hasattr(_storage_client, "connection_pool"):
+                _pool = getattr(_storage_client, "connection_pool", None)
+                if _pool and hasattr(_pool, "disconnect"):
+                    _pool.disconnect()
+    except Exception as e:
+        logger.debug("Error closing security rate limiter storage: %s", e)
