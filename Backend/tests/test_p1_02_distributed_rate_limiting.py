@@ -337,6 +337,9 @@ def test_6_independent_keys_isolation():
 # ==============================================================================
 # TEST 7 — Redis failure (Fail-closed behavior)
 # ==============================================================================
+# ==============================================================================
+# TEST 7 — Redis failure & StorageError (Fail-closed behavior)
+# ==============================================================================
 def test_7_redis_storage_failure_fails_closed():
     """When Redis fails at request time, gateway must return 503 Service Unavailable with Retry-After header."""
     shared_redis_state: Dict[str, Any] = {}
@@ -356,23 +359,43 @@ def test_7_redis_storage_failure_fails_closed():
         assert res.headers.get("retry-after") == "5"
         assert rate_limit_metrics["rate_limit_redis_errors_total"] >= 1
 
+    # Also verify limits.errors.StorageError is caught and converted to 503
+    from limits.errors import StorageError
+    def failing_incr_storage_error(*args, **kwargs):
+        raise StorageError("Wrapped storage failure")
+
+    failing_storage.incr = failing_incr_storage_error
+    with patch.object(gateway.limiter._limiter, "storage", failing_storage):
+        client = TestClient(app)
+        res = client.post("/gateway/scan", json={"sender": "test@domain.com", "body": "test email body", "links": []})
+        assert res.status_code == 503
+        assert "Service temporarily unavailable" in res.json().get("error", "")
+        assert res.headers.get("retry-after") == "5"
+
 
 # ==============================================================================
-# TEST 8 — Missing REDIS_URL production contract
+# TEST 8 — Missing/Unreachable REDIS_URL production contract
 # ==============================================================================
 @pytest.mark.asyncio
 async def test_8_missing_redis_url_production_contract():
-    """In production environment, absence of REDIS_URL must fail closed during startup/readiness."""
-    # 1. Factory initialization failure
-    with patch.dict(os.environ, {"ZEROPHISH_ENV": "production", "DATABASE_URL": "sqlite:///:memory:"}, clear=False):
-        with patch.dict(os.environ, {}, clear=True):
-            env_map = {"ZEROPHISH_ENV": "production", "DATABASE_URL": "sqlite:///:memory:"}
-            with patch.dict(os.environ, env_map):
-                with pytest.raises(RuntimeError) as exc_info:
-                    _create_gateway_limiter(None)
-                assert "REDIS_URL must be configured" in str(exc_info.value)
+    """In production environment, absence or unreachability of REDIS_URL must fail closed during startup/readiness."""
+    from security.dependencies import _resolve_limiter as _resolve_security_limiter
 
-    # 2. Lifespan startup failure in production mode
+    # 1. Gateway factory initialization failure when REDIS_URL missing
+    with patch.dict(os.environ, {"ZEROPHISH_ENV": "production", "DATABASE_URL": "sqlite:///:memory:"}):
+        os.environ.pop("REDIS_URL", None)
+        with pytest.raises(RuntimeError) as exc_info:
+            _create_gateway_limiter(None)
+        assert "REDIS_URL must be configured" in str(exc_info.value)
+
+    # 2. Security dependency factory initialization failure when REDIS_URL missing in production
+    with patch.dict(os.environ, {"ZEROPHISH_ENV": "production", "DATABASE_URL": "sqlite:///:memory:"}):
+        os.environ.pop("REDIS_URL", None)
+        with pytest.raises(RuntimeError) as exc_info:
+            _resolve_security_limiter(None)
+        assert "REDIS_URL must be configured" in str(exc_info.value)
+
+    # 3. Lifespan startup failure in production mode when REDIS_URL missing
     with patch.dict(os.environ, {"ZEROPHISH_ENV": "production", "DATABASE_URL": "sqlite:///:memory:"}):
         os.environ.pop("REDIS_URL", None)
         with pytest.raises(RuntimeError) as exc_info:
@@ -380,44 +403,61 @@ async def test_8_missing_redis_url_production_contract():
                 pass
         assert "REDIS_URL must be configured in production environment" in str(exc_info.value)
 
+    # 4. Lifespan startup failure in production mode when REDIS_URL is present but Redis is unreachable
+    with patch.dict(os.environ, {"ZEROPHISH_ENV": "production", "DATABASE_URL": "sqlite:///:memory:", "REDIS_URL": "redis://unreachable.host:6379"}):
+        unreachable_storage = MagicMock()
+        unreachable_storage.check.return_value = False
+        with patch.object(app.state.limiter._limiter, "storage", unreachable_storage):
+            with pytest.raises(RuntimeError) as exc_info:
+                async with lifespan(app):
+                    pass
+            assert "Redis rate limiter storage failed connectivity check" in str(exc_info.value)
+
 
 # ==============================================================================
 # TEST 9 — Local fallback
 # ==============================================================================
 def test_9_local_development_fallback_semantics():
     """In local development without Redis, limiter gracefully creates local memory backend."""
+    from security.dependencies import _resolve_limiter as _resolve_security_limiter
+
     with patch.dict(os.environ, {"ZEROPHISH_ENV": "development", "ENV": "development"}):
         os.environ.pop("REDIS_URL", None)
         local_limiter = _create_gateway_limiter(None)
         storage_type = type(local_limiter._limiter.storage).__name__
         assert "MemoryStorage" in storage_type
 
+        # Verify security dependency limiter also falls back to MemoryStorage in development
+        sec_limiter = _resolve_security_limiter(None)
+        sec_storage_type = type(sec_limiter._limiter.storage).__name__
+        assert "MemoryStorage" in sec_storage_type
+
         # Verify health check reflects 'memory' storage backend
         client = TestClient(app)
         health_res = client.get("/health")
         assert health_res.status_code == 200
         rl_info = health_res.json().get("rate_limiting", {})
-        assert "storage_backend" in rl_info
+        assert rl_info.get("storage_backend") == "memory"
 
 
 # ==============================================================================
-# TEST 10 — Route coverage
+# TEST 10 — Route coverage & Policy verification
 # ==============================================================================
 def test_10_rate_limited_routes_coverage():
-    """Verify scan and status routes are actively configured with rate limiting decorators."""
-    rate_limited_paths = set()
-    for route in app.routes:
-        endpoint_func = getattr(route, "endpoint", None)
-        if endpoint_func:
-            # Check if route wrapped with slowapi limiter decorator
-            if hasattr(endpoint_func, "_rate_limiting") or hasattr(route, "dependencies"):
-                rate_limited_paths.add(getattr(route, "path", ""))
+    """Verify scan, status, report, and vision routes actively enforce their rate limiting policies."""
+    import vision.router
+    from security.dependencies import limiter as sec_limiter
 
-    expected_endpoints = ["/gateway/scan", "/gateway/status/{scan_id}", "/gateway/result/{scan_id}", "/tier1/report"]
-    for expected in expected_endpoints:
-        # Route should be registered in app
-        matched = any(expected == r.path for r in app.routes if hasattr(r, "path"))
-        assert matched, f"Expected endpoint {expected} not registered in app"
+    # Verify gateway endpoints have limits registered in gateway.limiter
+    gw_routes = gateway.limiter._route_limits
+    assert "gateway.gateway_scan" in gw_routes
+    assert "gateway.gateway_status" in gw_routes
+    assert "gateway.gateway_result" in gw_routes
+    assert "gateway.receive_tier1_report" in gw_routes
+
+    # Verify vision endpoint has limit registered in security.dependencies.limiter
+    sec_routes = sec_limiter._route_limits
+    assert "vision.router.analyze_screenshot" in sec_routes
 
 
 # ==============================================================================
@@ -470,3 +510,73 @@ def test_12_existing_api_contract_response_format():
     assert "error" in body
     assert "Rate limit exceeded" in body["error"]
     assert "retry-after" in res2.headers
+    assert "x-ratelimit-limit" in res2.headers
+    assert "x-ratelimit-remaining" in res2.headers
+    assert "x-ratelimit-reset" in res2.headers
+
+
+# ==============================================================================
+# REAL REDIS INTEGRATION TESTS (Skipped unless live Redis available)
+# ==============================================================================
+def _is_real_redis_available() -> bool:
+    target_url = os.getenv("TEST_REAL_REDIS_URL") or os.getenv("REDIS_URL")
+    if not target_url:
+        return False
+    try:
+        r = redis.Redis.from_url(target_url, socket_connect_timeout=0.5, socket_timeout=0.5)
+        return bool(r.ping())
+    except Exception:
+        return False
+
+@pytest.mark.skipif(
+    not _is_real_redis_available(),
+    reason="Live Redis instance not available; set TEST_REAL_REDIS_URL to run real-Redis integration tests in CI/staging."
+)
+def test_real_redis_cross_worker_rate_limiting_integration():
+    """
+    Integration test executing atomic increments and TTL expiry against an actual Redis daemon.
+    Validates cross-worker coordination and window expiration in a live environment.
+    """
+    redis_url = os.getenv("TEST_REAL_REDIS_URL") or os.getenv("REDIS_URL")
+    assert redis_url is not None
+
+    limiter_w1 = Limiter(key_func=get_remote_address, storage_uri=redis_url, headers_enabled=False)
+    limiter_w2 = Limiter(key_func=get_remote_address, storage_uri=redis_url, headers_enabled=False)
+
+    app_w1 = FastAPI()
+    app_w1.state.limiter = limiter_w1
+    app_w1.add_exception_handler(RateLimitExceeded, gateway.rate_limit_handler)
+
+    app_w2 = FastAPI()
+    app_w2.state.limiter = limiter_w2
+    app_w2.add_exception_handler(RateLimitExceeded, gateway.rate_limit_handler)
+
+    unique_route = f"/real-redis-test-{int(time.time())}"
+
+    @app_w1.get(unique_route)
+    @limiter_w1.limit("2/second")
+    async def ep1(request: Request):
+        return {"worker": 1}
+
+    @app_w2.get(unique_route)
+    @limiter_w2.limit("2/second")
+    async def ep2(request: Request):
+        return {"worker": 2}
+
+    c1 = TestClient(app_w1, client=("203.0.113.195", 50000))
+    c2 = TestClient(app_w2, client=("203.0.113.195", 50000))
+
+    # Request 1 via Worker 1 -> OK
+    assert c1.get(unique_route).status_code == 200
+    # Request 2 via Worker 2 -> OK (limit 2 reached)
+    assert c2.get(unique_route).status_code == 200
+    # Request 3 via Worker 1 -> 429 Rate Limit Exceeded
+    assert c1.get(unique_route).status_code == 429
+    # Request 4 via Worker 2 -> 429 Rate Limit Exceeded
+    assert c2.get(unique_route).status_code == 429
+
+    # Wait for TTL to expire (window: 2/second)
+    time.sleep(1.2)
+
+    # Request 5 after expiry -> OK
+    assert c1.get(unique_route).status_code == 200

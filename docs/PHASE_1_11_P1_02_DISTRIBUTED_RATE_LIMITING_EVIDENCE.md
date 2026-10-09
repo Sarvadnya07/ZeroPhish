@@ -1,124 +1,130 @@
 # ZeroPhish — Phase 1.11 / P1-02: Distributed Rate Limiting Implementation Evidence
 
-## 1. Problem Statement
-In multi-worker deployments (e.g. Uvicorn running with 4 or 8 workers behind a reverse proxy), the original rate limiter utilized process-local in-memory storage (`memory://`). Each gateway worker maintained its own rate-limit counters and sliding/fixed window states independently. Consequently, an adversary sending requests evenly distributed across $N$ workers could consume up to $N \times \text{Limit}$ requests per window. This violated rate limiting boundaries and exposed the underlying analysis tiers to denial-of-service and quota exhaustion.
+## 1. Problem Statement & Root Cause Analysis
 
-P1-02 remedies this vulnerability by establishing Redis as the shared transient authority for rate-limit state across all gateway workers, enforcing atomic distributed counter increments and synchronized window expiry.
-
----
-
-## 2. Distributed Architecture
-ZeroPhish maintains a strict three-tier state architecture:
-- **Shared-Durable:** PostgreSQL retains authoritative scan lifecycle records, user/auth details, incidents, and webhook configurations.
-- **Shared-Transient:** Redis manages rate-limit window counters, atomic increment operations, and cross-worker SSE Pub/Sub message fanout.
-- **Worker-Local Transient:** Process-local SSE subscriber queues and lightweight runtime metrics.
-
-Gateway instances share the single authoritative Redis cluster specified via `REDIS_URL`. All route limits evaluated by SlowAPI coordinate directly against Redis key keyspaces (e.g. `LIMITER/<key>/<endpoint>/<window>`).
+### 1.1 Root Causes
+1. **Multi-Worker Rate Limiting Bypass:** The pre-P1-02 implementation relied on process-local in-memory state (`memory://`). Across $N$ gateway workers behind a load balancer, clients could consume up to $N \times \text{Limit}$ requests per window.
+2. **Unsafe Production Fallback in Security Dependencies:** `Backend/security/dependencies.py` initialized a standalone Limiter used for routes like `/vision/analyze`. When `REDIS_URL` was absent or failed in development, it fell back to `memory://`, but its production contract lacked the strict enforcement applied to the gateway limiter, risking silent fallback in production.
+3. **Lifespan Startup Connectivity Verification:** Startup previously validated only the syntactic existence of `REDIS_URL` in the environment, rather than performing an active reachability probe against the configured Redis cluster before serving requests.
+4. **Exception Handling Hierarchy:** `slowapi` interacts with the underlying `limits` library, which can raise `limits.errors.StorageError` in addition to raw `redis.exceptions.RedisError`. Only `RedisError` was explicitly handled, creating a risk that wrapped storage errors might bubble up as generic 500s rather than 503 Service Unavailable with `Retry-After`.
 
 ---
 
-## 3. Storage Hierarchy & Production Contract
-- **Production Mode (`ZEROPHISH_ENV=production`):**
-  - Redis configuration (`REDIS_URL`) is mandatory.
-  - Socket connect timeout is bounded to `3.0s` and socket read/write timeout to `5.0s`.
-  - Missing or unreachable Redis at startup triggers a fatal `RuntimeError`, failing closed immediately.
-  - Startup lifespan checks enforce the presence and validity of `REDIS_URL`.
-- **Local Development / Test Fallback:**
-  - When running in `development` or `test` without an active Redis daemon, `_create_gateway_limiter()` checks Redis connectivity via `storage.check()`.
-  - If unreachable or omitted, it gracefully falls back to single-process in-memory storage (`memory://`), allowing unit tests and standalone developer workflows to run seamlessly.
+## 2. Distributed Architecture & State Separation
+
+ZeroPhish strictly enforces state segregation across tiers:
+- **Shared-Durable (PostgreSQL):** Authoritative scan records, durable incidents, user models, webhook subscriptions.
+- **Shared-Transient (Redis):** Distributed rate-limiting counters/windows and cross-worker SSE Pub/Sub fanout.
+- **Worker-Local Transient:** Memory-resident subscriber queues and ephemeral runtime telemetry.
+
+Redis is the sole transient authority for rate limits across all gateway workers. Both the primary gateway limiter (`gateway.limiter`) and the security dependency limiter (`security.dependencies.limiter`) enforce identical Redis configuration standards and timeouts (`3.0s` connect, `5.0s` read).
 
 ---
 
-## 4. Atomic Counter Semantics
-SlowAPI utilizes Redis storage algorithms (via limits library) executing atomic `INCR` and `EXPIRE` commands (or Redis Lua scripts). Increments and window allocations are evaluated atomically inside the Redis engine. Concurrent requests across multiple workers or threads cannot read dirty un-incremented states or exceed configured thresholds.
+## 3. Production vs. Development Runtime Behavior
+
+| Environment | Redis Configuration | Connectivity Failure at Startup | Request-Time Storage Failure |
+| :--- | :--- | :--- | :--- |
+| **Production (`ZEROPHISH_ENV=production`)** | **Mandatory.** Must provide valid `REDIS_URL`. | **Fails closed immediately:** Raises `RuntimeError` during factory init and lifespan probe. Application will not start or report ready. | **Fails closed:** Caught by `rate_limit_storage_error_handler`, returning **HTTP 503** + `Retry-After: 5`. Unmetered requests are never permitted. |
+| **Development / Test** | Optional. Probes `REDIS_URL` if present. | Gracefully falls back to single-process in-memory backend (`memory://`). Logs clear warning. | Caught by `rate_limit_storage_error_handler` if Redis is used; in-memory store operates locally. |
 
 ---
 
-## 5. Fail-Closed Behavior
-When Redis experiences connection timeouts, network partitions, or storage errors at request time:
-- The custom exception handler `rate_limit_redis_error_handler` catches `redis.exceptions.RedisError`.
-- It immediately returns **HTTP 503 Service Unavailable** with JSON `{"error": "Service temporarily unavailable: rate limit storage error"}` and header `Retry-After: 5`.
-- Requests are never allowed through unmetered in production when the limiter backend is down.
-- Failures increment the `rate_limit_redis_errors_total` metric.
+## 4. Health, Readiness & Observability Contracts
 
----
-
-## 6. Monitored Endpoints & Coverage
-The following public scan entry points and status endpoints are covered by the distributed rate limiter:
-- `POST /gateway/scan` — Tier 1 & background analysis submission.
-- `GET /gateway/status/{scan_id}` — Polling scan status.
-- `GET /gateway/result/{scan_id}` — Polling full scan result.
-- `POST /tier1/report` — Client reporting endpoint.
-
----
-
-## 7. Metrics & Observability
-Runtime rate limiting metrics are tracked and exposed:
-- `rate_limit_rejected_total`: Total count of HTTP 429 rejections emitted by the gateway.
-- `rate_limit_redis_errors_total`: Total count of Redis storage exceptions caught during rate limit evaluation.
-- Exposed in `/gateway/health` under `"rate_limiting"`:
-  ```json
+### 4.1 `/gateway/health`
+Exposes the effective environment, current storage scheme, and rate-limiting metrics:
+```json
+{
+  "status": "healthy",
+  "service": "ZeroPhish API Gateway",
+  "environment": "production",
   "rate_limiting": {
     "storage_backend": "redis",
     "rate_limit_redis_errors_total": 0,
     "rate_limit_rejected_total": 0
   }
-  ```
+}
+```
+
+### 4.2 `/gateway/ready`
+Performs active ping probes against:
+- Database (`SELECT 1`)
+- Redis Pub/Sub (`ping()`)
+- Rate Limiter storage (`storage.check()`)
+
+If `storage.check()` fails in production, `/gateway/ready` returns **HTTP 503 Service Unavailable** with `"dependencies": {"rate_limiter": "unhealthy"}`.
 
 ---
 
-## 8. Health & Readiness Probes
-- `/gateway/health`: Emits gateway liveness along with current rate limit backend and metric counters.
-- `/gateway/ready`: Actively probes Redis storage connectivity via `storage.check()`. In production, if the rate limiter storage probe fails, readiness transitions to `503 Service Unavailable` with `"rate_limiter": "unhealthy"`.
+## 5. Route Policies & Verified Endpoints
+
+The rate limiting policies are registered on the authoritative limiters:
+
+| Endpoint | Limiter Instance | Configured Policy / Variable | Verified Key / Function |
+| :--- | :--- | :--- | :--- |
+| `POST /gateway/scan` | `gateway.limiter` | `CONFIG.scan_rate_limit` (`20/minute` prod, `1200/minute` dev) | `gateway.gateway_scan` |
+| `GET /gateway/status/{scan_id}` | `gateway.limiter` | `CONFIG.status_rate_limit` (`120/minute`) | `gateway.gateway_status` |
+| `GET /gateway/result/{scan_id}` | `gateway.limiter` | `CONFIG.status_rate_limit` (`120/minute`) | `gateway.gateway_result` |
+| `POST /tier1/report` | `gateway.limiter` | `CONFIG.status_rate_limit` (`120/minute`) | `gateway.receive_tier1_report` |
+| `POST /vision/analyze` | `security.dependencies.limiter` | `VISION_RATE_LIMIT` (default `10/minute`) | `vision.router.analyze_screenshot` |
 
 ---
 
-## 9. Security & Audit Logging
-Whenever a request exceeds the configured threshold:
-- `RateLimitExceeded` is captured by `rate_limit_handler`.
-- Audit event is recorded via `security.audit_logger.log_rate_limited(client_ip, request.url.path)`.
-- Client receives **HTTP 429 Too Many Requests** with informative JSON `{"error": "Rate limit exceeded: ..."}` and standard headers `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`.
+## 6. Test Suite & Verification Evidence
+
+### 6.1 Unit Tests vs. Real-Redis Integration Tests
+The test file `Backend/tests/test_p1_02_distributed_rate_limiting.py` contains:
+- **Unit / Simulation Tests (12 tests):** Fast, deterministic tests executing against `SharedFakeRedisStorage` (simulating atomic Redis operations) and mock interfaces.
+- **Real-Redis Integration Test (1 test):** `test_real_redis_cross_worker_rate_limiting_integration` exercises two independent gateway applications backed by a real Redis instance over network sockets. It is conditionally executed via `@pytest.mark.skipif(not _is_real_redis_available(), ...)` when `TEST_REAL_REDIS_URL` is set.
+
+### 6.2 Test Execution Results
+Executed test run:
+```bash
+python -m pytest Backend/tests/test_p1_02_distributed_rate_limiting.py Backend/tests/test_phase1_10_readiness_regressions.py -v --no-cov
+```
+
+**Results:**
+- **P1-02 Distributed Rate Limiting Suite:**
+  - `test_1_single_worker_baseline`: **PASSED**
+  - `test_2_two_workers_shared_state`: **PASSED**
+  - `test_3_multiple_workers_shared_state`: **PASSED**
+  - `test_4_concurrent_requests_atomicity`: **PASSED**
+  - `test_5_window_expiration_resets_allowance`: **PASSED**
+  - `test_6_independent_keys_isolation`: **PASSED**
+  - `test_7_redis_storage_failure_fails_closed`: **PASSED** (verifies both `redis.exceptions.ConnectionError` and `limits.errors.StorageError` return 503 + Retry-After)
+  - `test_8_missing_redis_url_production_contract`: **PASSED** (verifies missing `REDIS_URL` fails closed in gateway factory, security dependency factory, lifespan startup, and unreachable Redis startup probe)
+  - `test_9_local_development_fallback_semantics`: **PASSED** (verifies gateway and security limiters cleanly fall back to `MemoryStorage` in development)
+  - `test_10_rate_limited_routes_coverage`: **PASSED** (verifies policies across gateway and vision routes)
+  - `test_11_cleanup_resource_safety_on_shutdown`: **PASSED** (verifies `.close()` lifecycle on app shutdown)
+  - `test_12_existing_api_contract_response_format`: **PASSED** (verifies 429 status, JSON error, `Retry-After`, and `X-RateLimit-*` headers)
+  - `test_real_redis_cross_worker_rate_limiting_integration`: **SKIPPED** (Reason: Live Redis instance not available on local Windows dev workstation without `TEST_REAL_REDIS_URL`)
+- **Phase 1.10 Readiness Regression Suite:**
+  - All 9 tests: **PASSED** (SSE lifecycle, subscriber cleanup, overflow management, API key auth)
+- **Summary:** 21 passed, 1 skipped, 0 failed in 35.39s.
 
 ---
 
-## 10. Resource Safety & Graceful Shutdown
-During FastAPI lifespan shutdown:
-- Rate limiter storage connections (`_limiter.storage.storage`) are cleanly closed via `.close()`.
-- Prevents connection leaks and orphaned sockets in worker pools.
+## 7. Lifecycle, Error Handling & Graceful Shutdown
+- **Exception Handlers:**
+  - Catches both `redis.exceptions.RedisError` and `limits.errors.StorageError`.
+  - Translates storage failures to HTTP 503 with standard `Retry-After: 5` header and JSON error payload.
+  - Rate limit rejections trigger `security.audit_logger.log_rate_limited`.
+- **Resource Teardown:**
+  - Fast lifespan shutdown inspects `app.state.limiter` and terminates underlying Redis client connections via `storage.close()` if available.
 
 ---
 
-## 11. Circular Import Elimination
-`Backend/security/dependencies.py` was decoupled from `gateway.py` by implementing an independent `_get_security_limiter()` factory. This completely eliminates the previous circular import cycle (`gateway -> vision.router -> security.dependencies -> gateway`).
+## 8. Files Changed & Git State
+- **Branch:** `phase1.11/p1-02-distributed-rate-limiting`
+- **Files Modified:**
+  - `Backend/gateway.py`: Production active Redis connectivity probe in lifespan, `StorageError` handling, robust storage scheme reporting in health/readiness, dynamic environment reporting.
+  - `Backend/security/dependencies.py`: Unified `_resolve_limiter` enforcing fail-closed production contract with identical Redis timeouts, removing unsafe production fallback.
+  - `Backend/tests/test_p1_02_distributed_rate_limiting.py`: Extended tests for security dependency limiter, active startup failure on unreachable Redis, `StorageError` 503 handling, route policies across routers, and live Redis integration test harness.
+  - `docs/PHASE_1_11_P1_02_DISTRIBUTED_RATE_LIMITING_EVIDENCE.md`: Complete audit and evidence documentation.
 
 ---
 
-## 12. Verification & Test Suite
-The dedicated test suite `Backend/tests/test_p1_02_distributed_rate_limiting.py` provides 100% deterministic coverage without external dependencies through `SharedFakeRedisStorage`:
-1. `test_1_single_worker_baseline`: Standard single worker rate limiting.
-2. `test_2_two_workers_shared_state`: Requests split between Worker A and Worker B respect the single global limit.
-3. `test_3_multiple_workers_shared_state`: 4 workers sharing state accept exactly 5 requests and reject 7 requests out of 12.
-4. `test_4_concurrent_requests_atomicity`: Multi-threaded burst requests across 20 threads adhere strictly to the atomic limit.
-5. `test_5_window_expiration_resets_allowance`: Expired windows reset client allowance.
-6. `test_6_independent_keys_isolation`: Different client IPs maintain independent allowances.
-7. `test_7_redis_storage_failure_fails_closed`: Redis errors return 503 + Retry-After.
-8. `test_8_missing_redis_url_production_contract`: Missing `REDIS_URL` in production fails closed at startup.
-9. `test_9_local_development_fallback_semantics`: Non-production runs fall back gracefully to `memory://`.
-10. `test_10_rate_limited_routes_coverage`: Verifies all critical scan and status routes are registered with rate limiting.
-11. `test_11_cleanup_resource_safety_on_shutdown`: Storage connection `.close()` is called on app shutdown.
-12. `test_12_existing_api_contract_response_format`: 429 response structure matches standard error contracts with `Retry-After`.
-
----
-
-## 13. Regression Verification
-The Phase 1.10 readiness regression test suite (`Backend/tests/test_phase1_10_readiness_regressions.py`) passed all 9 test cases cleanly:
-- 21 total tests passed across `test_p1_02_distributed_rate_limiting.py` and `test_phase1_10_readiness_regressions.py`.
-- No regressions observed in SSE subscriber cleanup, overflow tracking, or API key validation.
-
----
-
-## 14. Summary of Changed Files
-- `Backend/gateway.py`: Added distributed rate limiter factory `_create_gateway_limiter`, fail-closed error handler, Retry-After response handler, readiness/health probes, and graceful shutdown.
-- `Backend/security/dependencies.py`: Resolved circular import by creating dedicated `_get_security_limiter`.
-- `Backend/tests/test_p1_02_distributed_rate_limiting.py`: Full P1-02 test suite (12 tests).
-- `docs/PHASE_1_11_P1_02_DISTRIBUTED_RATE_LIMITING_EVIDENCE.md`: Architecture and verification documentation.
+## 9. Remaining Limitations & Explicitly Unproven Claims
+1. **Live Multi-Node Redis Cluster Testing:** The real-Redis integration test was skipped in this local Windows development environment because no local Redis server was running (`TEST_REAL_REDIS_URL` not set). Simulated multi-worker and concurrent atomicity tests passed 100%, but live-network Redis testing must run in CI/staging where Redis is provisioned.
+2. **Reverse Proxy Header Trust:** `key_func=get_remote_address` uses `request.client.host`. In environments behind reverse proxies (e.g. AWS ALB, Cloudflare), trusted proxy middleware must populate client host from `X-Forwarded-For` to prevent shared client IP pooling across external users.
