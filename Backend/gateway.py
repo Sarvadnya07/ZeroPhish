@@ -39,9 +39,13 @@ from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Security, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.security import APIKeyHeader
+
+
 import redis.exceptions
 from limits.errors import StorageError
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -71,10 +75,16 @@ from models.gateway_models import (
     Tier3Result,
     TierStatus,
     CleanStatus,
+    ScanAuditEvent,
 )
 from models.tier1_report import Tier1ReportPayload
-from repositories.factory import get_cache_backend, get_scan_result_repository
+from repositories.factory import (
+    get_cache_backend,
+    get_scan_audit_repository,
+    get_scan_result_repository,
+)
 from tier_1.engine import analyze_tier1_server, sanitize_client_evidence
+from security.audit_logger import SecurityEventType, log_scan_audit, log_authz_denied
 from security.middleware import (
     InputValidator,
     RequestSizeLimitMiddleware,
@@ -83,6 +93,7 @@ from security.middleware import (
 try:
     from Backend.security.metrics import get_metrics_response
 except ImportError:
+
     from security.metrics import get_metrics_response
 
 try:
@@ -213,17 +224,149 @@ def _resolve_api_key() -> Optional[str]:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
-async def verify_api_key(api_key: str = Security(api_key_header)) -> str:
+import hashlib
+
+
+def _get_correlation_id(request: Optional[Request] = None) -> str:
+    """Extract correlation ID from incoming request headers or generate a new one."""
+    if request is not None:
+        corr = request.headers.get("x-correlation-id") or request.headers.get("x-request-id")
+        if corr and corr.strip():
+            return corr.strip()[:64]
+    return str(uuid.uuid4())
+
+
+def _get_actor_id(api_key: Optional[str] = None, request: Optional[Request] = None) -> Optional[str]:
+    """Derive actor identifier (hashed API key or user identity) without leaking raw secrets."""
+    if api_key and api_key.strip():
+        digest = hashlib.sha256(api_key.strip().encode("utf-8")).hexdigest()[:16]
+        return f"apikey:{digest}"
+    if request is not None:
+        user = getattr(request.state, "user", None)
+        if user and getattr(user, "id", None):
+            return f"user:{user.id}"
+    return None
+
+
+def _get_tenant_id(request: Optional[Request] = None) -> Optional[str]:
+    """Extract authoritative tenant identifier if present in request headers."""
+    if request is not None:
+        tenant = request.headers.get("x-tenant-id")
+        if tenant and tenant.strip():
+            return tenant.strip()[:64]
+    return None
+
+
+async def _record_scan_audit_event(
+    event_type: SecurityEventType | str,
+    scan_id: str,
+    correlation_id: str,
+    actor_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    previous_state: Optional[str] = None,
+    new_state: Optional[str] = None,
+    verdict: Optional[str] = None,
+    score: Optional[float] = None,
+    duration_ms: Optional[float] = None,
+    error_category: Optional[str] = None,
+    provenance: Optional[str] = None,
+    details: Optional[Dict[str, Any]] = None,
+    level: int = logging.INFO,
+) -> ScanAuditEvent:
+    """
+    Persist durable audit event to ScanAuditRepository and emit structured log.
+    Survives worker crashes and repository reloads.
+    """
+    ev_type_str = event_type.value if hasattr(event_type, "value") else str(event_type)
+    audit_ev = ScanAuditEvent(
+        event_id=str(uuid.uuid4()),
+        scan_id=scan_id or "unknown",
+        event_type=ev_type_str,
+        correlation_id=correlation_id or "unknown",
+        timestamp=datetime.now(timezone.utc),
+        actor_id=actor_id,
+        tenant_id=tenant_id,
+        previous_state=previous_state,
+        new_state=new_state,
+        verdict=verdict,
+        score=score,
+        duration_ms=duration_ms,
+        error_category=error_category,
+        provenance=provenance or WORKER_ID,
+        details=details or {},
+    )
+
+    # 1. Structured log emission
+    try:
+        log_scan_audit(
+            event_type=ev_type_str,
+            scan_id=audit_ev.scan_id,
+            correlation_id=audit_ev.correlation_id,
+            actor_id=audit_ev.actor_id,
+            tenant_id=audit_ev.tenant_id,
+            previous_state=audit_ev.previous_state,
+            new_state=audit_ev.new_state,
+            verdict=audit_ev.verdict,
+            score=audit_ev.score,
+            duration_ms=audit_ev.duration_ms,
+            error_category=audit_ev.error_category,
+            provenance=audit_ev.provenance,
+            level=level,
+        )
+    except Exception as log_err:
+        logger.debug("Failed to emit structured scan audit log: %s", log_err)
+
+    # 2. Durable repository persistence
+    try:
+        audit_repo = get_scan_audit_repository()
+        await audit_repo.record_event(audit_ev)
+    except Exception as repo_err:
+        logger.error("Failed to persist scan audit event %s to repository: %s", audit_ev.event_id, repo_err)
+
+    return audit_ev
+
+
+async def verify_api_key(
+    request: Request,
+    api_key: str = Security(api_key_header),
+) -> str:
     """Verify API key if configured; otherwise allow all requests."""
     expected = _resolve_api_key()
     if not expected:
         return api_key or ""
     if not api_key or api_key != expected:
+        corr_id = _get_correlation_id(request)
+        actor = _get_actor_id(api_key, request)
+        tenant = _get_tenant_id(request)
+        log_authz_denied(
+            user_id=actor or "[unknown_key]",
+            resource=request.url.path,
+            action=request.method,
+            reason="invalid_api_key",
+            ip=get_remote_address(request),
+        )
+        if request.url.path in ("/api/v1/scan", "/scan", "/gateway/scan"):
+            try:
+                await _record_scan_audit_event(
+                    event_type=SecurityEventType.AUTHZ_DENIED,
+                    scan_id="unauthorized",
+                    correlation_id=corr_id,
+                    actor_id=actor,
+                    tenant_id=tenant,
+                    previous_state="SUBMITTED",
+                    new_state="AUTHZ_DENIED",
+                    error_category="UNAUTHORIZED_API_KEY",
+                    provenance=WORKER_ID,
+                    level=logging.WARNING,
+                )
+            except Exception:
+                pass
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Could not validate API key",
         )
     return api_key
+
 
 # ---------- Lifespan & Background Tasks ----------
 _background_tasks: set[asyncio.Task] = set()
@@ -518,6 +661,36 @@ async def rate_limit_storage_error_handler(request: Request, exc: Exception) -> 
 
 app.add_exception_handler(redis.exceptions.RedisError, rate_limit_storage_error_handler)
 app.add_exception_handler(StorageError, rate_limit_storage_error_handler)
+
+async def scan_validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    if request.url.path in ("/api/v1/scan", "/scan", "/gateway/scan"):
+        corr_id = _get_correlation_id(request)
+        actor_id = _get_actor_id(request.headers.get("x-api-key"), request)
+        tenant_id = _get_tenant_id(request)
+        try:
+            await _record_scan_audit_event(
+                event_type=SecurityEventType.SCAN_VALIDATION_FAILED,
+                scan_id="invalid",
+                correlation_id=corr_id,
+                actor_id=actor_id,
+                tenant_id=tenant_id,
+                previous_state="SUBMITTED",
+                new_state="VALIDATION_FAILED",
+                error_category="REQUEST_VALIDATION_ERROR",
+                provenance=WORKER_ID,
+                details={"errors": [str(err.get("msg", err)) for err in exc.errors()][:10]},
+                level=logging.WARNING,
+            )
+        except Exception:
+            pass
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": jsonable_encoder(exc.errors())},
+    )
+
+
+app.add_exception_handler(RequestValidationError, scan_validation_error_handler)
+
 
 # ---------- Extension Routers ----------
 if EXTENSIONS_AVAILABLE:
@@ -1120,8 +1293,12 @@ async def _finalize_tier3(
     cache_key: Optional[str] = None,
     screenshot_b64: Optional[str] = None,
     links: Optional[List[str]] = None,
+    correlation_id: Optional[str] = None,
+    actor_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
 ) -> None:
-    """Background task: complete Tier 3 & optional Vision, update scan result, cache, and notify."""
+    """Background task: complete Tier 3 & optional Vision, update scan result, cache, audit, and notify."""
+    corr_id = correlation_id or str(uuid.uuid4())
     try:
         try:
             # CircuitBreaker implementation may not strictly match the protocol used
@@ -1240,6 +1417,46 @@ async def _finalize_tier3(
             })
             await scan_repo.save(scan_id, updated)
 
+            # Record durable audit event for completion or failure/timeout
+            if tier3_result.status == TierStatus.TIMEOUT:
+                audit_ev_type = SecurityEventType.SCAN_TIMEOUT
+                new_state_str = "TIMEOUT"
+                err_cat = tier3_result.category or "AI_TIMEOUT"
+                ev_level = logging.WARNING
+            elif tier3_result.status == TierStatus.FAILED:
+                audit_ev_type = SecurityEventType.SCAN_FAILED
+                new_state_str = "FAILED"
+                err_cat = tier3_result.category or "AI_PROVIDER_ERROR"
+                ev_level = logging.ERROR
+            else:
+                audit_ev_type = SecurityEventType.SCAN_COMPLETED
+                new_state_str = "COMPLETED"
+                err_cat = None
+                ev_level = logging.INFO
+
+            try:
+                await _record_scan_audit_event(
+                    event_type=audit_ev_type,
+                    scan_id=scan_id,
+                    correlation_id=corr_id,
+                    actor_id=actor_id,
+                    tenant_id=tenant_id,
+                    previous_state="PROCESSING",
+                    new_state=new_state_str,
+                    verdict=fusion_res.verdict,
+                    score=fusion_res.final_score,
+                    duration_ms=total_ms,
+                    error_category=err_cat,
+                    provenance=WORKER_ID,
+                    details={
+                        "layers_completed": layers_completed,
+                        "tier3_status": str(tier3_result.status.value if hasattr(tier3_result.status, "value") else tier3_result.status),
+                    },
+                    level=ev_level,
+                )
+            except Exception as audit_err:
+                logger.error("Failed to record finalization audit event for scan %s: %s", scan_id, audit_err)
+
             # Cache completed result
             if cache_key:
                 try:
@@ -1296,6 +1513,7 @@ async def _finalize_tier3(
     finally:
         scan_started_at.pop(scan_id, None)
 
+
 # ---------- Endpoints ----------
 @app.post("/api/v1/scan", response_model=GatewayScanResponse)
 @app.post("/scan", response_model=GatewayScanResponse)
@@ -1318,6 +1536,10 @@ async def gateway_scan(
     - Response includes a `scan_id` for polling status.
     """
     # 1. Input validation
+    corr_id = _get_correlation_id(request)
+    actor_id = _get_actor_id(api_key, request)
+    tenant_id = _get_tenant_id(request)
+
     valid, errors = InputValidator.validate_scan_request(
         sender=scan_request.sender,
         body=scan_request.body,
@@ -1325,6 +1547,22 @@ async def gateway_scan(
         subject=scan_request.subject,
     )
     if not valid:
+        try:
+            await _record_scan_audit_event(
+                event_type=SecurityEventType.SCAN_VALIDATION_FAILED,
+                scan_id="invalid",
+                correlation_id=corr_id,
+                actor_id=actor_id,
+                tenant_id=tenant_id,
+                previous_state="SUBMITTED",
+                new_state="VALIDATION_FAILED",
+                error_category="INPUT_VALIDATION_ERROR",
+                provenance=WORKER_ID,
+                details={"errors": [str(e) for e in errors][:10]},
+                level=logging.WARNING,
+            )
+        except Exception:
+            pass
         raise HTTPException(status_code=400, detail={"errors": errors})
 
     scan_id = str(uuid.uuid4())
@@ -1349,6 +1587,26 @@ async def gateway_scan(
             scan_repo = get_scan_result_repository()
             async with scan_results_lock:
                 await scan_repo.save(scan_id, cached_res)
+
+            try:
+                await _record_scan_audit_event(
+                    event_type=SecurityEventType.SCAN_CACHE_HIT,
+                    scan_id=scan_id,
+                    correlation_id=corr_id,
+                    actor_id=actor_id,
+                    tenant_id=tenant_id,
+                    previous_state="SUBMITTED",
+                    new_state="CACHE_HIT",
+                    verdict=cached_res.verdict.value if hasattr(cached_res.verdict, "value") else str(cached_res.verdict),
+                    score=cached_res.final_score,
+                    duration_ms=total_ms,
+                    provenance=WORKER_ID,
+                    details={"cached": True},
+                    level=logging.INFO,
+                )
+            except Exception as audit_err:
+                logger.error("Failed to record cache-hit audit event for scan %s: %s", scan_id, audit_err)
+
             try:
                 _spawn_background_task(
                     _notify_live_dashboard(cached_res, scan_request.sender, scan_request.subject or "No Subject"),
@@ -1360,6 +1618,7 @@ async def gateway_scan(
             return cached_res
         except (TypeError, ValueError, json.JSONDecodeError) as e:
             logger.debug("Cache data invalid for %s: %s", scan_id, e)
+
 
     # 3. Execute Tier 1 & Tier 2 (synchronous part)
     # Tier 1: Authoritative server-side heuristic analysis
@@ -1454,6 +1713,30 @@ async def gateway_scan(
     async with scan_results_lock:
         await scan_repo.save(scan_id, response)
 
+    # Record durable SCAN_ACCEPTED audit event
+    try:
+        await _record_scan_audit_event(
+            event_type=SecurityEventType.SCAN_ACCEPTED,
+            scan_id=scan_id,
+            correlation_id=corr_id,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            previous_state="SUBMITTED",
+            new_state="PROCESSING",
+            verdict=verdict.value if hasattr(verdict, "value") else str(verdict),
+            score=partial_score,
+            duration_ms=(time.perf_counter() - scan_started_at[scan_id]) * 1000,
+            provenance=WORKER_ID,
+            details={
+                "layers_completed": 2,
+                "tier1_score": tier1.score,
+                "tier2_score": tier2.score,
+            },
+            level=logging.INFO,
+        )
+    except Exception as audit_err:
+        logger.error("Failed to record scan accepted audit event for scan %s: %s", scan_id, audit_err)
+
     # 5. Notify dashboard (partial)
     try:
         _spawn_background_task(
@@ -1486,7 +1769,11 @@ async def gateway_scan(
         cache_key,
         scan_request.screenshot_b64,
         scan_request.links,
+        corr_id,
+        actor_id,
+        tenant_id,
     )
+
 
     logger.info("Scan %s initiated (partial score=%.2f)", scan_id, partial_score)
     return response
@@ -1577,7 +1864,21 @@ async def gateway_result(
         scan_started_at.pop(scan_id, None)
     return result
 
+@app.get("/gateway/audit/{scan_id}", response_model=List[ScanAuditEvent])
+@app.get("/api/v1/scan/{scan_id}/audit", response_model=List[ScanAuditEvent])
+@limiter.limit(CONFIG.status_rate_limit)
+async def gateway_scan_audit(
+    request: Request,
+    scan_id: str,
+    limit: int = 100,
+    api_key: str = Depends(verify_api_key),
+) -> List[ScanAuditEvent]:
+    """Retrieve durable audit trail events for a given scan_id."""
+    audit_repo = get_scan_audit_repository()
+    return await audit_repo.list_events(scan_id=scan_id, limit=limit)
+
 # ---------- Health / Readiness ----------
+
 @app.get("/health")
 @app.get("/api/v1/health")
 @app.get("/gateway/health")

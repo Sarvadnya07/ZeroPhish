@@ -275,3 +275,35 @@ class ScanResultDB(Base):
     __table_args__ = (
         Index("idx_scan_results_created", "created_at"),
     )
+
+
+# ---------- Scan Audit Trail ----------
+class ScanAuditEventDB(Base):
+    __tablename__ = "scan_audit_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    scan_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    correlation_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    actor_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    tenant_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    previous_state: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    new_state: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    verdict: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    duration_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    error_category: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    provenance: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    details_json: Mapped[str] = mapped_column(Text, nullable=False, server_default="{}")
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+    __table_args__ = (
+        Index("idx_scan_audit_scan_ts", "scan_id", "created_at"),
+        Index("idx_scan_audit_correlation", "correlation_id"),
+        Index("idx_scan_audit_event_type", "event_type"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ScanAuditEventDB id={self.id} event_type={self.event_type} scan_id={self.scan_id}>"

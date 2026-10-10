@@ -16,6 +16,7 @@ from .base import (
     AnalyticsRepository,
     CacheBackend,
     IncidentRepository,
+    ScanAuditRepository,
     ScanResultRepository,
     UserRepository,
     WebhookRepository,
@@ -28,7 +29,9 @@ _incident_repo: Optional[IncidentRepository] = None
 _analytics_repo: Optional[AnalyticsRepository] = None
 _webhook_repo: Optional[WebhookRepository] = None
 _scan_result_repo: Optional[ScanResultRepository] = None
+_scan_audit_repo: Optional[ScanAuditRepository] = None
 _cache_backend: Optional[CacheBackend] = None
+
 
 
 def _check_production_persistence_requirement() -> None:
@@ -135,6 +138,25 @@ def get_scan_result_repository() -> ScanResultRepository:
             logger.info("Using InMemoryScanResultRepository (no DATABASE_URL).")
     assert _scan_result_repo is not None
     return _scan_result_repo
+
+
+def get_scan_audit_repository() -> ScanAuditRepository:
+    global _scan_audit_repo
+    if _scan_audit_repo is None:
+        _check_production_persistence_requirement()
+        db_url = os.getenv("DATABASE_URL")
+        if db_url:
+            from .sql_repositories import SQLScanAuditRepository
+
+            _scan_audit_repo = SQLScanAuditRepository(_get_session_factory())
+        else:
+            from .in_memory import InMemoryScanAuditRepository
+
+            _scan_audit_repo = cast(ScanAuditRepository, InMemoryScanAuditRepository())
+            logger.info("Using InMemoryScanAuditRepository (no DATABASE_URL).")
+    assert _scan_audit_repo is not None
+    return _scan_audit_repo
+
 
 
 def get_cache_backend() -> CacheBackend:
@@ -273,6 +295,11 @@ def set_scan_result_repository(repo: ScanResultRepository) -> None:
     _scan_result_repo = repo
 
 
+def set_scan_audit_repository(repo: ScanAuditRepository) -> None:
+    global _scan_audit_repo
+    _scan_audit_repo = repo
+
+
 def set_cache_backend(cache: CacheBackend) -> None:
     global _cache_backend
     _cache_backend = cache
@@ -280,10 +307,11 @@ def set_cache_backend(cache: CacheBackend) -> None:
 
 def reset_repositories() -> None:
     """Reset all repository singletons for isolated testing."""
-    global _user_repo, _incident_repo, _analytics_repo, _webhook_repo, _scan_result_repo, _cache_backend
+    global _user_repo, _incident_repo, _analytics_repo, _webhook_repo, _scan_result_repo, _scan_audit_repo, _cache_backend
     _user_repo = None
     _incident_repo = None
     _analytics_repo = None
     _webhook_repo = None
     _scan_result_repo = None
+    _scan_audit_repo = None
     _cache_backend = None

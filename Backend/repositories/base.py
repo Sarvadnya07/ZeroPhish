@@ -267,3 +267,25 @@ class CacheBackend(Protocol):
     async def get_stats(self) -> Dict[str, Any]:
         """Return cache statistics."""
         ...
+
+
+@runtime_checkable
+class ScanAuditRepository(Protocol):
+    """Repository for durable scan lifecycle audit event records."""
+
+    async def record_event(self, event: Any) -> Any:
+        """Persist a scan audit event."""
+        ...
+
+    async def list_events(
+        self,
+        scan_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Any]:
+        """List scan audit events filtered by scan_id or correlation_id."""
+        ...
+
+    async def count(self, scan_id: Optional[str] = None) -> int:
+        """Return total count of audit events, optionally filtered by scan_id."""
+        ...

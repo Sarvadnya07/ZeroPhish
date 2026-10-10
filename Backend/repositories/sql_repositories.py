@@ -18,7 +18,7 @@ try:
 except ImportError:  # pragma: no cover - SQLAlchemy is optional in some environments
     Session = Any  # type: ignore[misc,assignment]
 
-from models.gateway_models import GatewayScanResponse
+from models.gateway_models import GatewayScanResponse, ScanAuditEvent
 
 from analytics.models import (
     AdminDashboardSummary,
@@ -41,6 +41,7 @@ from infrastructure.models import (
     IncidentCommentDB,
     IncidentDB,
     PolicyRuleDB,
+    ScanAuditEventDB,
     ScanEventDB,
     ScanResultDB,
     TokenRevocationDB,
@@ -48,6 +49,7 @@ from infrastructure.models import (
     WebhookDeliveryDB,
     WebhookSubscriptionDB,
 )
+
 
 
 def _to_datetime(v: Any) -> Optional[_dt.datetime]:
@@ -960,3 +962,96 @@ class SQLWebhookRepository:
                 )
                 for r in rows
             ]
+
+
+class SQLScanAuditRepository:
+    """SQLAlchemy-backed repository for durable scan audit events."""
+
+    def __init__(self, session_factory):
+        self._session_factory = session_factory
+
+    def _to_scan_audit_event(self, r: ScanAuditEventDB) -> ScanAuditEvent:
+        details = {}
+        if r.details_json:
+            try:
+                details = json.loads(r.details_json)
+            except Exception:
+                details = {}
+        return ScanAuditEvent(
+            event_id=r.event_id,
+            scan_id=r.scan_id,
+            event_type=r.event_type,
+            correlation_id=r.correlation_id,
+            timestamp=r.timestamp,
+            actor_id=r.actor_id,
+            tenant_id=r.tenant_id,
+            previous_state=r.previous_state,
+            new_state=r.new_state,
+            verdict=r.verdict,
+            score=r.score,
+            duration_ms=r.duration_ms,
+            error_category=r.error_category,
+            provenance=r.provenance,
+            details=details,
+        )
+
+    async def record_event(self, event: ScanAuditEvent) -> ScanAuditEvent:
+        details_json = json.dumps(getattr(event, "details", {}) or {}, default=str)
+        ts_dt = _to_datetime(getattr(event, "timestamp", None)) or _dt.datetime.now(_dt.timezone.utc)
+        created_at = ts_dt.timestamp()
+
+        with self._session_factory() as session:
+            try:
+                # Idempotency / deduplication check by event_id
+                existing = session.query(ScanAuditEventDB).filter(ScanAuditEventDB.event_id == event.event_id).first()
+                if existing:
+                    logger.debug("Scan audit event %s already recorded; returning existing record", event.event_id)
+                    return self._to_scan_audit_event(existing)
+
+                db_record = ScanAuditEventDB(
+                    event_id=str(event.event_id),
+                    scan_id=str(event.scan_id),
+                    event_type=str(event.event_type),
+                    correlation_id=str(event.correlation_id),
+                    actor_id=str(event.actor_id) if event.actor_id else None,
+                    tenant_id=str(event.tenant_id) if event.tenant_id else None,
+                    previous_state=str(event.previous_state) if event.previous_state else None,
+                    new_state=str(event.new_state) if event.new_state else None,
+                    verdict=str(event.verdict) if event.verdict else None,
+                    score=float(event.score) if event.score is not None else None,
+                    duration_ms=float(event.duration_ms) if event.duration_ms is not None else None,
+                    error_category=str(event.error_category) if event.error_category else None,
+                    provenance=str(event.provenance) if event.provenance else None,
+                    details_json=details_json,
+                    timestamp=ts_dt,
+                    created_at=created_at,
+                )
+                session.add(db_record)
+                session.commit()
+                return event
+            except Exception:
+                session.rollback()
+                raise
+
+    async def list_events(
+        self,
+        scan_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[ScanAuditEvent]:
+        with self._session_factory() as session:
+            query = session.query(ScanAuditEventDB)
+            if scan_id:
+                query = query.filter(ScanAuditEventDB.scan_id == scan_id)
+            if correlation_id:
+                query = query.filter(ScanAuditEventDB.correlation_id == correlation_id)
+            rows = query.order_by(ScanAuditEventDB.created_at.asc(), ScanAuditEventDB.id.asc()).limit(limit).all()
+            return [self._to_scan_audit_event(r) for r in rows]
+
+    async def count(self, scan_id: Optional[str] = None) -> int:
+        with self._session_factory() as session:
+            query = session.query(ScanAuditEventDB)
+            if scan_id:
+                query = query.filter(ScanAuditEventDB.scan_id == scan_id)
+            return query.count()
+

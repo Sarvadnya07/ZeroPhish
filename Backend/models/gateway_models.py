@@ -287,3 +287,27 @@ class TierError(BaseModel):
     error_type: str = Field(..., min_length=1, description="Error type/code")
     message: str = Field(..., min_length=1, description="Human‑readable error")
     fallback_score: int = Field(default=50, ge=0, le=100, description="Default score used on failure")
+
+
+# ---------- Scan Audit Event Models ----------
+class ScanAuditEvent(BaseModel):
+    """Authoritative structured scan lifecycle audit record."""
+
+    event_id: str = Field(..., description="Unique event identifier")
+    scan_id: str = Field(..., description="Associated scan identifier")
+    event_type: str = Field(..., description="Lifecycle event type")
+    correlation_id: str = Field(..., description="Request or process correlation ID")
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Event timestamp (UTC)",
+    )
+    actor_id: Optional[str] = Field(None, description="Hashed API key or user identity")
+    tenant_id: Optional[str] = Field(None, description="Authoritative tenant identifier if present")
+    previous_state: Optional[str] = Field(None, description="Previous lifecycle state")
+    new_state: Optional[str] = Field(None, description="Current lifecycle state")
+    verdict: Optional[str] = Field(None, description="Scan verdict at this stage")
+    score: Optional[float] = Field(None, description="Scan score at this stage")
+    duration_ms: Optional[float] = Field(None, description="Elapsed stage/lifecycle duration in ms")
+    error_category: Optional[str] = Field(None, description="Standardized error category on failure")
+    provenance: Optional[str] = Field(None, description="Gateway worker identity or origin component")
+    details: Dict[str, Any] = Field(default_factory=dict, description="Sanitized event metadata")

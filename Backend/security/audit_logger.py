@@ -48,6 +48,14 @@ class SecurityEventType(str, Enum):
     # Configuration
     CONFIG_ERROR = "CONFIG_ERROR"
     STARTUP_WARNING = "STARTUP_WARNING"
+    # Scan lifecycle
+    SCAN_ACCEPTED = "SCAN_ACCEPTED"
+    SCAN_CACHE_HIT = "SCAN_CACHE_HIT"
+    SCAN_STAGE_TRANSITION = "SCAN_STAGE_TRANSITION"
+    SCAN_COMPLETED = "SCAN_COMPLETED"
+    SCAN_FAILED = "SCAN_FAILED"
+    SCAN_TIMEOUT = "SCAN_TIMEOUT"
+    SCAN_VALIDATION_FAILED = "SCAN_VALIDATION_FAILED"
     # General
     USER_PROVISIONED = "USER_PROVISIONED"
     AUDIT_EVENT = "AUDIT_EVENT"
@@ -360,3 +368,49 @@ class AuditLogger:
             user_id=user_id or "[none]",
             **safe_details,
         )
+
+
+def log_scan_audit(
+    event_type: SecurityEventType | str,
+    scan_id: str,
+    correlation_id: str,
+    actor_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    previous_state: Optional[str] = None,
+    new_state: Optional[str] = None,
+    verdict: Optional[str] = None,
+    score: Optional[float] = None,
+    duration_ms: Optional[float] = None,
+    error_category: Optional[str] = None,
+    provenance: Optional[str] = None,
+    level: int = logging.INFO,
+) -> None:
+    """
+    Log structured scan lifecycle event to security audit logger.
+    Ensures safe serialization without exposing raw bodies, tokens, or traces.
+    """
+    ev_type = event_type.value if hasattr(event_type, "value") else str(event_type)
+    fields: Dict[str, Any] = {
+        "scan_id": scan_id or "unknown",
+        "correlation_id": correlation_id or "unknown",
+        "actor_id": actor_id or "[none]",
+        "tenant_id": tenant_id or "[none]",
+        "previous_state": previous_state or "None",
+        "new_state": new_state or "None",
+        "provenance": provenance or "gateway",
+    }
+    if verdict is not None:
+        fields["verdict"] = verdict
+    if score is not None:
+        fields["score"] = f"{score:.2f}"
+    if duration_ms is not None:
+        fields["duration_ms"] = f"{duration_ms:.2f}"
+    if error_category is not None:
+        fields["error_category"] = error_category[:100]
+
+    _emit_logger(
+        ev_type,
+        level,
+        "scan",
+        **fields,
+    )

@@ -30,14 +30,17 @@ from incidents.models import (
 )
 from webhooks.models import WebhookDelivery, WebhookSubscription
 
+from models.gateway_models import ScanAuditEvent
 from .base import (
     AnalyticsRepository,
     CacheBackend,
     IncidentRepository,
+    ScanAuditRepository,
     ScanResultRepository,
     UserRepository,
     WebhookRepository,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -577,3 +580,49 @@ class InMemoryCacheBackend:
                 "backend": "in_memory",
                 "keys_count": len(self._store),
             }
+
+
+class InMemoryScanAuditRepository:
+    """In-memory scan audit repository for testing and development."""
+
+    def __init__(self, limit: int = 1000):
+        self._events: List[ScanAuditEvent] = []
+        self._events_by_id: Dict[str, ScanAuditEvent] = {}
+        self._limit = limit
+        self._lock = asyncio.Lock()
+
+    async def record_event(self, event: ScanAuditEvent) -> ScanAuditEvent:
+        async with self._lock:
+            # Deduplication by event_id
+            if event.event_id in self._events_by_id:
+                logger.debug("Scan audit event %s already recorded in-memory", event.event_id)
+                return self._events_by_id[event.event_id]
+
+            self._events_by_id[event.event_id] = event
+            self._events.append(event)
+            while len(self._events) > self._limit:
+                evicted = self._events.pop(0)
+                self._events_by_id.pop(evicted.event_id, None)
+            logger.debug("Recorded scan audit event %s (in-memory)", event.event_id)
+            return event
+
+    async def list_events(
+        self,
+        scan_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[ScanAuditEvent]:
+        async with self._lock:
+            results = self._events
+            if scan_id:
+                results = [e for e in results if e.scan_id == scan_id]
+            if correlation_id:
+                results = [e for e in results if e.correlation_id == correlation_id]
+            return results[:limit]
+
+    async def count(self, scan_id: Optional[str] = None) -> int:
+        async with self._lock:
+            if scan_id:
+                return sum(1 for e in self._events if e.scan_id == scan_id)
+            return len(self._events)
+
