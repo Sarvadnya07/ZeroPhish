@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Security, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Security, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -249,12 +249,24 @@ def _get_actor_id(api_key: Optional[str] = None, request: Optional[Request] = No
 
 
 def _get_tenant_id(request: Optional[Request] = None) -> Optional[str]:
-    """Extract authoritative tenant identifier if present in request headers."""
+    """
+    Derive authoritative tenant identifier.
+
+    ZeroPhish operates as a single-tenant deployment governed by API keys and system
+    identities. Request headers such as 'x-tenant-id' are unauthenticated, spoofable client
+    claims and are NEVER treated as authoritative. Returns None unless an authentic,
+    authenticated tenant context is bound to request.state.
+    """
     if request is not None:
-        tenant = request.headers.get("x-tenant-id")
-        if tenant and tenant.strip():
-            return tenant.strip()[:64]
+        state_tenant = getattr(request.state, "tenant_id", None)
+        if state_tenant and isinstance(state_tenant, str) and state_tenant.strip():
+            return state_tenant.strip()[:64]
     return None
+
+
+class AuditPersistenceError(RuntimeError):
+    """Raised when durable audit persistence fails for a required lifecycle transition."""
+    pass
 
 
 async def _record_scan_audit_event(
@@ -272,10 +284,14 @@ async def _record_scan_audit_event(
     provenance: Optional[str] = None,
     details: Optional[Dict[str, Any]] = None,
     level: int = logging.INFO,
+    fail_closed: bool = False,
 ) -> ScanAuditEvent:
     """
     Persist durable audit event to ScanAuditRepository and emit structured log.
     Survives worker crashes and repository reloads.
+
+    If fail_closed is True (e.g. in production for synchronous security-critical lifecycle
+    transitions), failure to write to the durable audit repository raises AuditPersistenceError.
     """
     ev_type_str = event_type.value if hasattr(event_type, "value") else str(event_type)
     audit_ev = ScanAuditEvent(
@@ -320,8 +336,19 @@ async def _record_scan_audit_event(
     try:
         audit_repo = get_scan_audit_repository()
         await audit_repo.record_event(audit_ev)
+        logger.debug("Audit event %s successfully persisted (persistence_status=persisted)", audit_ev.event_id)
     except Exception as repo_err:
-        logger.error("Failed to persist scan audit event %s to repository: %s", audit_ev.event_id, repo_err)
+        logger.error(
+            "Audit event %s persistence failed (persistence_status=failed, event_type=%s, scan_id=%s): %s",
+            audit_ev.event_id,
+            ev_type_str,
+            audit_ev.scan_id,
+            repo_err,
+        )
+        if fail_closed:
+            raise AuditPersistenceError(
+                f"Failed to persist required scan audit event {ev_type_str} for scan {scan_id}: {repo_err}"
+            ) from repo_err
 
     return audit_ev
 
@@ -330,10 +357,27 @@ async def verify_api_key(
     request: Request,
     api_key: str = Security(api_key_header),
 ) -> str:
-    """Verify API key if configured; otherwise allow all requests."""
+    """
+    Verify API key.
+
+    In production (ZEROPHISH_ENV == 'production'), an API key is mandatory. If unconfigured,
+    the gateway fails closed with HTTP 500.
+    In development/testing, if no API key is configured, requests are permitted.
+    """
+    current_env = (os.getenv("ZEROPHISH_ENV") or os.getenv("ENV") or CONFIG.env or "development").strip().lower()
+    is_production = current_env == "production"
     expected = _resolve_api_key()
+
+    if is_production and not expected:
+        logger.critical("FATAL: API_KEY is not configured in production environment.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Server security misconfiguration: API key authentication must be configured in production.",
+        )
+
     if not expected:
         return api_key or ""
+
     if not api_key or api_key != expected:
         corr_id = _get_correlation_id(request)
         actor = _get_actor_id(api_key, request)
@@ -358,6 +402,7 @@ async def verify_api_key(
                     error_category="UNAUTHORIZED_API_KEY",
                     provenance=WORKER_ID,
                     level=logging.WARNING,
+                    fail_closed=is_production,
                 )
             except Exception:
                 pass
@@ -1510,6 +1555,29 @@ async def _finalize_tier3(
                 )
             except (TypeError, ValueError, RuntimeError, OSError) as e:
                 logger.error("Analytics recording error for scan %s: %s", scan_id, e)
+    except Exception as unhandled_err:
+        logger.error(
+            "Unexpected error during scan %s background finalization: %s",
+            scan_id,
+            unhandled_err,
+            exc_info=True,
+        )
+        try:
+            await _record_scan_audit_event(
+                event_type=SecurityEventType.SCAN_FAILED,
+                scan_id=scan_id,
+                correlation_id=corr_id,
+                actor_id=actor_id,
+                tenant_id=tenant_id,
+                previous_state="PROCESSING",
+                new_state="FAILED",
+                error_category="UNEXPECTED_FINALIZER_EXCEPTION",
+                provenance=WORKER_ID,
+                details={"error": type(unhandled_err).__name__},
+                level=logging.ERROR,
+            )
+        except Exception as audit_err:
+            logger.error("Failed to record failure audit event for scan %s: %s", scan_id, audit_err)
     finally:
         scan_started_at.pop(scan_id, None)
 
@@ -1588,6 +1656,8 @@ async def gateway_scan(
             async with scan_results_lock:
                 await scan_repo.save(scan_id, cached_res)
 
+            current_env = (os.getenv("ZEROPHISH_ENV") or os.getenv("ENV") or CONFIG.env or "development").strip().lower()
+            is_production = current_env == "production"
             try:
                 await _record_scan_audit_event(
                     event_type=SecurityEventType.SCAN_CACHE_HIT,
@@ -1603,6 +1673,13 @@ async def gateway_scan(
                     provenance=WORKER_ID,
                     details={"cached": True},
                     level=logging.INFO,
+                    fail_closed=is_production,
+                )
+            except AuditPersistenceError as ape:
+                logger.critical("Aborting cached scan %s: durable audit trail persistence failed in production: %s", scan_id, ape)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Security audit logging failure: cannot persist required scan audit trail",
                 )
             except Exception as audit_err:
                 logger.error("Failed to record cache-hit audit event for scan %s: %s", scan_id, audit_err)
@@ -1714,6 +1791,9 @@ async def gateway_scan(
         await scan_repo.save(scan_id, response)
 
     # Record durable SCAN_ACCEPTED audit event
+    current_env = (os.getenv("ZEROPHISH_ENV") or os.getenv("ENV") or CONFIG.env or "development").strip().lower()
+    is_production = current_env == "production"
+
     try:
         await _record_scan_audit_event(
             event_type=SecurityEventType.SCAN_ACCEPTED,
@@ -1733,6 +1813,14 @@ async def gateway_scan(
                 "tier2_score": tier2.score,
             },
             level=logging.INFO,
+            fail_closed=is_production,
+        )
+    except AuditPersistenceError as ape:
+        logger.critical("Aborting scan %s: durable audit trail persistence failed in production: %s", scan_id, ape)
+        scan_started_at.pop(scan_id, None)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Security audit logging failure: cannot persist required scan audit trail",
         )
     except Exception as audit_err:
         logger.error("Failed to record scan accepted audit event for scan %s: %s", scan_id, audit_err)
@@ -1870,10 +1958,16 @@ async def gateway_result(
 async def gateway_scan_audit(
     request: Request,
     scan_id: str,
-    limit: int = 100,
+    limit: int = Query(default=50, ge=1, le=100),
     api_key: str = Depends(verify_api_key),
 ) -> List[ScanAuditEvent]:
-    """Retrieve durable audit trail events for a given scan_id."""
+    """Retrieve bounded durable audit trail events for a given scan_id."""
+    scan_repo = get_scan_result_repository()
+    async with scan_results_lock:
+        scan_exists = await scan_repo.get(scan_id)
+    if scan_exists is None:
+        raise HTTPException(status_code=404, detail=f"Unknown scan_id: {scan_id}")
+
     audit_repo = get_scan_audit_repository()
     return await audit_repo.list_events(scan_id=scan_id, limit=limit)
 

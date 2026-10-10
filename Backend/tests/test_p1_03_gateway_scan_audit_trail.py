@@ -241,7 +241,8 @@ def test_gateway_scan_lifecycle_auditing_end_to_end():
     accepted_ev = events[0]
     assert accepted_ev.event_type == SecurityEventType.SCAN_ACCEPTED.value
     assert accepted_ev.correlation_id == "test-corr-flow-1"
-    assert accepted_ev.tenant_id == "tenant-corp"
+    # Spoofed client header x-tenant-id must be ignored and not trusted
+    assert accepted_ev.tenant_id is None
     assert accepted_ev.previous_state == "SUBMITTED"
     assert accepted_ev.new_state == "PROCESSING"
 
@@ -430,3 +431,131 @@ async def test_audit_event_finalization_failure_and_timeout_classification():
         assert events[0].error_category == "AI_PROVIDER_ERROR"
     finally:
         gateway.execute_tier3_with_circuit_breaker = orig_t3_exec
+
+
+def test_production_api_key_unconfigured_fails_closed(monkeypatch):
+    """Verify that in production (ZEROPHISH_ENV=production), missing API_KEY fails closed with 500."""
+    monkeypatch.setenv("ZEROPHISH_ENV", "production")
+    monkeypatch.delenv("API_KEY", raising=False)
+
+    client = TestClient(app)
+    response = client.get("/api/v1/scan/test-scan-id/audit")
+    assert response.status_code == 500
+    assert "Server security misconfiguration" in response.json()["detail"]
+
+
+def test_audit_query_endpoint_bounded_limits_validation():
+    """Verify limit parameter is strictly validated (ge=1, le=100) and returns 422 for invalid bounds."""
+    client = TestClient(app)
+
+    # limit = 0 -> 422
+    resp_zero = client.get("/api/v1/scan/some-scan/audit?limit=0")
+    assert resp_zero.status_code == 422
+
+    # limit = -5 -> 422
+    resp_neg = client.get("/api/v1/scan/some-scan/audit?limit=-5")
+    assert resp_neg.status_code == 422
+
+    # limit = 500 (exceeds le=100) -> 422
+    resp_excess = client.get("/api/v1/scan/some-scan/audit?limit=500")
+    assert resp_excess.status_code == 422
+
+
+def test_audit_query_endpoint_nonexistent_scan_returns_404():
+    """Verify that querying audit trail for a non-existent scan returns 404."""
+    client = TestClient(app)
+    resp = client.get("/api/v1/scan/nonexistent-uuid-12345/audit?limit=10")
+    assert resp.status_code == 404
+    assert "Unknown scan_id" in resp.json()["detail"]
+
+
+def test_audit_persistence_failure_policy_in_production(monkeypatch):
+    """Verify that in production, if durable audit repository fails on SCAN_ACCEPTED, gateway fails closed with 500."""
+    from repositories.factory import set_scan_audit_repository, set_scan_result_repository
+    from repositories.in_memory import InMemoryScanResultRepository
+
+    class FailingAuditRepository(InMemoryScanAuditRepository):
+        async def record_event(self, event: ScanAuditEvent) -> ScanAuditEvent:
+            raise RuntimeError("Database connection died during audit write")
+
+    set_scan_audit_repository(FailingAuditRepository())
+    set_scan_result_repository(InMemoryScanResultRepository())
+    monkeypatch.setenv("ZEROPHISH_ENV", "production")
+    monkeypatch.setenv("API_KEY", "prod-secret-key-123")
+
+    client = TestClient(app)
+    headers = {"X-API-Key": "prod-secret-key-123"}
+    payload = {
+        "sender": "user@example.com",
+        "subject": "Hello",
+        "body": "Normal body content",
+        "links": [],
+    }
+
+    resp = client.post("/api/v1/scan", json=payload, headers=headers)
+    assert resp.status_code == 500
+    assert "Security audit logging failure" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_finalize_tier3_unexpected_exception_audited():
+    """Verify unexpected exception in _finalize_tier3 is audited as SCAN_FAILED with safe category."""
+    import gateway
+    from gateway import _finalize_tier3
+    from repositories.factory import get_scan_result_repository, get_scan_audit_repository
+    from models.gateway_models import (
+        GatewayScanResponse,
+        Verdict,
+        Tier1Result,
+        Tier2Result,
+        CleanStatus,
+        DomainAnalysis,
+        DomainStatus,
+        Tier2Analysis,
+        ThreatAnalysisDetail,
+    )
+
+    scan_repo = get_scan_result_repository()
+    audit_repo = get_scan_audit_repository()
+
+    dummy_t1 = Tier1Result(score=10, evidence=[], status=CleanStatus.CLEAN)
+    dummy_t2 = Tier2Result(
+        score=20,
+        domain_analysis=DomainAnalysis(status=DomainStatus.OK, score=10),
+        threat_analysis=Tier2Analysis(status=DomainStatus.OK, score=20),
+        threat_details=ThreatAnalysisDetail(threat_level=20, category="Safe", reasoning="OK", flagged_phrases=[]),
+        evidence=[],
+    )
+
+    scan_id = "scan-unexpected-err-1"
+    initial_res = GatewayScanResponse(
+        scan_id=scan_id,
+        partial_score=10.0,
+        verdict=Verdict.SAFE,
+        tier1=dummy_t1,
+        tier2=dummy_t2,
+        complete=False,
+        layers_completed=2,
+    )
+    await scan_repo.save(scan_id, initial_res)
+
+    orig_fuse = gateway.fuse_detection_results
+
+    def mock_exploding_fuse(*args, **kwargs):
+        raise ValueError("Simulated unexpected fusion crash")
+
+    gateway.fuse_detection_results = mock_exploding_fuse
+    try:
+        await _finalize_tier3(
+            scan_id=scan_id,
+            email_body="test body",
+            correlation_id="corr-unexp-1",
+        )
+        events = await audit_repo.list_events(scan_id=scan_id)
+        assert len(events) >= 1
+        failed_ev = events[-1]
+        assert failed_ev.event_type == SecurityEventType.SCAN_FAILED.value
+        assert failed_ev.error_category == "UNEXPECTED_FINALIZER_EXCEPTION"
+        assert failed_ev.details.get("error") == "ValueError"
+    finally:
+        gateway.fuse_detection_results = orig_fuse
